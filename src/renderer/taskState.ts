@@ -97,7 +97,8 @@ export function getConversationList(state: TaskState): ConversationListItem[] {
 }
 
 function conversationTitle(task: DesktopTask): string {
-  return task.topic || task.artifact?.fileName || task.id;
+  const prompt = task.userInput?.prompt.trim();
+  return prompt || task.topic || task.artifact?.fileName || task.id;
 }
 
 export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState {

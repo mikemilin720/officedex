@@ -211,6 +211,23 @@ describe("taskState", () => {
     expect(task.runtimeSnapshot!.provider).toBeUndefined();
   });
 
+  it("uses attached user prompt for a running task title before bridge topic events arrive", () => {
+    const state = attachUserInput(createInitialTaskState(), "task-bridge-123", {
+      prompt: "Create a board update deck from the latest revenue notes",
+    });
+
+    expect(getConversationList(state)).toEqual([
+      {
+        conversationId: "task-bridge-123",
+        firstTaskId: "task-bridge-123",
+        latestTaskId: "task-bridge-123",
+        title: "Create a board update deck from the latest revenue notes",
+        status: "starting",
+        documentType: undefined,
+      },
+    ]);
+  });
+
   it("groups multiple tasks in one conversation into one conversation list item", () => {
     let state = createInitialTaskState();
     state = applyTaskEvent(state, {
