@@ -130,8 +130,10 @@ function MessageCopyButton({ text, ariaLabel }: { text: string; ariaLabel: strin
     try {
       await navigator.clipboard.writeText(cleanText);
       setState("copied");
+      void message.success(t("dialogue.messageCopy.copied"));
     } catch {
       setState("failed");
+      void message.error(t("dialogue.messageCopy.failed"));
     }
     window.setTimeout(() => setState("idle"), 1800);
   }
@@ -635,7 +637,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [latestTask.events.length]);
+  }, [conversationId, latestTask.id, latestTask.events.length]);
 
   useEffect(() => {
     setReferenceImages([]);
@@ -659,7 +661,6 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
           // Latest + active: show as active round
           return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} />;
         })}
-        <div ref={bottomRef} />
       </div>
       <ConversationFooter
         latestTask={latestTask}
@@ -671,6 +672,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
         referenceImages={referenceImages}
         onReferenceImagesChange={setReferenceImages}
       />
+      <div ref={bottomRef} />
     </div>
   );
 }
@@ -1598,8 +1600,10 @@ function UserReferenceImage({ filePath }: { filePath: string }) {
     try {
       await copyImageToClipboard(filePath, src);
       setCopyLabel(t("dialogue.userMessage.imageCopied"));
+      void message.success(t("dialogue.userMessage.imageCopied"));
     } catch {
       setCopyLabel(t("dialogue.userMessage.imageCopyFailed"));
+      void message.error(t("dialogue.userMessage.imageCopyFailed"));
     }
     window.setTimeout(() => setCopyLabel(null), 2000);
   }
@@ -1686,8 +1690,10 @@ function InlineImagePreview({ artifact }: { artifact: Artifact }) {
     try {
       await copyImageToClipboard(artifact.filePath, src);
       setCopyLabel(t("dialogue.completed.imageCopied"));
+      void message.success(t("dialogue.completed.imageCopied"));
     } catch {
       setCopyLabel(t("dialogue.completed.imageCopyFailed"));
+      void message.error(t("dialogue.completed.imageCopyFailed"));
     }
     window.setTimeout(() => setCopyLabel(null), 2000);
   }

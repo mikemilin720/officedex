@@ -1,10 +1,24 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { message as antdMessage } from "antd";
 import type { DesktopAPI, DesktopTask, GenerateInput } from "../../shared/types";
 import { officecli } from "../bridge";
 import { LocaleProvider, type Locale } from "../i18n";
 import { DialogueScreen, assembleSlots } from "./DialogueScreens";
 import type { ImagePromptSlot } from "../../shared/types";
+
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd");
+  return {
+    ...actual,
+    message: {
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      destroy: vi.fn(),
+    },
+  };
+});
 
 function installDomStubs() {
   Object.defineProperty(window, "matchMedia", {
@@ -50,6 +64,7 @@ let writeTextSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   installDomStubs();
   respondSpy = vi.fn(async () => undefined);
   cancelSpy = vi.fn(async () => undefined);
@@ -272,6 +287,18 @@ describe("DialogueScreen state machine", () => {
 
     await waitFor(() => expect(copyImageToClipboardSpy).toHaveBeenCalledWith("/tmp/banner.png"));
     expect(await screen.findByText("Copied")).toBeTruthy();
+    expect(antdMessage.success).toHaveBeenCalledWith("Copied");
+  });
+
+  it("shows top error feedback when generated image copy fails", async () => {
+    copyImageToClipboardSpy.mockRejectedValueOnce(new Error("native clipboard failed"));
+    render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
+
+    await waitFor(() => expect(issuePreviewTokenSpy).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByAltText("banner.png"));
+    fireEvent.click(await screen.findByRole("button", { name: /copy image/i }));
+
+    await waitFor(() => expect(antdMessage.error).toHaveBeenCalledWith("Copy failed"));
   });
 
   it("failed task with credits-exhausted error shows Sign In button wired to onOpenLogin", () => {
@@ -303,6 +330,23 @@ describe("DialogueScreen state machine", () => {
     fireEvent.click(screen.getByRole("button", { name: /copy user message/i }));
 
     await waitFor(() => expect(writeTextSpy).toHaveBeenCalledWith("Build a quarterly planning deck"));
+    expect(antdMessage.success).toHaveBeenCalledWith("Copied");
+  });
+
+  it("shows top error feedback when conversation bubble copy fails", async () => {
+    writeTextSpy.mockRejectedValueOnce(new Error("clipboard denied"));
+    const task: DesktopTask = {
+      id: "task-user-copy-fail",
+      conversationId: "task-user-copy-fail",
+      status: "completed",
+      events: [{ task_id: "task-user-copy-fail", type: "task.completed", payload: { message: "done" } }],
+      userInput: { prompt: "Build a quarterly planning deck" },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /copy user message/i }));
+
+    await waitFor(() => expect(antdMessage.error).toHaveBeenCalledWith("Copy failed"));
   });
 
   it("copies the assistant result message from the conversation bubble", async () => {
@@ -317,6 +361,7 @@ describe("DialogueScreen state machine", () => {
     fireEvent.click(screen.getByRole("button", { name: /copy assistant message/i }));
 
     await waitFor(() => expect(writeTextSpy).toHaveBeenCalledWith("Deck generated successfully"));
+    expect(antdMessage.success).toHaveBeenCalledWith("Copied");
   });
 
   it("image generation inserts template prompt and submits edited prompt only", async () => {
@@ -630,6 +675,48 @@ describe("Image template slots (guided fill-in)", () => {
 });
 
 describe("Conversation multi-round", () => {
+  it("scrolls to the bottom after switching between completed conversations", async () => {
+    const firstTask = makeCompletedImageTask({
+      id: "task-img-1",
+      conversationId: "conv-1",
+      events: [{ task_id: "task-img-1", type: "task.completed", payload: { message: "done" } }],
+      artifact: {
+        taskId: "task-img-1",
+        filePath: "/tmp/first.png",
+        fileName: "first.png",
+        documentType: "img",
+      },
+    });
+    const secondTask = makeCompletedImageTask({
+      id: "task-img-2",
+      conversationId: "conv-2",
+      events: [{ task_id: "task-img-2", type: "task.completed", payload: { message: "done" } }],
+      artifact: {
+        taskId: "task-img-2",
+        filePath: "/tmp/second.png",
+        fileName: "second.png",
+        documentType: "img",
+      },
+    });
+    const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[firstTask]} />);
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    rerender(<DialogueScreen {...baseProps()} tasks={[secondTask]} />);
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+  });
+
+  it("scrolls to a sentinel after the continuation composer", async () => {
+    render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
+    const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+
+    const layout = document.querySelector(".conversation-layout");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(layout?.lastElementChild);
+  });
+
   it("renders time markers for each task round", () => {
     const task1: DesktopTask = {
       id: "task-1",

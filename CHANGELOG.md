@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.13] - 2026-06-03
+
+### Fixed
+- Switching to a historical conversation now scrolls the workspace to the true bottom, including the continuation composer.
+- Conversation and generated-image copy actions now show top-level success or failure feedback.
+
 ## [0.5.8] - 2026-05-29
 
 ### Added
@@ -87,7 +93,8 @@ Initial open-source release of OfficeDex — the desktop client for OfficeCLI.
 - GNU General Public License v3.0 LICENSE + NOTICE.
 - CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, issue/PR templates, Dependabot.
 
-[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.13...HEAD
+[0.5.13]: https://github.com/officecli/officedex/compare/v0.5.12...v0.5.13
 [0.5.5]: https://github.com/officecli/officedex/compare/v0.5.4...v0.5.5
 [0.5.3]: https://github.com/officecli/officedex/compare/v0.5.2...v0.5.3
 [0.5.1]: https://github.com/officecli/officedex/compare/v0.5.0...v0.5.1
