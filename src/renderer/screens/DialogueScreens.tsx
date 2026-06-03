@@ -629,15 +629,29 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
 }) {
   const latestTask = tasks[tasks.length - 1];
   const bottomRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const t = useT();
   const conversationId = tasks[0]?.conversationId;
   const referenceImagesSpec = getAttachmentSpec("img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversationId, latestTask.id, latestTask.events.length]);
+    scrollToBottom();
+  }, [conversationId, latestTask.id, latestTask.events.length, scrollToBottom]);
+
+  useEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      scrollToBottom();
+    });
+    observer.observe(layout);
+    return () => observer.disconnect();
+  }, [conversationId, scrollToBottom]);
 
   useEffect(() => {
     setReferenceImages([]);
@@ -650,7 +664,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
   const isActive = ["running", "starting", "question"].includes(latestTask.status);
 
   return (
-    <div className="conversation-layout">
+    <div className="conversation-layout" ref={layoutRef}>
       <div className="chat-thread">
         {tasks.map((task) => {
           const isLatest = task.id === latestTask.id;

@@ -7,6 +7,8 @@ import { LocaleProvider, type Locale } from "../i18n";
 import { DialogueScreen, assembleSlots } from "./DialogueScreens";
 import type { ImagePromptSlot } from "../../shared/types";
 
+let resizeObserverRecords: Array<{ callback: ResizeObserverCallback; observed: Element[] }> = [];
+
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd");
   return {
@@ -36,7 +38,15 @@ function installDomStubs() {
     })),
   });
   class ResizeObserverStub {
-    observe() {}
+    private record: { callback: ResizeObserverCallback; observed: Element[] };
+
+    constructor(callback: ResizeObserverCallback) {
+      this.record = { callback, observed: [] };
+      resizeObserverRecords.push(this.record);
+    }
+    observe(target: Element) {
+      this.record.observed.push(target);
+    }
     unobserve() {}
     disconnect() {}
   }
@@ -65,6 +75,7 @@ let originals: Partial<DesktopAPI>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resizeObserverRecords = [];
   installDomStubs();
   respondSpy = vi.fn(async () => undefined);
   cancelSpy = vi.fn(async () => undefined);
@@ -715,6 +726,22 @@ describe("Conversation multi-round", () => {
 
     const layout = document.querySelector(".conversation-layout");
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(layout?.lastElementChild);
+  });
+
+  it("scrolls again when restored conversation content resizes after preview loading", async () => {
+    render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
+    const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    const layout = document.querySelector(".conversation-layout");
+    const layoutObserver = resizeObserverRecords.find((record) => record.observed.includes(layout!));
+    expect(layoutObserver).toBeTruthy();
+
+    act(() => {
+      layoutObserver!.callback([], {} as ResizeObserver);
+    });
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
   });
 
   it("renders time markers for each task round", () => {
