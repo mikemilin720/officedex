@@ -149,6 +149,10 @@ export const zh: Record<string, string> = {
   "dialogue.userMessage.copyImage": "复制图片",
   "dialogue.userMessage.imageCopied": "已复制",
   "dialogue.userMessage.imageCopyFailed": "复制失败",
+  "dialogue.messageCopy.user": "复制用户消息",
+  "dialogue.messageCopy.assistant": "复制助手消息",
+  "dialogue.messageCopy.copied": "已复制",
+  "dialogue.messageCopy.failed": "复制失败",
 
   // Dialogue — terminal
   "dialogue.terminal.failed.title": "生成失败",

@@ -34,6 +34,7 @@ import { useT } from "../i18n";
 import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
 import { ReportIssueDialog } from "../components/ReportIssueDialog";
+import { Check as CheckIcon, Copy as CopyIcon } from "lucide-react";
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -102,6 +103,41 @@ function localizedSlotLabel(slot: ImagePromptSlot, slug: string, t: Translator):
   const key = `dialogue.imageTemplates.slotLabel.${slug}.${slot.key}`;
   const translated = t(key);
   return translated === key ? slot.label : translated;
+}
+
+function MessageCopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
+  const t = useT();
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const cleanText = text.trim();
+  if (!cleanText) return null;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(cleanText);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+    window.setTimeout(() => setState("idle"), 1800);
+  }
+
+  const title = state === "copied"
+    ? t("dialogue.messageCopy.copied")
+    : state === "failed"
+      ? t("dialogue.messageCopy.failed")
+      : ariaLabel;
+
+  return (
+    <button
+      type="button"
+      className={`message-copy-button ${state !== "idle" ? "is-active" : ""}`}
+      aria-label={ariaLabel}
+      title={title}
+      onClick={copy}
+    >
+      {state === "copied" ? <CheckIcon size={14} strokeWidth={2} /> : <CopyIcon size={14} strokeWidth={2} />}
+    </button>
+  );
 }
 
 export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify }: DialogueProps) {
@@ -745,15 +781,17 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
     const completionMessage = eventText(latestEvent);
     const duration = taskDurationLabel(task.events, t);
     const completedAt = formatLocalTimestamp(artifact?.syncedAt) || formatLocalTimestamp(latestEvent?.ts) || t("dialogue.completed.completionTimeUnknown");
+    const resultMessage = completionMessage || t("dialogue.completed.completionFallback");
     return (
-      <div className="message ai-message success">
+      <div className="message ai-message success has-copy">
+        <MessageCopyButton text={resultMessage} ariaLabel={t("dialogue.messageCopy.assistant")} />
         <div className="message-author">
           <CheckCircleFilled />
           <strong>{t("dialogue.completed.title")}</strong>
           <Tag color="green">{duration}</Tag>
           {creditTag}
         </div>
-        <p>{completionMessage || t("dialogue.completed.completionFallback")}</p>
+        <p>{resultMessage}</p>
         {artifact ? (
           isImageArtifact(artifact) ? (
             <div className="result-image-card">
@@ -812,7 +850,8 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
     : rawDescription;
 
   return (
-    <div className={`message ai-message terminal ${failed ? "failed" : "cancelled"}`}>
+    <div className={`message ai-message terminal has-copy ${failed ? "failed" : "cancelled"}`}>
+      <MessageCopyButton text={description} ariaLabel={t("dialogue.messageCopy.assistant")} />
       <div className="message-author">
         {failed ? <CloseCircleOutlined /> : <StopOutlined />}
         <strong>{title}</strong>
@@ -1455,6 +1494,7 @@ function imageExtensionFor(artifact: Artifact): string {
 }
 
 function UserMessage({ task, fallback }: { task: DesktopTask; fallback: string }) {
+  const t = useT();
   const input = task.userInput;
   const prompt = input?.prompt?.trim();
   const referenceImages = input?.referenceImages ?? [];
@@ -1463,7 +1503,8 @@ function UserMessage({ task, fallback }: { task: DesktopTask; fallback: string }
   const displayText = prompt || (hasAttachments ? "" : fallback);
 
   return (
-    <div className="message user-message">
+    <div className="message user-message has-copy">
+      <MessageCopyButton text={displayText} ariaLabel={t("dialogue.messageCopy.user")} />
       {displayText ? <div className="user-message-prompt">{displayText}</div> : null}
       {referenceImages.length > 0 ? (
         <div className="user-message-images">

@@ -491,6 +491,7 @@
 }
 
 .message {
+  position: relative;
   max-width: 720px;
   border: 1px solid var(--n-hairline);
   border-radius: var(--radius-lg);
@@ -499,6 +500,43 @@
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.message.has-copy {
+  padding-right: 42px;
+}
+
+.message-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--n-steel);
+  cursor: pointer;
+  opacity: 0;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.message:hover .message-copy-button,
+.message-copy-button:focus-visible,
+.message-copy-button.is-active {
+  opacity: 1;
+}
+
+.message-copy-button:hover,
+.message-copy-button:focus-visible,
+.message-copy-button.is-active {
+  border-color: var(--n-hairline);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--n-charcoal);
+  outline: none;
 }
 
 .message p {

@@ -36,6 +36,7 @@ function installDomStubs() {
 let respondSpy: ReturnType<typeof vi.fn>;
 let cancelSpy: ReturnType<typeof vi.fn>;
 let listImageTemplatesSpy: ReturnType<typeof vi.fn>;
+let writeTextSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 
 beforeEach(() => {
@@ -43,6 +44,11 @@ beforeEach(() => {
   respondSpy = vi.fn(async () => undefined);
   cancelSpy = vi.fn(async () => undefined);
   listImageTemplatesSpy = vi.fn(async () => []);
+  writeTextSpy = vi.fn(async () => undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: writeTextSpy },
+  });
   originals = {
     respond: officecli.respond,
     cancel: officecli.cancel,
@@ -249,6 +255,35 @@ describe("DialogueScreen state machine", () => {
     const signInBtn = screen.getByRole("button", { name: /sign in to continue/i });
     fireEvent.click(signInBtn);
     expect(onOpenLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies the user message prompt from the conversation bubble", async () => {
+    const task: DesktopTask = {
+      id: "task-user-copy",
+      conversationId: "task-user-copy",
+      status: "completed",
+      events: [{ task_id: "task-user-copy", type: "task.completed", payload: { message: "done" } }],
+      userInput: { prompt: "Build a quarterly planning deck" },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /copy user message/i }));
+
+    await waitFor(() => expect(writeTextSpy).toHaveBeenCalledWith("Build a quarterly planning deck"));
+  });
+
+  it("copies the assistant result message from the conversation bubble", async () => {
+    const task: DesktopTask = {
+      id: "task-ai-copy",
+      conversationId: "task-ai-copy",
+      status: "completed",
+      events: [{ task_id: "task-ai-copy", type: "task.completed", payload: { message: "Deck generated successfully" } }],
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /copy assistant message/i }));
+
+    await waitFor(() => expect(writeTextSpy).toHaveBeenCalledWith("Deck generated successfully"));
   });
 
   it("image generation inserts template prompt and submits edited prompt only", async () => {

@@ -129,6 +129,10 @@ export const en: Record<string, string> = {
   "dialogue.userMessage.copyImage": "Copy Image",
   "dialogue.userMessage.imageCopied": "Copied",
   "dialogue.userMessage.imageCopyFailed": "Copy failed",
+  "dialogue.messageCopy.user": "Copy user message",
+  "dialogue.messageCopy.assistant": "Copy assistant message",
+  "dialogue.messageCopy.copied": "Copied",
+  "dialogue.messageCopy.failed": "Copy failed",
 
   // Dialogue — terminal
   "dialogue.terminal.failed.title": "Generation Failed",
