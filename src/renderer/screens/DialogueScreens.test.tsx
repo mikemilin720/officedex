@@ -718,6 +718,47 @@ describe("Conversation multi-round", () => {
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
   });
 
+  it("sets the scroll container to the true bottom after switching conversations", async () => {
+    const firstTask = makeCompletedImageTask({ id: "task-img-1", conversationId: "conv-1" });
+    const secondTask = makeCompletedImageTask({ id: "task-img-2", conversationId: "conv-2" });
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this instanceof HTMLElement && this.classList.contains("stage") ? 300 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this instanceof HTMLElement && this.classList.contains("stage") ? 1200 : 0;
+      },
+    });
+
+    try {
+      const { rerender } = render(
+        <section className="stage" data-testid="stage-scroll">
+          <DialogueScreen {...baseProps()} tasks={[firstTask]} />
+        </section>,
+      );
+      const stage = screen.getByTestId("stage-scroll");
+
+      await waitFor(() => expect(stage.scrollTop).toBe(900));
+      stage.scrollTop = 120;
+      rerender(
+        <section className="stage" data-testid="stage-scroll">
+          <DialogueScreen {...baseProps()} tasks={[secondTask]} />
+        </section>,
+      );
+
+      await waitFor(() => expect(stage.scrollTop).toBe(900));
+    } finally {
+      if (clientHeightDescriptor) Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      if (scrollHeightDescriptor) Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+    }
+  });
+
   it("scrolls to a sentinel after the continuation composer", async () => {
     render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
     const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;

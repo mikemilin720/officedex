@@ -618,6 +618,18 @@ function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, 
 
 /* ─── Conversation View ─── */
 
+function findVerticalScrollContainer(element: HTMLElement | null): HTMLElement | null {
+  let current = element?.parentElement ?? null;
+  while (current) {
+    if (current.classList.contains("stage")) return current;
+    const style = window.getComputedStyle(current);
+    const overflowY = style.overflowY || style.overflow;
+    if (/(auto|scroll|overlay)/.test(overflowY)) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
 function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGeneration, onContinueModify, onOpenLogin }: {
   tasks: DesktopTask[];
   busy: boolean;
@@ -636,7 +648,12 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
   const referenceImagesSpec = getAttachmentSpec("img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    const bottom = bottomRef.current;
+    bottom?.scrollIntoView({ behavior: "auto", block: "end" });
+    const scrollContainer = findVerticalScrollContainer(bottom);
+    if (scrollContainer) {
+      scrollContainer.scrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+    }
   }, []);
 
   useEffect(() => {
