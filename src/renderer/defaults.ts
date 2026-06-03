@@ -7,6 +7,7 @@ export const defaultGenerateInput: Partial<GenerateInput> = {
   documentType: "pptx",
   mode: "fast",
   enableImages: true,
+  imageRatio: "square",
 };
 
 export const defaultProxySettings: ProxySettings = {

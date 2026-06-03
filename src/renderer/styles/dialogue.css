@@ -144,6 +144,20 @@
   font-weight: 500;
 }
 
+.image-ratio-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  color: var(--n-slate);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.image-ratio-row-compact {
+  margin-bottom: 10px;
+}
+
 .image-template-picker {
   display: grid;
   gap: 10px;

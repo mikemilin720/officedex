@@ -1,4 +1,4 @@
-import type { Artifact, BridgeEvent, DesktopTask, ProviderSnapshot, StageState, TaskQuestion, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, ImageRatio, ProviderSnapshot, StageState, TaskQuestion, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
 
 export interface TaskState {
   tasks: Record<string, DesktopTask>;
@@ -251,7 +251,12 @@ function userInputFromPayload(payload: BridgeEvent["payload"]): TaskUserInput | 
   const sourceFile = stringValue(payload.source_file) || undefined;
   const raw = payload.reference_images;
   const referenceImages = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : undefined;
-  return { prompt, sourceFile, referenceImages };
+  const imageRatio = normalizeImageRatio(payload.image_ratio) ?? normalizeImageRatio(payload.imageRatio);
+  return { prompt, sourceFile, referenceImages, imageRatio };
+}
+
+function normalizeImageRatio(value: unknown): ImageRatio | undefined {
+  return value === "square" || value === "landscape" || value === "portrait" ? value : undefined;
 }
 
 function stringValue(value: unknown): string {

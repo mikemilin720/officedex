@@ -642,6 +642,32 @@ describe("App task flow", () => {
     );
   });
 
+  it("submits selected imageRatio for new image generation", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Start a New Generation" });
+
+    fireEvent.click(screen.getByLabelText("Image"));
+    expect(await screen.findByText("Image ratio")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Landscape"));
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
+      target: { value: "Create a wide launch visual" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
+
+    await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
+    expect(bridge.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentType: "img",
+        prompt: "Create a wide launch visual",
+        imageRatio: "landscape",
+      }),
+    );
+  });
+
   it("does not include referenceImages when documentType is not Image", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");
@@ -657,6 +683,7 @@ describe("App task flow", () => {
 
     await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
     expect(bridge.generate).toHaveBeenCalledWith(expect.not.objectContaining({ referenceImages: expect.anything() }));
+    expect(bridge.generate).toHaveBeenCalledWith(expect.not.objectContaining({ imageRatio: expect.anything() }));
   });
 
   it("continuation composer on completed image task calls generate with new prompt and no referenceImages by default", async () => {
@@ -694,6 +721,46 @@ describe("App task flow", () => {
       expect.objectContaining({
         documentType: "img",
         prompt: "Make the sky brighter",
+      }),
+    );
+  });
+
+  it("continuation composer on completed image task sends selected imageRatio", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    act(() => {
+      bridge.emit({
+        event_id: "event-img-ratio-done",
+        task_id: "task-img-ratio-done",
+        type: "task.completed",
+        payload: {
+          result: {
+            file_path: "/tmp/generated.png",
+            file_name: "generated.png",
+            document_type: "img",
+          },
+        },
+      });
+    });
+
+    expect(await screen.findByText("Generation Complete")).toBeTruthy();
+
+    const composer = screen.getByTestId("continuation-composer");
+    fireEvent.click(within(composer).getByLabelText("Portrait"));
+    const textarea = within(composer).getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "Make it vertical" } });
+    const submitBtn = composer.querySelector(".composer-row .ant-btn-primary")!;
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
+    expect(bridge.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentType: "img",
+        prompt: "Make it vertical",
+        imageRatio: "portrait",
       }),
     );
   });
@@ -1134,6 +1201,7 @@ function installBridgeMock() {
     previewArtifact,
     readArtifactFile: vi.fn(async () => ({ data: new Uint8Array() })),
     readLocalImage: vi.fn(async () => ({ data: new Uint8Array(), mime: "image/png" })),
+    copyImageToClipboard: vi.fn(async () => undefined),
     renderPreviewHtml: vi.fn(async () => ({ html: "<html><body>preview</body></html>" }) as { html: string } | null),
     issuePreviewToken: vi.fn(async (artifact) => ({ token: "test-token", fileName: artifact.fileName, documentType: artifact.documentType })),
     revokePreviewToken: vi.fn(async () => undefined),

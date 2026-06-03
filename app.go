@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -293,6 +294,9 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 		}
 		if len(resolved.ReferenceImages) > 0 {
 			payload["reference_images"] = resolved.ReferenceImages
+		}
+		if strings.TrimSpace(resolved.ImageRatio) != "" {
+			payload["image_ratio"] = strings.TrimSpace(resolved.ImageRatio)
 		}
 		_ = a.localStore.RecordEvent(types.BridgeEvent{
 			TaskID:  result.TaskID,
@@ -642,6 +646,59 @@ func (a *App) ReadLocalImage(filePath string) (LocalImageData, error) {
 		return LocalImageData{}, fmt.Errorf("read local image: %w", err)
 	}
 	return LocalImageData{Data: data, Mime: mime}, nil
+}
+
+// CopyImageToClipboard writes a local image file to the system clipboard. Wails
+// only exposes text clipboard helpers, and macOS WebKit does not reliably
+// support navigator.clipboard.write for image blobs inside the app webview.
+func (a *App) CopyImageToClipboard(filePath string) error {
+	if filePath == "" {
+		return errors.New("copy image to clipboard: empty path")
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), "."))
+	if _, ok := localImageMimeByExt[ext]; !ok {
+		return fmt.Errorf("copy image to clipboard: unsupported extension %q", ext)
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("copy image to clipboard: %w", err)
+	}
+	if info.IsDir() {
+		return errors.New("copy image to clipboard: path is a directory")
+	}
+	if runtime.GOOS != "darwin" {
+		return errors.New("copy image to clipboard: native image clipboard is only supported on macOS")
+	}
+	return copyImageToClipboardDarwin(filePath)
+}
+
+func copyImageToClipboardDarwin(filePath string) error {
+	const script = `
+ObjC.import("AppKit");
+function run(argv) {
+  const path = argv[0];
+  const image = $.NSImage.alloc.initWithContentsOfFile(path);
+  if (!image) {
+    throw new Error("copy image to clipboard: could not load image");
+  }
+  const pasteboard = $.NSPasteboard.generalPasteboard;
+  pasteboard.clearContents;
+  const ok = pasteboard.writeObjects($.NSArray.arrayWithObject(image));
+  if (!ok) {
+    throw new Error("copy image to clipboard: NSPasteboard write failed");
+  }
+}
+`
+	cmd := exec.Command("/usr/bin/osascript", "-l", "JavaScript", "-e", script, filePath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return fmt.Errorf("copy image to clipboard: %w", err)
+		}
+		return fmt.Errorf("copy image to clipboard: %w: %s", err, msg)
+	}
+	return nil
 }
 
 // PreviewHTML is the renderer-facing wrapper for a sidecar HTML preview.

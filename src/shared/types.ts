@@ -5,6 +5,7 @@
  * Adding/removing fields requires updating all three.
  */
 export type DocumentType = "pptx" | "docx" | "xlsx" | "report" | "img";
+export type ImageRatio = "square" | "landscape" | "portrait";
 
 export type AttachmentSlot = "sourceWorkbook" | "referenceImages";
 
@@ -116,6 +117,7 @@ export interface GenerateInput {
   promptTemplateId?: string;
   sourceFile?: string;
   referenceImages?: string[];
+  imageRatio?: ImageRatio;
   outputDir?: string;
   publish?: boolean;
   enableImages?: boolean;
@@ -157,6 +159,7 @@ export interface TaskUserInput {
   promptTemplateId?: string;
   sourceFile?: string;
   referenceImages?: string[];
+  imageRatio?: ImageRatio;
 }
 
 export interface ImagePromptSlot {
@@ -417,6 +420,7 @@ export interface DesktopAPI {
   revokePreviewToken(token: string): Promise<void>;
   readArtifactFile(previewToken: string): Promise<{ data: BinaryFileData }>;
   readLocalImage(filePath: string): Promise<{ data: BinaryFileData; mime: string }>;
+  copyImageToClipboard(filePath: string): Promise<void>;
   renderPreviewHtml(previewToken: string): Promise<{ html: string } | null>;
   setPreviewMode(active: boolean): Promise<void>;
   login(): Promise<{ url: string }>;

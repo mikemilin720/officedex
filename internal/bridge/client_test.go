@@ -478,6 +478,95 @@ func TestInvokeGenerateSendsPromptTemplateID(t *testing.T) {
 	}
 }
 
+func TestInvokeGenerateSendsImageRatioForIMG(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType: types.DocIMG,
+			Topic:        "Poster",
+			Prompt:       "red bicycle",
+			ImageRatio:   "landscape",
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(second.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if args["ratio"] != "landscape" {
+		t.Fatalf("ratio = %v, want landscape", args["ratio"])
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"task_id":    "task-img",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateDoesNotSendImageRatioForNonIMG(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType: types.DocPPTX,
+			Topic:        "Deck",
+			Prompt:       "make slides",
+			ImageRatio:   "portrait",
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(second.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if _, ok := args["ratio"]; ok {
+		t.Fatalf("ratio should not be sent for non-img generation: %#v", args["ratio"])
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"task_id":    "task-pptx",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateRejectsInvalidImageRatio(t *testing.T) {
+	client, _ := newClientWithFake(t)
+	defer client.Stop()
+
+	_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+		DocumentType: types.DocIMG,
+		Topic:        "Poster",
+		Prompt:       "red bicycle",
+		ImageRatio:   "panorama",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported image ratio") {
+		t.Fatalf("err = %v, want unsupported image ratio", err)
+	}
+}
+
 func TestInvokeModifyBuildsOfficeModifyRequest(t *testing.T) {
 	client, fake := newClientWithFake(t)
 	defer client.Stop()

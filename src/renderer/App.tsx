@@ -32,6 +32,7 @@ type PendingGenerate = {
     prompt: string;
     sourceFile?: string;
     referenceImages?: string[];
+    imageRatio?: GenerateInput["imageRatio"];
   };
   parentTaskId?: string;
 };
@@ -279,6 +280,7 @@ export function App() {
         prompt: values.prompt,
         sourceFile: values.sourceFile,
         referenceImages: values.referenceImages,
+        imageRatio: values.imageRatio,
       },
     };
     setState((current) => attachUserInput(applyTaskEvent(current, {
@@ -331,7 +333,7 @@ export function App() {
     setActiveNav("dialogue");
   }, []);
 
-  const continueGeneration = useCallback(async (documentType: string, prompt: string, referenceImages?: string[]) => {
+  const continueGeneration = useCallback(async (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: GenerateInput["imageRatio"]) => {
     if (forceUpdate) {
       recordError("Update required before continuing", "setup");
       return;
@@ -345,6 +347,7 @@ export function App() {
       input: {
         prompt,
         referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
+        imageRatio,
       },
       parentTaskId,
     };
@@ -370,6 +373,7 @@ export function App() {
         enableImages: persistedSettings.defaults.enableImages,
         imageQuality: persistedSettings.defaults.imageQuality,
         referenceImages,
+        imageRatio,
       });
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
@@ -600,6 +604,7 @@ function createNewGenerationDraft(input: Partial<GenerateInput> = {}): NewGenera
     mode: input.mode ?? defaultGenerateInput.mode,
     sourceFile: input.sourceFile,
     referenceImages: input.referenceImages,
+    imageRatio: input.imageRatio ?? defaultGenerateInput.imageRatio,
   };
 }
 

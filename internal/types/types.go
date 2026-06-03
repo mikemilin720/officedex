@@ -142,6 +142,7 @@ type GenerateInput struct {
 	PromptTemplateID string       `json:"promptTemplateId,omitempty"`
 	SourceFile       string       `json:"sourceFile,omitempty"`
 	ReferenceImages  []string     `json:"referenceImages,omitempty"`
+	ImageRatio       string       `json:"imageRatio,omitempty"`
 	OutputDir        string       `json:"outputDir,omitempty"`
 	Publish          bool         `json:"publish,omitempty"`
 	EnableImages     *bool        `json:"enableImages,omitempty"`

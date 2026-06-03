@@ -107,6 +107,9 @@ function createBrowserPreviewAPI(): DesktopAPI {
     readLocalImage: async () => {
       throw new Error("Local image reading requires desktop file access.");
     },
+    copyImageToClipboard: async () => {
+      throw new Error("Image clipboard access requires the desktop app.");
+    },
     renderPreviewHtml: async () => null,
     setPreviewMode: async () => undefined,
     login: async () => {
@@ -375,6 +378,7 @@ function createWailsAPI(): DesktopAPI {
       const mime = typeof result?.mime === "string" ? result.mime : "application/octet-stream";
       return { data, mime };
     },
+    copyImageToClipboard: (filePath: string) => WailsApp.CopyImageToClipboard(filePath),
     renderPreviewHtml: async (previewToken: string) => {
       const result = await WailsApp.RenderPreviewHtml(previewToken);
       if (!result || typeof result.html !== "string") {

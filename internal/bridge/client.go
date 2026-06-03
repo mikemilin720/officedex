@@ -400,6 +400,10 @@ func (c *Client) SessionID() string {
 // InvokeGenerate calls "task/invoke" with the office.generate tool args
 // projected from the GenerateInput.
 func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) (TaskInvokeResult, error) {
+	ratio, err := imageRatioArg(input)
+	if err != nil {
+		return TaskInvokeResult{}, err
+	}
 	c.mu.Lock()
 	sessionID := c.sessionID
 	c.mu.Unlock()
@@ -438,6 +442,9 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		// for the expected sidecar contract.
 		"emit_preview": true,
 	}
+	if ratio != "" {
+		args["ratio"] = ratio
+	}
 	for k, v := range buildAttachmentArgs(input) {
 		args[k] = v
 	}
@@ -456,6 +463,19 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		return TaskInvokeResult{}, fmt.Errorf("bridge: decode task/invoke: %w", err)
 	}
 	return result, nil
+}
+
+func imageRatioArg(input types.GenerateInput) (string, error) {
+	ratio := strings.ToLower(strings.TrimSpace(input.ImageRatio))
+	if ratio == "" || input.DocumentType != types.DocIMG {
+		return "", nil
+	}
+	switch ratio {
+	case "square", "landscape", "portrait":
+		return ratio, nil
+	default:
+		return "", fmt.Errorf("bridge: unsupported image ratio: %s", input.ImageRatio)
+	}
 }
 
 // InvokeModify calls "task/invoke" with the office.modify tool args projected

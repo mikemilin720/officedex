@@ -21,7 +21,7 @@ import {
 } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { getAttachmentSpec } from "../../shared/types";
-import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, StageState } from "../../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState } from "../../shared/types";
 import { defaultGenerateInput } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
@@ -47,6 +47,7 @@ export interface NewGenerationDraft {
   mode?: GenerateInput["mode"];
   sourceFile?: string;
   referenceImages?: string[];
+  imageRatio?: ImageRatio;
 }
 
 interface DialogueProps {
@@ -66,7 +67,7 @@ interface DialogueProps {
   onPreview: (artifact: Artifact) => void;
   onNewGenerationDraftChange?: (patch: Partial<NewGenerationDraft>) => void;
   onForceCancel?: (taskId: string) => void;
-  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[]) => void;
+  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
 }
 
@@ -75,7 +76,21 @@ const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
   topic: "",
   prompt: "",
   mode: "fast",
+  imageRatio: "square",
 };
+
+const IMAGE_RATIO_OPTIONS: ImageRatio[] = ["square", "landscape", "portrait"];
+
+function normalizeImageRatio(value: unknown): ImageRatio {
+  return IMAGE_RATIO_OPTIONS.includes(value as ImageRatio) ? (value as ImageRatio) : "square";
+}
+
+function imageRatioOptions(t: Translator) {
+  return IMAGE_RATIO_OPTIONS.map((ratio) => ({
+    value: ratio,
+    label: t(`dialogue.imageRatio.${ratio}`),
+  }));
+}
 
 /**
  * Frontend-only assembly of a slotted image-template preset into a flat prompt.
@@ -193,8 +208,9 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
       topic: draft.topic,
       prompt: draft.prompt,
       mode: draft.mode,
+      imageRatio: normalizeImageRatio(draft.imageRatio),
     });
-  }, [form, draft.documentType, draft.topic, draft.prompt, draft.mode]);
+  }, [form, draft.documentType, draft.topic, draft.prompt, draft.mode, draft.imageRatio]);
 
   const loadImageTemplates = useCallback(() => {
     const requestId = imageTemplateRequestId.current + 1;
@@ -352,6 +368,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
           topic: values.topic ?? "",
           prompt: values.prompt ?? "",
           mode: values.mode,
+          imageRatio: normalizeImageRatio(values.imageRatio),
         });
       }} onFinish={(values) => {
         const validation = attachments.validateForSubmit();
@@ -364,12 +381,16 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
           if (slotCheck.firstError) message.warning(slotCheck.firstError);
           return;
         }
-        const { promptTemplateId: _promptTemplateId, ...submitValues } = values;
+        const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, ...submitValues } = values;
         void _promptTemplateId;
         const prompt = hasSlots && !rawDecoupled && selectedTemplate
           ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
           : submitValues.prompt;
-        onSubmit({ ...submitValues, prompt, ...attachments.collect() });
+        const nextInput: GenerateInput = { ...submitValues, prompt, ...attachments.collect() };
+        if (submitValues.documentType === "img") {
+          nextInput.imageRatio = normalizeImageRatio(rawImageRatio);
+        }
+        onSubmit(nextInput);
       }} className="fluid-command-bar">
         <div className="format-row">
           <span>{t("dialogue.format.label")}</span>
@@ -380,6 +401,14 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
             />
           </Form.Item>
         </div>
+        {docType === "img" ? (
+          <div className="image-ratio-row">
+            <span>{t("dialogue.imageRatio.label")}</span>
+            <Form.Item name="imageRatio" noStyle>
+              <Radio.Group optionType="button" options={imageRatioOptions(t)} />
+            </Form.Item>
+          </div>
+        ) : null}
         <Form.Item name="topic" hidden>
           <Input />
         </Form.Item>
@@ -592,7 +621,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
   busy: boolean;
   onPreview: (artifact: Artifact) => void;
   onForceCancel?: (taskId: string) => void;
-  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[]) => void;
+  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onOpenLogin: () => void;
 }) {
@@ -906,7 +935,7 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
 function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinueModify, onForceCancel, onOpenLogin, referenceImages, onReferenceImagesChange }: {
   latestTask: DesktopTask;
   busy: boolean;
-  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[]) => void;
+  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onForceCancel?: (taskId: string) => void;
   onOpenLogin: () => void;
@@ -915,11 +944,18 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
 }) {
   const t = useT();
   const status = latestTask.status;
+  const artifact = latestTask.artifact;
+  const docType = latestTask.documentType || artifact?.documentType || "docx";
+  const isImageGeneration = docType === "img" || (artifact ? isImageArtifact(artifact) : false);
+  const [imageRatio, setImageRatio] = useState<ImageRatio>(() => normalizeImageRatio(latestTask.userInput?.imageRatio));
   const [continuationPrompt, setContinuationPrompt] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  const artifact = latestTask.artifact;
   const referenceImagesSpec = getAttachmentSpec("img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
+
+  useEffect(() => {
+    setImageRatio(normalizeImageRatio(latestTask.userInput?.imageRatio));
+  }, [latestTask.id, latestTask.userInput?.imageRatio]);
 
   // Running / Starting / Question: readonly composer with cancel
   if (status === "running" || status === "starting") {
@@ -980,14 +1016,11 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
 
   // Completed / Failed / Cancelled: show continuation composer for ALL types
   if (status === "completed" || status === "failed" || status === "cancelled") {
-    // Get document type from artifact or task
-    const docType = latestTask.documentType || latestTask.artifact?.documentType || "docx";
-
     // Completed office documents (pptx/docx/xlsx) support in-place "continue editing" via office.modify.
     const isModifiable = status === "completed" && Boolean(artifact) && isModifiableArtifact(artifact!) && Boolean(onContinueModify);
     // Disable input only for completed non-image, non-modifiable artifacts (e.g. report).
     const inputDisabled = Boolean(artifact && !isImageArtifact(artifact) && !isModifiable);
-    const supportsReferenceImages = docType === "img" || (artifact ? isImageArtifact(artifact) : false);
+    const supportsReferenceImages = isImageGeneration;
     const referenceLimitReached = referenceImages.length >= referenceImageMaxCount;
     const pickReferenceImages = async () => {
       if (!referenceImagesSpec || referenceLimitReached) return;
@@ -1007,7 +1040,7 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
       if (isModifiable && onContinueModify) {
         onContinueModify(docType, continuationPrompt.trim());
       } else if (onContinueGeneration) {
-        onContinueGeneration(docType, continuationPrompt.trim(), referenceImages.length > 0 ? referenceImages : undefined);
+        onContinueGeneration(docType, continuationPrompt.trim(), referenceImages.length > 0 ? referenceImages : undefined, isImageGeneration ? imageRatio : undefined);
       } else {
         return;
       }
@@ -1024,6 +1057,17 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
             onRemove={(path) => onReferenceImagesChange(referenceImages.filter((p) => p !== path))}
             onAdd={pickReferenceImages}
           />
+        ) : null}
+        {isImageGeneration ? (
+          <div className="image-ratio-row image-ratio-row-compact">
+            <span>{t("dialogue.imageRatio.label")}</span>
+            <Radio.Group
+              optionType="button"
+              options={imageRatioOptions(t)}
+              value={imageRatio}
+              onChange={(event) => setImageRatio(normalizeImageRatio(event.target.value))}
+            />
+          </div>
         ) : null}
         <div className="composer-row">
           {supportsReferenceImages ? (
@@ -1552,11 +1596,7 @@ function UserReferenceImage({ filePath }: { filePath: string }) {
   async function copyImage() {
     if (!src) return;
     try {
-      const response = await fetch(src);
-      const blob = await response.blob();
-      await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob }),
-      ]);
+      await copyImageToClipboard(filePath, src);
       setCopyLabel(t("dialogue.userMessage.imageCopied"));
     } catch {
       setCopyLabel(t("dialogue.userMessage.imageCopyFailed"));
@@ -1644,11 +1684,7 @@ function InlineImagePreview({ artifact }: { artifact: Artifact }) {
   async function copyImage() {
     if (!src) return;
     try {
-      const response = await fetch(src);
-      const blob = await response.blob();
-      await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob }),
-      ]);
+      await copyImageToClipboard(artifact.filePath, src);
       setCopyLabel(t("dialogue.completed.imageCopied"));
     } catch {
       setCopyLabel(t("dialogue.completed.imageCopyFailed"));
@@ -1695,4 +1731,24 @@ function InlineImagePreview({ artifact }: { artifact: Artifact }) {
       </Modal>
     </>
   );
+}
+
+async function copyImageToClipboard(filePath: string, src: string) {
+  try {
+    await officecli.copyImageToClipboard(filePath);
+    return;
+  } catch {
+    await copyImageViaWebClipboard(src);
+  }
+}
+
+async function copyImageViaWebClipboard(src: string) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    throw new Error("image clipboard write is unavailable");
+  }
+  const response = await fetch(src);
+  const blob = await response.blob();
+  await navigator.clipboard.write([
+    new ClipboardItem({ [blob.type]: blob }),
+  ]);
 }

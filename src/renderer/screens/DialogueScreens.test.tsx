@@ -31,11 +31,21 @@ function installDomStubs() {
   vi.spyOn(window, "getComputedStyle").mockImplementation(
     () => ({ getPropertyValue: () => "" }) as unknown as CSSStyleDeclaration,
   );
+  if (!URL.createObjectURL) {
+    URL.createObjectURL = vi.fn(() => "blob:test-image");
+  }
+  if (!URL.revokeObjectURL) {
+    URL.revokeObjectURL = vi.fn();
+  }
 }
 
 let respondSpy: ReturnType<typeof vi.fn>;
 let cancelSpy: ReturnType<typeof vi.fn>;
 let listImageTemplatesSpy: ReturnType<typeof vi.fn>;
+let issuePreviewTokenSpy: ReturnType<typeof vi.fn>;
+let readArtifactFileSpy: ReturnType<typeof vi.fn>;
+let revokePreviewTokenSpy: ReturnType<typeof vi.fn>;
+let copyImageToClipboardSpy: ReturnType<typeof vi.fn>;
 let writeTextSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 
@@ -44,6 +54,10 @@ beforeEach(() => {
   respondSpy = vi.fn(async () => undefined);
   cancelSpy = vi.fn(async () => undefined);
   listImageTemplatesSpy = vi.fn(async () => []);
+  issuePreviewTokenSpy = vi.fn(async (artifact) => ({ token: "test-token", fileName: artifact.fileName, documentType: artifact.documentType }));
+  readArtifactFileSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]) }));
+  revokePreviewTokenSpy = vi.fn(async () => undefined);
+  copyImageToClipboardSpy = vi.fn(async () => undefined);
   writeTextSpy = vi.fn(async () => undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -53,10 +67,18 @@ beforeEach(() => {
     respond: officecli.respond,
     cancel: officecli.cancel,
     listImageTemplates: officecli.listImageTemplates,
+    issuePreviewToken: officecli.issuePreviewToken,
+    readArtifactFile: officecli.readArtifactFile,
+    revokePreviewToken: officecli.revokePreviewToken,
+    copyImageToClipboard: officecli.copyImageToClipboard,
   };
   officecli.respond = respondSpy as unknown as DesktopAPI["respond"];
   officecli.cancel = cancelSpy as unknown as DesktopAPI["cancel"];
   officecli.listImageTemplates = listImageTemplatesSpy as unknown as DesktopAPI["listImageTemplates"];
+  officecli.issuePreviewToken = issuePreviewTokenSpy as unknown as DesktopAPI["issuePreviewToken"];
+  officecli.readArtifactFile = readArtifactFileSpy as unknown as DesktopAPI["readArtifactFile"];
+  officecli.revokePreviewToken = revokePreviewTokenSpy as unknown as DesktopAPI["revokePreviewToken"];
+  officecli.copyImageToClipboard = copyImageToClipboardSpy as unknown as DesktopAPI["copyImageToClipboard"];
 });
 
 afterEach(() => {
@@ -228,17 +250,28 @@ describe("DialogueScreen state machine", () => {
       events: [{ task_id: "task-img", type: "task.completed", payload: { message: "done" } }],
       artifact: {
         taskId: "task-img",
-        filePath: "/tmp/banner.png",
-        fileName: "banner.png",
+        filePath: "/tmp/render-banner.png",
+        fileName: "render-banner.png",
         documentType: "img",
       },
     };
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
     expect(screen.getByText("Generation Complete")).toBeTruthy();
-    expect(screen.getAllByText("banner.png").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("render-banner.png").length).toBeGreaterThan(0);
     const openButtons = screen.getAllByRole("button", { name: /open/i });
     expect(openButtons.length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /show in folder/i })).toBeTruthy();
+  });
+
+  it("copies generated images through the desktop clipboard bridge", async () => {
+    render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
+
+    await waitFor(() => expect(issuePreviewTokenSpy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByAltText("banner.png"));
+    fireEvent.click(await screen.findByRole("button", { name: /copy image/i }));
+
+    await waitFor(() => expect(copyImageToClipboardSpy).toHaveBeenCalledWith("/tmp/banner.png"));
+    expect(await screen.findByText("Copied")).toBeTruthy();
   });
 
   it("failed task with credits-exhausted error shows Sign In button wired to onOpenLogin", () => {
@@ -308,6 +341,40 @@ describe("DialogueScreen state machine", () => {
     const submitted = onSubmit.mock.calls[0][0];
     expect(submitted).toEqual(expect.objectContaining({ documentType: "img", prompt: "A red bicycle" }));
     expect(submitted).not.toHaveProperty("promptTemplateId");
+  });
+
+  it("submits the selected image ratio for new image generation only", async () => {
+    const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast", imageRatio: "square" }} />);
+
+    expect(screen.getByText("Image ratio")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Landscape"));
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
+      target: { value: "A launch banner" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      documentType: "img",
+      prompt: "A launch banner",
+      imageRatio: "landscape",
+    }));
+  });
+
+  it("does not submit imageRatio for non-image generation", async () => {
+    const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "pptx", topic: "", prompt: "", mode: "fast", imageRatio: "portrait" }} />);
+
+    expect(screen.queryByText("Image ratio")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
+      target: { value: "Build a deck" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ documentType: "pptx", prompt: "Build a deck" }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
   });
 
   it("image generation confirms before replacing an existing prompt with a template", async () => {
@@ -645,18 +712,20 @@ describe("Bottom continuation composer — acceptance criteria", () => {
     expect(submitBtn.disabled).toBe(false);
   });
 
-  it("T5: clicking submit calls onContinueGeneration with documentType, prompt, and referenceImages", () => {
+  it("T5: clicking submit calls onContinueGeneration with documentType, prompt, referenceImages, and imageRatio", () => {
     const onContinueGeneration = vi.fn();
     const task = makeCompletedImageTask();
     render(<DialogueScreen {...baseProps({ onContinueGeneration })} tasks={[task]} />);
 
+    expect(screen.getByText("Image ratio")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Portrait"));
     const textarea = screen.getByPlaceholderText(/describe what you want to generate/i);
     fireEvent.change(textarea, { target: { value: "Add a sunset" } });
     const submitBtn = document.querySelector(".composer-row .ant-btn-primary") as HTMLButtonElement;
     fireEvent.click(submitBtn);
 
     expect(onContinueGeneration).toHaveBeenCalledTimes(1);
-    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", undefined);
+    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", undefined, "portrait");
   });
 
   it("T6: Enter submits, Shift+Enter does not", () => {
@@ -672,7 +741,7 @@ describe("Bottom continuation composer — acceptance criteria", () => {
 
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
     expect(onContinueGeneration).toHaveBeenCalledTimes(1);
-    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Brighten colors", undefined);
+    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Brighten colors", undefined, "square");
   });
 
   it("adds a completed image as a continuation reference only after Continue editing is clicked", () => {
@@ -690,7 +759,7 @@ describe("Bottom continuation composer — acceptance criteria", () => {
     fireEvent.click(submitBtn);
 
     expect(onContinueGeneration).toHaveBeenCalledTimes(1);
-    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", ["/tmp/banner.png"]);
+    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", ["/tmp/banner.png"], "square");
   });
 
   it("does not submit a generated image reference after it is removed from the continuation composer", () => {
@@ -708,6 +777,6 @@ describe("Bottom continuation composer — acceptance criteria", () => {
     fireEvent.click(submitBtn);
 
     expect(onContinueGeneration).toHaveBeenCalledTimes(1);
-    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", undefined);
+    expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", undefined, "square");
   });
 });
