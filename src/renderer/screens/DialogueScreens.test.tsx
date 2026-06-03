@@ -267,7 +267,7 @@ describe("DialogueScreen state machine", () => {
     render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
 
     await waitFor(() => expect(issuePreviewTokenSpy).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByAltText("banner.png"));
+    fireEvent.click(await screen.findByAltText("banner.png"));
     fireEvent.click(await screen.findByRole("button", { name: /copy image/i }));
 
     await waitFor(() => expect(copyImageToClipboardSpy).toHaveBeenCalledWith("/tmp/banner.png"));
