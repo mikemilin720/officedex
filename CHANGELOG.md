@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.19] - 2026-06-05
+
+### Fixed
+- Failed generations now show a Retry button that resubmits the original request, including saved attachments and image options.
+
 ## [0.5.18] - 2026-06-05
 
 ### Fixed
