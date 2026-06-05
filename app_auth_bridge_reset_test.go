@@ -319,8 +319,8 @@ func writeAuthResetOfficeCLI(t *testing.T, script authResetScript) string {
 case "$1" in
   login)
     printf 'Open this URL: %s\n'
+    sleep 0.05
     if [ %d -ne 0 ]; then
-      sleep 0.05
       printf '%s\n' >&2
       exit %d
     fi

@@ -153,11 +153,11 @@ func writeWhoamiFakeOfficeCLI(t *testing.T, mode string) string {
 	var body string
 	switch mode {
 	case "logged_in":
-		body = "printf 'Mode: logged in\\nUser ID: user-test\\nSession: sess-test\\n'\nexit 0\n"
+		body = "printf 'Mode: logged in\\nUser ID: user-test\\nSession: sess-test\\n'\nsleep 0.05\nexit 0\n"
 	case "api_key":
-		body = "printf 'API key configured: true\\n'\nexit 0\n"
+		body = "printf 'API key configured: true\\n'\nsleep 0.05\nexit 0\n"
 	case "anonymous":
-		body = "printf 'Not logged in\\n'\nexit 1\n"
+		body = "printf 'Not logged in\\n'\nsleep 0.05\nexit 1\n"
 	default:
 		t.Fatalf("unknown whoami mode %q", mode)
 	}
