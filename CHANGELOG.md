@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.16] - 2026-06-05
+
+### Added
+- Image template results can now be saved and submitted from the desktop client.
+
+### Changed
+- Bundled the latest OfficeCLI runtime.
+
 ## [0.5.15] - 2026-06-03
 
 ### Fixed
@@ -103,7 +111,8 @@ Initial open-source release of OfficeDex — the desktop client for OfficeCLI.
 - GNU General Public License v3.0 LICENSE + NOTICE.
 - CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, issue/PR templates, Dependabot.
 
-[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.15...HEAD
+[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.16...HEAD
+[0.5.16]: https://github.com/officecli/officedex/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/officecli/officedex/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/officecli/officedex/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/officecli/officedex/compare/v0.5.12...v0.5.13

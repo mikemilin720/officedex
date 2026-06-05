@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-artifacts/
 dist-electron/
 /release/
 *.log
@@ -7,6 +8,7 @@ dist-electron/
 .DS_Store
 
 # Local bundled OfficeCLI binaries for packaging.
+build/_icon_backup/
 build/officecli/
 officecli-bin/
 
@@ -18,6 +20,8 @@ src/renderer/generated/
 # Tooling caches (Claude Code, OMC, Playwright MCP).
 .claude/
 .omc/
+.omo/
+.omx/
 .playwright-mcp/
 
 # Misc local marker files.
