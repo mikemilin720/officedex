@@ -297,6 +297,20 @@ describe("DialogueScreen state machine", () => {
     expect(screen.getByRole("button", { name: /show in folder/i })).toBeTruthy();
   });
 
+  it("keeps more actions directly beside Show in folder on completed image cards", () => {
+    const task = makeCompletedImageTask({
+      events: [{ task_id: "task-img", type: "task.completed", request_id: "req-img-1", payload: { message: "done" } }],
+    });
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const showInFolder = screen.getByRole("button", { name: /show in folder/i });
+    const moreActions = screen.getByRole("button", { name: /more actions/i });
+    const fileActions = showInFolder.closest(".result-image-file-actions");
+
+    expect(fileActions).toBeTruthy();
+    expect(fileActions?.contains(moreActions)).toBe(true);
+  });
+
   it("submits a completed image task and private template for public review", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "public-poster", title: "Public Poster", description: "", promptPreset: "Public prompt", sortOrder: 0, enabled: true, visibility: "platform_public" },

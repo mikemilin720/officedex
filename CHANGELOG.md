@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.18] - 2026-06-05
+
+### Fixed
+- Completed image cards now keep the more actions button directly beside Show in folder without wrapping it onto a separate line.
+
 ## [0.5.17] - 2026-06-05
 
 ### Fixed

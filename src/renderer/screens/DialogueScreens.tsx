@@ -978,14 +978,16 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
                 <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => officecli.openPath(artifact.filePath)}>
                   {t("dialogue.completed.open")}
                 </Button>
-                <Button icon={<FolderOpenOutlined />} onClick={() => officecli.showItemInFolder(artifact.filePath)}>
-                  {t("dialogue.completed.showInFolder")}
-                </Button>
-                {publishMenu ? (
-                  <Dropdown menu={publishMenu} trigger={["click"]} placement="bottomRight">
-                    <Button aria-label={t("dialogue.completed.moreActions")} icon={<MoreOutlined />} />
-                  </Dropdown>
-                ) : null}
+                <div className="result-image-file-actions">
+                  <Button icon={<FolderOpenOutlined />} onClick={() => officecli.showItemInFolder(artifact.filePath)}>
+                    {t("dialogue.completed.showInFolder")}
+                  </Button>
+                  {publishMenu ? (
+                    <Dropdown menu={publishMenu} trigger={["click"]} placement="bottomRight">
+                      <Button aria-label={t("dialogue.completed.moreActions")} icon={<MoreOutlined />} />
+                    </Dropdown>
+                  ) : null}
+                </div>
               </div>
               <Modal
                 open={publishOpen}

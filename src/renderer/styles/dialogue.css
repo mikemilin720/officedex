@@ -1089,6 +1089,19 @@
   max-width: 100%;
 }
 
+.result-image-file-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.result-image-file-actions .ant-dropdown-trigger {
+  flex: 0 0 auto;
+}
+
 .result-image-actions .ant-btn > span:not(.ant-btn-icon) {
   overflow: hidden;
   text-overflow: ellipsis;
