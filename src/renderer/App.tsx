@@ -283,6 +283,7 @@ export function App() {
         imageRatio: values.imageRatio,
       },
     };
+    const pendingInput = pendingGenerateRef.current.input;
     setState((current) => attachUserInput(applyTaskEvent(current, {
       task_id: localTaskId,
       type: "task.started",
@@ -292,7 +293,7 @@ export function App() {
         topic,
         message: "Task submitted",
       },
-    }), localTaskId, pendingGenerateRef.current!.input));
+    }), localTaskId, pendingInput));
     setSelectedTaskID({ kind: "task", id: localTaskId });
     setActiveNav("dialogue");
     resetNewGenerationDraft();
@@ -351,6 +352,7 @@ export function App() {
       },
       parentTaskId,
     };
+    const pendingInput = pendingGenerateRef.current.input;
     setState((current) => attachUserInput(applyTaskEvent(current, {
       task_id: localTaskId,
       type: "task.started",
@@ -360,7 +362,7 @@ export function App() {
         topic,
         message: "Task submitted",
       },
-    }), localTaskId, pendingGenerateRef.current!.input, parentTaskId));
+    }), localTaskId, pendingInput, parentTaskId));
     setSelectedTaskID({ kind: "task", id: localTaskId });
     setActiveNav("dialogue");
     setBusy(false);
@@ -414,6 +416,7 @@ export function App() {
       input: { prompt, sourceFile },
       parentTaskId,
     };
+    const pendingInput = pendingGenerateRef.current.input;
     setState((current) => attachUserInput(applyTaskEvent(current, {
       task_id: localTaskId,
       type: "task.started",
@@ -423,7 +426,7 @@ export function App() {
         topic,
         message: "Task submitted",
       },
-    }), localTaskId, pendingGenerateRef.current!.input, parentTaskId));
+    }), localTaskId, pendingInput, parentTaskId));
     setSelectedTaskID({ kind: "task", id: localTaskId });
     setActiveNav("dialogue");
     setBusy(false);

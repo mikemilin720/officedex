@@ -433,6 +433,27 @@ describe("App task flow", () => {
     expect(prompt.value).toBe("");
   });
 
+  it("keeps submitted input stable when generate resolves before the optimistic task render", async () => {
+    const bridge = installBridgeMock();
+    bridge.generate.mockResolvedValueOnce({ taskId: "fast-task", sessionId: "session-fast", status: "starting" });
+    const unhandled = vi.fn();
+    window.addEventListener("error", unhandled);
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
+      target: { value: "Create a fast deck" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
+
+    await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getAllByText("Create a fast deck").length).toBeGreaterThan(0));
+    expect(unhandled).not.toHaveBeenCalled();
+    window.removeEventListener("error", unhandled);
+  });
+
   it("restores the submitted new generation draft when generate rejects before task acceptance", async () => {
     const bridge = installBridgeMock();
     bridge.generate.mockRejectedValueOnce(new Error("provider unavailable"));
