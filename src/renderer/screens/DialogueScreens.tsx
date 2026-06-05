@@ -1,4 +1,4 @@
-import { Button, Form, Image, Input, message, Modal, Progress, Radio, Space, Spin, Tag, Timeline, Tooltip } from "antd";
+import { Button, Dropdown, Form, Image, Input, message, Modal, Progress, Radio, Space, Spin, Tag, Timeline, Tooltip, type MenuProps } from "antd";
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -12,6 +12,7 @@ import {
   FolderOpenOutlined,
   LinkOutlined,
   LoadingOutlined,
+  MoreOutlined,
   PaperClipOutlined,
   PlayCircleOutlined,
   SendOutlined,
@@ -940,6 +941,18 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
     const duration = taskDurationLabel(task.events, t);
     const completedAt = formatLocalTimestamp(artifact?.syncedAt) || formatLocalTimestamp(latestEvent?.ts) || t("dialogue.completed.completionTimeUnknown");
     const resultMessage = completionMessage || t("dialogue.completed.completionFallback");
+    const publishMenu: MenuProps | undefined = imagePublishRequestID ? {
+      items: [
+        {
+          key: "publish-template",
+          label: t("dialogue.completed.publishTemplateAction"),
+        },
+      ],
+      onClick: ({ key }) => {
+        if (key === "publish-template") void openPublishDialog();
+      },
+    } : undefined;
+
     return (
       <div className="message ai-message success has-copy">
         <MessageCopyButton text={resultMessage} ariaLabel={t("dialogue.messageCopy.assistant")} />
@@ -958,7 +971,7 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
                 <strong>{artifact.fileName}</strong>
                 <span>{t("dialogue.completed.imageMeta", { type: artifact.documentType.toUpperCase(), time: completedAt })}</span>
               </div>
-              <Space>
+              <div className="result-image-actions">
                 <Button icon={<LinkOutlined />} onClick={() => onUseAsReference(artifact.filePath)}>
                   {t("dialogue.completed.continueEditing")}
                 </Button>
@@ -968,12 +981,12 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
                 <Button icon={<FolderOpenOutlined />} onClick={() => officecli.showItemInFolder(artifact.filePath)}>
                   {t("dialogue.completed.showInFolder")}
                 </Button>
-                {imagePublishRequestID ? (
-                  <Button onClick={openPublishDialog}>
-                    {t("dialogue.completed.publishTemplateAction")}
-                  </Button>
+                {publishMenu ? (
+                  <Dropdown menu={publishMenu} trigger={["click"]} placement="bottomRight">
+                    <Button aria-label={t("dialogue.completed.moreActions")} icon={<MoreOutlined />} />
+                  </Dropdown>
                 ) : null}
-              </Space>
+              </div>
               <Modal
                 open={publishOpen}
                 title={t("dialogue.completed.publishTemplateTitle")}

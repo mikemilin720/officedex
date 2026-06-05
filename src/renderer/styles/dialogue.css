@@ -1075,6 +1075,26 @@
   margin-top: 4px;
 }
 
+.result-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.result-image-actions .ant-btn {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.result-image-actions .ant-btn > span:not(.ant-btn-icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @keyframes preview-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }

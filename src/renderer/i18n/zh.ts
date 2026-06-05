@@ -150,6 +150,7 @@ export const zh: Record<string, string> = {
   "dialogue.completed.preview": "预览",
   "dialogue.completed.showInFolder": "在文件夹中显示",
   "dialogue.completed.continueEditing": "继续修改",
+  "dialogue.completed.moreActions": "更多操作",
   "dialogue.completed.referenceImage": "引用",
   "dialogue.completed.continuationPlaceholder": "描述你想要生成的内容……",
   "dialogue.completed.askPlaceholder": "输入消息或命令……",

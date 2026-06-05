@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.17] - 2026-06-05
+
+### Fixed
+- Completed image cards now keep the template review action inside the more actions menu, so long labels no longer spill outside the result card.
+
 ## [0.5.16] - 2026-06-05
 
 ### Added
@@ -111,7 +116,8 @@ Initial open-source release of OfficeDex — the desktop client for OfficeCLI.
 - GNU General Public License v3.0 LICENSE + NOTICE.
 - CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, issue/PR templates, Dependabot.
 
-[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.16...HEAD
+[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.17...HEAD
+[0.5.17]: https://github.com/officecli/officedex/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/officecli/officedex/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/officecli/officedex/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/officecli/officedex/compare/v0.5.13...v0.5.14

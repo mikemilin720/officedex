@@ -307,7 +307,9 @@ describe("DialogueScreen state machine", () => {
     });
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /submit template for review/i }));
+    expect(screen.queryByRole("button", { name: /submit template for review/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /submit template for review/i }));
     expect(await screen.findByText("Publish as public template")).toBeTruthy();
     fireEvent.change(await screen.findByRole("combobox", { name: "Private template" }), { target: { value: "17" } });
     fireEvent.click(screen.getByRole("button", { name: /^Submit for review$/i }));

@@ -130,6 +130,7 @@ export const en: Record<string, string> = {
   "dialogue.completed.preview": "Preview",
   "dialogue.completed.showInFolder": "Show in folder",
   "dialogue.completed.continueEditing": "Continue editing",
+  "dialogue.completed.moreActions": "More actions",
   "dialogue.completed.referenceImage": "Reference",
   "dialogue.completed.continuationPlaceholder": "Describe what you want to generate...",
   "dialogue.completed.askPlaceholder": "Ask a message or command...",
