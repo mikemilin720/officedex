@@ -2,7 +2,7 @@ import { ConfigProvider, message } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Artifact, BridgeEvent, GenerateInput, ModifyInput, PreviewGrant } from "../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, GenerateInput, ModifyInput, PreviewGrant } from "../shared/types";
 import { applyTaskEvent, attachUserInput, createInitialTaskState, deleteConversation, deleteTask, getConversationList, getConversationTasks, type TaskState } from "./taskState";
 import { officecli } from "./bridge";
 import { theme } from "./designTokens";
@@ -322,6 +322,26 @@ export function App() {
     }
   }
 
+  function retryTaskGeneration(task: DesktopTask) {
+    const input = task.userInput;
+    if (!input?.prompt.trim()) return;
+    const documentType = documentTypeFromTask(task);
+    const values: GenerateInput = {
+      documentType,
+      topic: task.topic || summarizePrompt(input.prompt),
+      prompt: input.prompt,
+      mode: persistedSettings.defaults.mode,
+      enableImages: persistedSettings.defaults.enableImages,
+      imageQuality: persistedSettings.defaults.imageQuality,
+      sourceFile: input.sourceFile,
+    };
+    if (documentType === "img") {
+      values.referenceImages = input.referenceImages;
+      values.imageRatio = input.imageRatio;
+    }
+    void submit(values);
+  }
+
   const newGeneration = useCallback(() => {
     setSelectedTaskID({ kind: "none" });
     clearError();
@@ -568,6 +588,7 @@ export function App() {
             onNewGenerationDraftChange={updateNewGenerationDraft}
             onContinueGeneration={continueGeneration}
             onContinueModify={continueModify}
+            onRetryTask={retryTaskGeneration}
             onForceCancel={(taskId) => {
               setState((current) => applyTaskEvent(current, {
                 type: "task.cancelled",
@@ -613,6 +634,15 @@ function createNewGenerationDraft(input: Partial<GenerateInput> = {}): NewGenera
 
 function createLocalTaskId(): string {
   return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function documentTypeFromTask(task: DesktopTask): GenerateInput["documentType"] {
+  const value = task.documentType || task.artifact?.documentType;
+  return isGenerateDocumentType(value) ? value : defaultGenerateInput.documentType ?? "pptx";
+}
+
+function isGenerateDocumentType(value: unknown): value is GenerateInput["documentType"] {
+  return value === "pptx" || value === "docx" || value === "xlsx" || value === "report" || value === "img";
 }
 
 function errorMessage(error: unknown): string {

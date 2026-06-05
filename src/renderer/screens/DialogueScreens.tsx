@@ -70,6 +70,7 @@ interface DialogueProps {
   onForceCancel?: (taskId: string) => void;
   onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
+  onRetryTask?: (task: DesktopTask) => void;
 }
 
 const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
@@ -158,7 +159,7 @@ function MessageCopyButton({ text, ariaLabel }: { text: string; ariaLabel: strin
   );
 }
 
-export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify }: DialogueProps) {
+export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask }: DialogueProps) {
   if (lastError) {
     return <ConnectionFailure kind={errorKind} status={bridgeStatus} error={lastError} details={errorDetails} onOpenSettings={onOpenSettings} onOpenLogin={onOpenLogin} onRetry={onRetry} />;
   }
@@ -167,7 +168,7 @@ export function DialogueScreen({ tasks, conversationId, artifacts, newGeneration
     return <FluidNewGeneration draft={newGenerationDraft ?? EMPTY_NEW_GENERATION_DRAFT} busy={busy} onSubmit={onSubmit} onDraftChange={onNewGenerationDraftChange ?? (() => undefined)} />;
   }
   // Conversation view with all rounds
-  return <ConversationView tasks={tasks} busy={busy} onPreview={onPreview} onForceCancel={onForceCancel} onContinueGeneration={onContinueGeneration} onContinueModify={onContinueModify} onOpenLogin={onOpenLogin} />;
+  return <ConversationView tasks={tasks} busy={busy} onPreview={onPreview} onForceCancel={onForceCancel} onContinueGeneration={onContinueGeneration} onContinueModify={onContinueModify} onRetryTask={onRetryTask} onOpenLogin={onOpenLogin} />;
 }
 
 function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
@@ -683,13 +684,14 @@ function findVerticalScrollContainer(element: HTMLElement | null): HTMLElement |
   return null;
 }
 
-function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGeneration, onContinueModify, onOpenLogin }: {
+function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, onOpenLogin }: {
   tasks: DesktopTask[];
   busy: boolean;
   onPreview: (artifact: Artifact) => void;
   onForceCancel?: (taskId: string) => void;
   onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
+  onRetryTask?: (task: DesktopTask) => void;
   onOpenLogin: () => void;
 }) {
   const latestTask = tasks[tasks.length - 1];
@@ -740,7 +742,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
           const isLatest = task.id === latestTask.id;
           // Past rounds: always show as completed/failed/cancelled
           if (!isLatest || !isActive) {
-            return <ConversationRound key={task.id} task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={addReferenceImage} />;
+            return <ConversationRound key={task.id} task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={addReferenceImage} onRetryTask={onRetryTask} />;
           }
           // Latest + active: show as active round
           return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} />;
@@ -763,11 +765,12 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
 
 /* ─── Conversation Round (completed / failed / cancelled) ─── */
 
-function ConversationRound({ task, onPreview, onOpenLogin, onUseAsReference }: {
+function ConversationRound({ task, onPreview, onOpenLogin, onUseAsReference, onRetryTask }: {
   task: DesktopTask;
   onPreview: (artifact: Artifact) => void;
   onOpenLogin: () => void;
   onUseAsReference: (path: string) => void;
+  onRetryTask?: (task: DesktopTask) => void;
 }) {
   const t = useT();
   const subject = taskSubject(task, t);
@@ -777,7 +780,7 @@ function ConversationRound({ task, onPreview, onOpenLogin, onUseAsReference }: {
     <>
       <div className="time-marker">{timeMarker}</div>
       <UserMessage task={task} fallback={subject} />
-      <TaskResultMessage task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={onUseAsReference} />
+      <TaskResultMessage task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={onUseAsReference} onRetryTask={onRetryTask} />
     </>
   );
 }
@@ -866,11 +869,12 @@ function ActiveTaskRound({ task, onForceCancel }: {
 
 /* ─── Task Result Message (completed / failed / cancelled) ─── */
 
-function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
+function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onRetryTask }: {
   task: DesktopTask;
   onPreview: (artifact: Artifact) => void;
   onOpenLogin: () => void;
   onUseAsReference: (path: string) => void;
+  onRetryTask?: (task: DesktopTask) => void;
 }) {
   const t = useT();
   const capability = useReportCapability();
@@ -889,6 +893,7 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
   const latestEvent = task.events.at(-1);
   const creditTag = renderCreditTag(task, t);
   const imagePublishRequestID = latestRequestID(task);
+  const canRetry = failed && Boolean(task.userInput?.prompt.trim()) && Boolean(onRetryTask);
 
   useEffect(() => {
     if (capability?.enabled || completed) return;
@@ -1067,25 +1072,32 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
         {creditTag}
       </div>
       <p>{description}</p>
-      {creditsExhausted ? (
-        <Button size="small" type="primary" icon={<UserOutlined />} onClick={onOpenLogin}>
-          {t("dialogue.terminal.creditsExhausted.signIn")}
-        </Button>
-      ) : capability?.enabled ? (
-        <Button size="small" onClick={() => setReportOpen(true)}>
-          {t("dialogue.terminal.reportIssue")}
-        </Button>
-      ) : requestId ? (
-        <Button size="small" icon={<CopyOutlined />} onClick={() => { void navigator.clipboard.writeText(requestId).then(() => { void message.success(t("report.toast.copiedRequestId")); }); }}>
-          {t("dialogue.terminal.copyRequestId")}
-        </Button>
-      ) : (
-        <Tooltip title={t("dialogue.terminal.noRequestId")}>
-          <Button size="small" disabled>
+      <Space size="small" wrap>
+        {canRetry ? (
+          <Button size="small" type="primary" icon={<CloudOutlined aria-hidden />} onClick={() => onRetryTask?.(task)}>
+            {t("dialogue.failure.button.retry")}
+          </Button>
+        ) : null}
+        {creditsExhausted ? (
+          <Button size="small" type="primary" icon={<UserOutlined />} onClick={onOpenLogin}>
+            {t("dialogue.terminal.creditsExhausted.signIn")}
+          </Button>
+        ) : capability?.enabled ? (
+          <Button size="small" onClick={() => setReportOpen(true)}>
+            {t("dialogue.terminal.reportIssue")}
+          </Button>
+        ) : requestId ? (
+          <Button size="small" icon={<CopyOutlined />} onClick={() => { void navigator.clipboard.writeText(requestId).then(() => { void message.success(t("report.toast.copiedRequestId")); }); }}>
             {t("dialogue.terminal.copyRequestId")}
           </Button>
-        </Tooltip>
-      )}
+        ) : (
+          <Tooltip title={t("dialogue.terminal.noRequestId")}>
+            <Button size="small" disabled>
+              {t("dialogue.terminal.copyRequestId")}
+            </Button>
+          </Tooltip>
+        )}
+      </Space>
       <div className="terminal-event-card">
         <span>{t("dialogue.history.taskIdLabel")}</span>
         <strong>{task.id}</strong>

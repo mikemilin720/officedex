@@ -74,6 +74,39 @@ test.describe("Generation flow", () => {
     await expect(page.getByText("model quota exceeded").first()).toBeVisible();
   });
 
+  test("failed task Retry resubmits the original generation input", async ({ page }) => {
+    await installBridgeMock(page);
+    await page.goto("/");
+    await expect(page.getByPlaceholder(/enter what you want to generate/i)).toBeVisible();
+
+    await emitBridgeEvent(page, {
+      event_id: "ev-retry-start", task_id: "mock-task-retry", type: "task.started",
+      payload: { document_type: "img", topic: "Retry poster" },
+    });
+    await emitBridgeEvent(page, {
+      event_id: "ev-retry-input", task_id: "mock-task-retry", type: "task.user_input",
+      payload: {
+        prompt: "Create a poster from the reference",
+        reference_images: ["/tmp/ref.png"],
+        image_ratio: "portrait",
+      },
+    });
+    await emitBridgeEvent(page, {
+      event_id: "ev-retry-fail", task_id: "mock-task-retry", type: "task.failed",
+      payload: { message: "temporary provider outage" },
+    });
+
+    await page.getByRole("button", { name: /^Retry$/ }).click();
+    await expect.poll(async () => (await getBridgeCalls(page, "generate")).length).toBe(1);
+    const calls = await getBridgeCalls(page, "generate");
+    expect(calls[0][0]).toMatchObject({
+      documentType: "img",
+      prompt: "Create a poster from the reference",
+      referenceImages: ["/tmp/ref.png"],
+      imageRatio: "portrait",
+    });
+  });
+
   test("task.cancelled surfaces cancelled terminal state", async ({ page }) => {
     await installBridgeMock(page);
     await page.goto("/");

@@ -199,6 +199,51 @@ describe("App task flow", () => {
     expect(screen.getByText("task.failed")).toBeTruthy();
   });
 
+  it("retries a failed generation with the original task input", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    act(() => {
+      bridge.emit({
+        event_id: "event-retry-started",
+        task_id: "task-retry",
+        type: "task.started",
+        payload: { document_type: "img", topic: "Retry poster" },
+      });
+      bridge.emit({
+        event_id: "event-retry-input",
+        task_id: "task-retry",
+        type: "task.user_input",
+        payload: {
+          prompt: "Create a poster from the reference",
+          reference_images: ["/tmp/ref.png"],
+          image_ratio: "portrait",
+        },
+      });
+      bridge.emit({
+        event_id: "event-retry-failed",
+        task_id: "task-retry",
+        type: "task.failed",
+        payload: { message: "temporary provider outage" },
+      });
+    });
+
+    expect(await screen.findByText("Generation Failed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Retry$/ }));
+
+    await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
+    expect(bridge.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentType: "img",
+        prompt: "Create a poster from the reference",
+        referenceImages: ["/tmp/ref.png"],
+        imageRatio: "portrait",
+      }),
+    );
+  });
+
   it("renders a cancelled task as a visible terminal state", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");
