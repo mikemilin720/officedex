@@ -176,6 +176,8 @@ type ImagePromptSlot struct {
 
 type ImagePromptTemplate struct {
 	ID           uint64            `json:"id"`
+	OwnerUserID  uint64            `json:"ownerUserID,omitempty"`
+	Visibility   string            `json:"visibility,omitempty"`
 	Slug         string            `json:"slug"`
 	Title        string            `json:"title"`
 	Description  string            `json:"description"`
@@ -184,6 +186,35 @@ type ImagePromptTemplate struct {
 	SortOrder    int               `json:"sortOrder"`
 	Enabled      bool              `json:"enabled"`
 	Slots        []ImagePromptSlot `json:"slots,omitempty"`
+}
+
+type CreateUserImageTemplateInput struct {
+	SourceTemplateID uint64            `json:"sourceTemplateID,omitempty"`
+	Slug             string            `json:"slug"`
+	Title            string            `json:"title"`
+	Description      string            `json:"description,omitempty"`
+	PromptPreset     string            `json:"promptPreset,omitempty"`
+	Slots            []ImagePromptSlot `json:"slots,omitempty"`
+	SortOrder        int               `json:"sortOrder,omitempty"`
+}
+
+type CreateImageTemplatePublishRequestInput struct {
+	PrivateTemplateID uint64 `json:"privateTemplateID"`
+	ProvenanceID      uint64 `json:"provenanceID,omitempty"`
+	RequestID         string `json:"requestID,omitempty"`
+	SubmitterNote     string `json:"submitterNote,omitempty"`
+}
+
+type ImageTemplatePublishRequest struct {
+	ID                uint64 `json:"id"`
+	PrivateTemplateID uint64 `json:"privateTemplateID"`
+	RequesterUserID   uint64 `json:"requesterUserID,omitempty"`
+	ProvenanceID      uint64 `json:"provenanceID"`
+	Status            string `json:"status"`
+	SubmitterNote     string `json:"submitterNote,omitempty"`
+	PublicTemplateID  uint64 `json:"publicTemplateID,omitempty"`
+	CreatedAt         string `json:"createdAt,omitempty"`
+	UpdatedAt         string `json:"updatedAt,omitempty"`
 }
 
 type TaskQuestionOption struct {

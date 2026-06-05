@@ -715,6 +715,54 @@ func TestListImageTemplatesMapsBridgeResponse(t *testing.T) {
 	}
 }
 
+func TestCreateImageTemplatePublishRequestUsesRequestID(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan struct {
+		item *types.ImageTemplatePublishRequest
+		err  error
+	}, 1)
+	go func() {
+		item, err := client.CreateImageTemplatePublishRequest(context.Background(), types.CreateImageTemplatePublishRequestInput{
+			PrivateTemplateID: 17,
+			RequestID:         "req-img-1",
+			SubmitterNote:     "please review",
+		})
+		done <- struct {
+			item *types.ImageTemplatePublishRequest
+			err  error
+		}{item: item, err: err}
+	}()
+
+	req := fake.readRequest(t)
+	if req.Method != "image_template_publish_requests/create" {
+		t.Fatalf("method = %q, want image_template_publish_requests/create", req.Method)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if params["private_template_id"] != float64(17) || params["request_id"] != "req-img-1" || params["submitter_note"] != "please review" {
+		t.Fatalf("unexpected params: %#v", params)
+	}
+	fake.writeResponse(t, req.idString(), map[string]any{
+		"id":                  31,
+		"private_template_id": 17,
+		"requester_user_id":   42,
+		"provenance_id":       11,
+		"status":              "pending",
+	}, nil)
+
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("CreateImageTemplatePublishRequest: %v", result.err)
+	}
+	if result.item.ID != 31 || result.item.PrivateTemplateID != 17 || result.item.Status != "pending" {
+		t.Fatalf("unexpected response: %#v", result.item)
+	}
+}
+
 func TestInvokeGenerateUsesTaskInvokeTimeout(t *testing.T) {
 	fake := newFakeTransport()
 	client := New(Options{

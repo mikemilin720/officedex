@@ -250,6 +250,30 @@ func (a *App) ListImageTemplates() ([]types.ImagePromptTemplate, error) {
 	return client.ListImageTemplates(a.ctx)
 }
 
+func (a *App) CreateImageTemplate(input types.CreateUserImageTemplateInput) (types.ImagePromptTemplate, error) {
+	client, err := a.ensureBridge()
+	if err != nil {
+		return types.ImagePromptTemplate{}, err
+	}
+	item, err := client.CreateImageTemplate(a.ctx, input)
+	if err != nil {
+		return types.ImagePromptTemplate{}, err
+	}
+	return *item, nil
+}
+
+func (a *App) CreateImageTemplatePublishRequest(input types.CreateImageTemplatePublishRequestInput) (types.ImageTemplatePublishRequest, error) {
+	client, err := a.ensureBridge()
+	if err != nil {
+		return types.ImageTemplatePublishRequest{}, err
+	}
+	item, err := client.CreateImageTemplatePublishRequest(a.ctx, input)
+	if err != nil {
+		return types.ImageTemplatePublishRequest{}, err
+	}
+	return *item, nil
+}
+
 // GenerateResult is the renderer-facing shape of a task invocation result.
 type GenerateResult struct {
 	TaskID    string `json:"taskId"`

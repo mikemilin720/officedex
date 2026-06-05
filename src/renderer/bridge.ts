@@ -8,8 +8,11 @@ import type {
   BridgeEvent,
   BridgeRuntimeSnapshot,
   CreditStatus,
+  CreateImageTemplatePublishRequestInput,
+  CreateUserImageTemplateInput,
   DesktopAPI,
   GenerateInput,
+  ImageTemplatePublishRequest,
   ImagePromptTemplate,
   LlmProvider,
   ModifyInput,
@@ -67,6 +70,12 @@ function createBrowserPreviewAPI(): DesktopAPI {
     initialize: async () => ({ browserPreview: true }),
     getCapabilities: async () => ({ browserPreview: true }),
     listImageTemplates: async () => [],
+    createImageTemplate: async () => {
+      throw new Error("Creating image templates requires the desktop app.");
+    },
+    createImageTemplatePublishRequest: async () => {
+      throw new Error("Publishing image templates requires the desktop app.");
+    },
     generate: async () => {
       throw new Error("Bridge IPC is only available inside the desktop app.");
     },
@@ -329,6 +338,16 @@ function createWailsAPI(): DesktopAPI {
     listImageTemplates: async (): Promise<ImagePromptTemplate[]> => {
       const fn = (WailsApp as unknown as { ListImageTemplates?: () => Promise<ImagePromptTemplate[]> }).ListImageTemplates;
       return fn ? fn() : [];
+    },
+    createImageTemplate: async (input: CreateUserImageTemplateInput): Promise<ImagePromptTemplate> => {
+      const fn = (WailsApp as unknown as { CreateImageTemplate?: (arg1: never) => Promise<ImagePromptTemplate> }).CreateImageTemplate;
+      if (!fn) throw new Error("Creating image templates requires a newer OfficeDex runtime.");
+      return fn(toWails(input));
+    },
+    createImageTemplatePublishRequest: async (input: CreateImageTemplatePublishRequestInput): Promise<ImageTemplatePublishRequest> => {
+      const fn = (WailsApp as unknown as { CreateImageTemplatePublishRequest?: (arg1: never) => Promise<ImageTemplatePublishRequest> }).CreateImageTemplatePublishRequest;
+      if (!fn) throw new Error("Publishing image templates requires a newer OfficeDex runtime.");
+      return fn(toWails(input));
     },
     generate: async (input: GenerateInput) => {
       const result = await WailsApp.Generate(toWails(input));

@@ -320,6 +320,8 @@ type bridgeImagePromptSlot struct {
 
 type bridgeImagePromptTemplate struct {
 	ID           uint64                  `json:"id"`
+	OwnerUserID  uint64                  `json:"owner_user_id,omitempty"`
+	Visibility   string                  `json:"visibility,omitempty"`
 	Slug         string                  `json:"slug"`
 	Title        string                  `json:"title"`
 	Description  string                  `json:"description"`
@@ -328,6 +330,18 @@ type bridgeImagePromptTemplate struct {
 	SortOrder    int                     `json:"sort_order"`
 	Enabled      bool                    `json:"enabled"`
 	Slots        []bridgeImagePromptSlot `json:"slots,omitempty"`
+}
+
+type bridgeImageTemplatePublishRequest struct {
+	ID                uint64 `json:"id"`
+	PrivateTemplateID uint64 `json:"private_template_id"`
+	RequesterUserID   uint64 `json:"requester_user_id"`
+	ProvenanceID      uint64 `json:"provenance_id"`
+	Status            string `json:"status"`
+	SubmitterNote     string `json:"submitter_note"`
+	PublicTemplateID  uint64 `json:"public_template_id"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // ListImageTemplates calls "image_templates/list" and maps bridge snake_case
@@ -360,6 +374,8 @@ func (c *Client) ListImageTemplates(ctx context.Context) ([]types.ImagePromptTem
 		}
 		items = append(items, types.ImagePromptTemplate{
 			ID:           item.ID,
+			OwnerUserID:  item.OwnerUserID,
+			Visibility:   item.Visibility,
 			Slug:         item.Slug,
 			Title:        item.Title,
 			Description:  item.Description,
@@ -371,6 +387,82 @@ func (c *Client) ListImageTemplates(ctx context.Context) ([]types.ImagePromptTem
 		})
 	}
 	return items, nil
+}
+
+func (c *Client) CreateImageTemplate(ctx context.Context, input types.CreateUserImageTemplateInput) (*types.ImagePromptTemplate, error) {
+	params := map[string]any{
+		"source_template_id": input.SourceTemplateID,
+		"slug":               input.Slug,
+		"title":              input.Title,
+		"description":        input.Description,
+		"prompt_preset":      input.PromptPreset,
+		"sort_order":         input.SortOrder,
+	}
+	if len(input.Slots) > 0 {
+		slots := make([]map[string]any, 0, len(input.Slots))
+		for _, slot := range input.Slots {
+			slots = append(slots, map[string]any{
+				"key":           slot.Key,
+				"label":         slot.Label,
+				"example":       slot.Example,
+				"default_value": slot.DefaultValue,
+				"help_text":     slot.HelpText,
+				"required":      slot.Required,
+				"multiline":     slot.Multiline,
+			})
+		}
+		params["slots"] = slots
+	}
+	raw, err := c.Request(ctx, "image_templates/create", params)
+	if err != nil {
+		return nil, err
+	}
+	var item bridgeImagePromptTemplate
+	if err := decodeJSON(raw, &item); err != nil {
+		return nil, fmt.Errorf("bridge: decode image_templates/create: %w", err)
+	}
+	mapped := types.ImagePromptTemplate{
+		ID:           item.ID,
+		OwnerUserID:  item.OwnerUserID,
+		Visibility:   item.Visibility,
+		Slug:         item.Slug,
+		Title:        item.Title,
+		Description:  item.Description,
+		PromptPreset: item.PromptPreset,
+		ThumbnailURL: item.ThumbnailURL,
+		SortOrder:    item.SortOrder,
+		Enabled:      item.Enabled,
+	}
+	return &mapped, nil
+}
+
+func (c *Client) CreateImageTemplatePublishRequest(ctx context.Context, input types.CreateImageTemplatePublishRequestInput) (*types.ImageTemplatePublishRequest, error) {
+	params := map[string]any{
+		"private_template_id": input.PrivateTemplateID,
+		"provenance_id":       input.ProvenanceID,
+		"request_id":          input.RequestID,
+		"submitter_note":      input.SubmitterNote,
+	}
+	raw, err := c.Request(ctx, "image_template_publish_requests/create", params)
+	if err != nil {
+		return nil, err
+	}
+	var item bridgeImageTemplatePublishRequest
+	if err := decodeJSON(raw, &item); err != nil {
+		return nil, fmt.Errorf("bridge: decode image_template_publish_requests/create: %w", err)
+	}
+	mapped := types.ImageTemplatePublishRequest{
+		ID:                item.ID,
+		PrivateTemplateID: item.PrivateTemplateID,
+		RequesterUserID:   item.RequesterUserID,
+		ProvenanceID:      item.ProvenanceID,
+		Status:            item.Status,
+		SubmitterNote:     item.SubmitterNote,
+		PublicTemplateID:  item.PublicTemplateID,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
+	}
+	return &mapped, nil
 }
 
 // OpenSession calls "session/open" and caches the returned session id.

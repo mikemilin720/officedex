@@ -66,6 +66,8 @@ function installDomStubs() {
 let respondSpy: ReturnType<typeof vi.fn>;
 let cancelSpy: ReturnType<typeof vi.fn>;
 let listImageTemplatesSpy: ReturnType<typeof vi.fn>;
+let createImageTemplateSpy: ReturnType<typeof vi.fn>;
+let createImageTemplatePublishRequestSpy: ReturnType<typeof vi.fn>;
 let issuePreviewTokenSpy: ReturnType<typeof vi.fn>;
 let readArtifactFileSpy: ReturnType<typeof vi.fn>;
 let revokePreviewTokenSpy: ReturnType<typeof vi.fn>;
@@ -80,6 +82,8 @@ beforeEach(() => {
   respondSpy = vi.fn(async () => undefined);
   cancelSpy = vi.fn(async () => undefined);
   listImageTemplatesSpy = vi.fn(async () => []);
+  createImageTemplateSpy = vi.fn(async () => ({ id: 17, slug: "poster-copy", title: "Poster copy", description: "Cinematic poster", promptPreset: "Template prompt", sortOrder: 10, enabled: true, visibility: "user_private" }));
+  createImageTemplatePublishRequestSpy = vi.fn(async () => ({ id: 31, privateTemplateID: 17, provenanceID: 11, status: "pending" }));
   issuePreviewTokenSpy = vi.fn(async (artifact) => ({ token: "test-token", fileName: artifact.fileName, documentType: artifact.documentType }));
   readArtifactFileSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]) }));
   revokePreviewTokenSpy = vi.fn(async () => undefined);
@@ -93,6 +97,8 @@ beforeEach(() => {
     respond: officecli.respond,
     cancel: officecli.cancel,
     listImageTemplates: officecli.listImageTemplates,
+    createImageTemplate: officecli.createImageTemplate,
+    createImageTemplatePublishRequest: officecli.createImageTemplatePublishRequest,
     issuePreviewToken: officecli.issuePreviewToken,
     readArtifactFile: officecli.readArtifactFile,
     revokePreviewToken: officecli.revokePreviewToken,
@@ -101,6 +107,8 @@ beforeEach(() => {
   officecli.respond = respondSpy as unknown as DesktopAPI["respond"];
   officecli.cancel = cancelSpy as unknown as DesktopAPI["cancel"];
   officecli.listImageTemplates = listImageTemplatesSpy as unknown as DesktopAPI["listImageTemplates"];
+  officecli.createImageTemplate = createImageTemplateSpy as unknown as DesktopAPI["createImageTemplate"];
+  (officecli as unknown as { createImageTemplatePublishRequest: typeof createImageTemplatePublishRequestSpy }).createImageTemplatePublishRequest = createImageTemplatePublishRequestSpy;
   officecli.issuePreviewToken = issuePreviewTokenSpy as unknown as DesktopAPI["issuePreviewToken"];
   officecli.readArtifactFile = readArtifactFileSpy as unknown as DesktopAPI["readArtifactFile"];
   officecli.revokePreviewToken = revokePreviewTokenSpy as unknown as DesktopAPI["revokePreviewToken"];
@@ -287,6 +295,29 @@ describe("DialogueScreen state machine", () => {
     const openButtons = screen.getAllByRole("button", { name: /open/i });
     expect(openButtons.length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /show in folder/i })).toBeTruthy();
+  });
+
+  it("submits a completed image task and private template for public review", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "public-poster", title: "Public Poster", description: "", promptPreset: "Public prompt", sortOrder: 0, enabled: true, visibility: "platform_public" },
+      { id: 17, slug: "my-poster", title: "My Poster", description: "", promptPreset: "Generated prompt", sortOrder: 0, enabled: true, visibility: "user_private" },
+    ]);
+    const task = makeCompletedImageTask({
+      events: [{ task_id: "task-img", type: "task.completed", request_id: "req-img-1", payload: { message: "done" } }],
+    });
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit template for review/i }));
+    expect(await screen.findByText("Publish as public template")).toBeTruthy();
+    fireEvent.change(await screen.findByRole("combobox", { name: "Private template" }), { target: { value: "17" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Submit for review$/i }));
+
+    await waitFor(() => expect(createImageTemplatePublishRequestSpy).toHaveBeenCalledWith({
+      privateTemplateID: 17,
+      requestID: "req-img-1",
+      submitterNote: "",
+    }));
+    expect(antdMessage.success).toHaveBeenCalledWith("Submitted for review");
   });
 
   it("copies generated images through the desktop clipboard bridge", async () => {
@@ -498,6 +529,30 @@ describe("DialogueScreen state machine", () => {
 
     await waitFor(() => expect(listImageTemplatesSpy).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Banner")).toBeTruthy();
+  });
+
+  it("copies a public image template into the user's private library", async () => {
+    listImageTemplatesSpy
+      .mockResolvedValueOnce([
+        { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
+      ])
+      .mockResolvedValueOnce([
+        { id: 17, slug: "poster-copy", title: "Poster copy", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/17/thumbnail", sortOrder: 10, enabled: true, visibility: "user_private" },
+      ]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText("Poster")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Copy to my templates$/i }));
+
+    await waitFor(() => expect(createImageTemplateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      sourceTemplateID: 7,
+      title: "Poster copy",
+      slug: "poster-copy",
+    })));
+    expect(antdMessage.success).toHaveBeenCalledWith("Saved to My templates");
+    await waitFor(() => expect(listImageTemplatesSpy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Poster copy")).toBeTruthy();
+    expect(screen.getByText("My template")).toBeTruthy();
   });
 });
 

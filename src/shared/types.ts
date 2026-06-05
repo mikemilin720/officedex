@@ -175,6 +175,8 @@ export interface ImagePromptSlot {
 
 export interface ImagePromptTemplate {
   id: number;
+  ownerUserID?: number;
+  visibility?: "platform_public" | "user_private" | string;
   slug: string;
   title: string;
   description: string;
@@ -184,6 +186,35 @@ export interface ImagePromptTemplate {
   enabled: boolean;
   /** When present and non-empty, the renderer shows a guided fill-in form instead of the raw textarea. */
   slots?: ImagePromptSlot[];
+}
+
+export interface CreateUserImageTemplateInput {
+  sourceTemplateID?: number;
+  slug: string;
+  title: string;
+  description?: string;
+  promptPreset?: string;
+  slots?: ImagePromptSlot[];
+  sortOrder?: number;
+}
+
+export interface CreateImageTemplatePublishRequestInput {
+  privateTemplateID: number;
+  provenanceID?: number;
+  requestID?: string;
+  submitterNote?: string;
+}
+
+export interface ImageTemplatePublishRequest {
+  id: number;
+  privateTemplateID: number;
+  requesterUserID?: number;
+  provenanceID: number;
+  status: string;
+  submitterNote?: string;
+  publicTemplateID?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DesktopTask {
@@ -404,6 +435,8 @@ export interface DesktopAPI {
   initialize(): Promise<unknown>;
   getCapabilities(): Promise<unknown>;
   listImageTemplates(): Promise<ImagePromptTemplate[]>;
+  createImageTemplate(input: CreateUserImageTemplateInput): Promise<ImagePromptTemplate>;
+  createImageTemplatePublishRequest(input: CreateImageTemplatePublishRequestInput): Promise<ImageTemplatePublishRequest>;
   generate(input: GenerateInput): Promise<{ taskId: string; sessionId: string; status: string }>;
   modify(input: ModifyInput): Promise<{ taskId: string; sessionId: string; status: string }>;
   respond(input: { taskId: string; questionId?: string; optionId?: string; answer?: string }): Promise<unknown>;

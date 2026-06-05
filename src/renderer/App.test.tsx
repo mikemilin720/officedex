@@ -1187,6 +1187,8 @@ function installBridgeMock() {
     initialize: vi.fn(async () => ({})),
     getCapabilities: vi.fn(async () => ({})),
     listImageTemplates: vi.fn(async () => []),
+    createImageTemplate: vi.fn(async () => ({ id: 1, slug: "mock", title: "Mock", description: "", promptPreset: "", sortOrder: 0, enabled: true })),
+    createImageTemplatePublishRequest: vi.fn(async () => ({ id: 1, privateTemplateID: 1, provenanceID: 1, status: "pending" })),
     generate,
     modify: vi.fn(async () => ({ taskId: "task-modify", sessionId: "session-2", status: "starting" })),
     respond: vi.fn(async () => undefined),

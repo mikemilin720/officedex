@@ -184,6 +184,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   const [imageTemplates, setImageTemplates] = useState<ImagePromptTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState("");
+  const [copyingTemplateId, setCopyingTemplateId] = useState<string | undefined>();
   const [slotValues, setSlotValues] = useState<Record<string, string>>({});
   const [slotErrors, setSlotErrors] = useState<Record<string, string>>({});
   const [rawDecoupled, setRawDecoupled] = useState(false);
@@ -301,6 +302,28 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
       return;
     }
     apply();
+  }
+
+  async function copyImageTemplate(template: ImagePromptTemplate) {
+    const sourceId = Number(template.id);
+    if (!Number.isFinite(sourceId) || sourceId <= 0) return;
+    const slugBase = slugifyTemplateTitle(template.slug || template.title || "image-template");
+    const titleBase = template.title.trim() || t("dialogue.imageTemplates.defaultCopiedTitle");
+    setCopyingTemplateId(String(template.id));
+    try {
+      await officecli.createImageTemplate({
+        sourceTemplateID: sourceId,
+        slug: `${slugBase}-copy`,
+        title: t("dialogue.imageTemplates.copyTitle", { title: titleBase }),
+        description: template.description,
+      });
+      void message.success(t("dialogue.imageTemplates.copySuccess"));
+      loadImageTemplates();
+    } catch (error) {
+      void message.error(t("dialogue.imageTemplates.copyError", { error: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setCopyingTemplateId(undefined);
+    }
   }
 
   function handleSlotChange(key: string, value: string) {
@@ -424,8 +447,10 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
             loading={templatesLoading}
             error={templatesError}
             onSelect={applyImageTemplate}
+            onCopy={copyImageTemplate}
             onClear={() => setSelectedTemplateId(undefined)}
             onRefresh={loadImageTemplates}
+            copyingId={copyingTemplateId}
             t={t}
           />
         ) : null}
@@ -508,14 +533,16 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   );
 }
 
-function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onClear, onRefresh, t }: {
+function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onCopy, onClear, onRefresh, copyingId, t }: {
   templates: ImagePromptTemplate[];
   selectedId?: string;
   loading: boolean;
   error: string;
   onSelect: (template: ImagePromptTemplate) => void;
+  onCopy: (template: ImagePromptTemplate) => void;
   onClear: () => void;
   onRefresh: () => void;
+  copyingId?: string;
   t: Translator;
 }) {
   return (
@@ -550,25 +577,50 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
             const id = String(template.id);
             const selected = selectedId === id;
             return (
-              <button
+              <div
                 key={id}
-                type="button"
                 className={`image-template-card ${selected ? "image-template-card-selected" : ""}`}
-                aria-pressed={selected}
-                onClick={() => onSelect(template)}
               >
-                <div className="image-template-thumb">
-                  {template.thumbnailUrl ? <img src={template.thumbnailUrl} alt="" /> : <MaterialSymbol name="image" />}
-                </div>
-                <strong>{template.title}</strong>
-                {template.description ? <span>{template.description}</span> : null}
-              </button>
+                <button
+                  type="button"
+                  className="image-template-card-main"
+                  aria-pressed={selected}
+                  onClick={() => onSelect(template)}
+                >
+                  <div className="image-template-thumb">
+                    {template.thumbnailUrl ? <img src={template.thumbnailUrl} alt="" /> : <MaterialSymbol name="image" />}
+                  </div>
+                  <span className={`image-template-scope image-template-scope-${template.visibility === "user_private" ? "private" : "public"}`}>
+                    {template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public")}
+                  </span>
+                  <strong>{template.title}</strong>
+                  {template.description ? <span>{template.description}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  className="image-template-copy"
+                  onClick={() => onCopy(template)}
+                  disabled={copyingId === id}
+                  aria-label={t("dialogue.imageTemplates.copyAria", { title: template.title })}
+                >
+                  {copyingId === id ? t("dialogue.imageTemplates.copying") : t("dialogue.imageTemplates.copy")}
+                </button>
+              </div>
             );
           })}
         </div>
       )}
     </div>
   );
+}
+
+function slugifyTemplateTitle(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || "image-template";
 }
 
 function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, t }: {
@@ -823,12 +875,19 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
   const capability = useReportCapability();
   const [reportOpen, setReportOpen] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishTemplates, setPublishTemplates] = useState<ImagePromptTemplate[]>([]);
+  const [publishTemplateId, setPublishTemplateId] = useState("");
+  const [publishLoading, setPublishLoading] = useState(false);
+  const [publishSubmitting, setPublishSubmitting] = useState(false);
+  const [publishError, setPublishError] = useState("");
   const failed = task.status === "failed";
   const cancelled = task.status === "cancelled";
   const completed = task.status === "completed";
   const artifact = task.artifact;
   const latestEvent = task.events.at(-1);
   const creditTag = renderCreditTag(task, t);
+  const imagePublishRequestID = latestRequestID(task);
 
   useEffect(() => {
     if (capability?.enabled || completed) return;
@@ -838,6 +897,43 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
     }).catch(() => {});
     return () => { c = true; };
   }, [task.id, capability?.enabled, completed]);
+
+  async function openPublishDialog() {
+    setPublishOpen(true);
+    setPublishError("");
+    setPublishLoading(true);
+    try {
+      const items = await officecli.listImageTemplates();
+      const privateItems = items.filter((item) => item.enabled && item.visibility === "user_private");
+      setPublishTemplates(privateItems);
+      setPublishTemplateId(privateItems[0] ? String(privateItems[0].id) : "");
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : String(error));
+      setPublishTemplates([]);
+      setPublishTemplateId("");
+    } finally {
+      setPublishLoading(false);
+    }
+  }
+
+  async function submitPublishRequest() {
+    const privateTemplateID = Number(publishTemplateId);
+    if (!imagePublishRequestID || !Number.isFinite(privateTemplateID) || privateTemplateID <= 0) return;
+    setPublishSubmitting(true);
+    try {
+      await officecli.createImageTemplatePublishRequest({
+        privateTemplateID,
+        requestID: imagePublishRequestID,
+        submitterNote: "",
+      });
+      setPublishOpen(false);
+      void message.success(t("dialogue.completed.publishTemplateSuccess"));
+    } catch (error) {
+      void message.error(t("dialogue.completed.publishTemplateError", { error: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setPublishSubmitting(false);
+    }
+  }
 
   if (completed) {
     const completionMessage = eventText(latestEvent);
@@ -872,7 +968,42 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference }: {
                 <Button icon={<FolderOpenOutlined />} onClick={() => officecli.showItemInFolder(artifact.filePath)}>
                   {t("dialogue.completed.showInFolder")}
                 </Button>
+                {imagePublishRequestID ? (
+                  <Button onClick={openPublishDialog}>
+                    {t("dialogue.completed.publishTemplateAction")}
+                  </Button>
+                ) : null}
               </Space>
+              <Modal
+                open={publishOpen}
+                title={t("dialogue.completed.publishTemplateTitle")}
+                onCancel={() => setPublishOpen(false)}
+                onOk={submitPublishRequest}
+                okText={t("dialogue.completed.publishTemplateSubmit")}
+                okButtonProps={{ disabled: !publishTemplateId || publishLoading, loading: publishSubmitting }}
+                cancelText={t("dialogue.imageTemplates.confirmReplaceCancel")}
+              >
+                <div className="image-template-publish-form">
+                  <label htmlFor={`publish-template-${task.id}`}>{t("dialogue.completed.publishTemplateSelect")}</label>
+                  {publishLoading ? (
+                    <div className="image-template-status"><Spin size="small" /> <span>{t("dialogue.imageTemplates.loading")}</span></div>
+                  ) : publishError ? (
+                    <div className="image-template-status image-template-status-error">{publishError}</div>
+                  ) : publishTemplates.length === 0 ? (
+                    <div className="image-template-status">{t("dialogue.completed.publishTemplateEmpty")}</div>
+                  ) : (
+                    <select
+                      id={`publish-template-${task.id}`}
+                      value={publishTemplateId}
+                      onChange={(event) => setPublishTemplateId(event.target.value)}
+                    >
+                      {publishTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>{template.title}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </Modal>
             </div>
           ) : (
             <div className="result-card">
@@ -1371,6 +1502,15 @@ function eventsForTimeline(events: BridgeEvent[], t: Translator) {
 function eventText(event?: BridgeEvent): string {
   const payload = event?.payload || {};
   return String(payload.message || payload.stage || payload.status || payload.question || "");
+}
+
+function latestRequestID(task: DesktopTask): string {
+  for (let i = task.events.length - 1; i >= 0; i -= 1) {
+    const event = task.events[i];
+    const requestID = event.request_id || (typeof event.payload?.request_id === "string" ? event.payload.request_id : "");
+    if (requestID.trim()) return requestID.trim();
+  }
+  return "";
 }
 
 // Recognises the officecli error emitted when the device's anonymous credit
