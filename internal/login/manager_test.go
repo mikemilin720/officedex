@@ -28,6 +28,20 @@ type fakeTransport struct {
 	killCalls atomic.Int32
 }
 
+type instantExitTransport struct {
+	stdout io.Reader
+	stderr io.Reader
+	code   int
+}
+
+func (f instantExitTransport) Stdout() io.Reader    { return f.stdout }
+func (f instantExitTransport) Stderr() io.Reader    { return f.stderr }
+func (f instantExitTransport) Stdin() io.Writer     { return io.Discard }
+func (f instantExitTransport) Kill(os.Signal) error { return nil }
+func (f instantExitTransport) Wait() (int, os.Signal, error) {
+	return f.code, nil, nil
+}
+
 func newFakeTransport() *fakeTransport {
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
@@ -114,7 +128,7 @@ func TestStartReturnsURLWhenEmittedOnStdout(t *testing.T) {
 func TestStartTimesOutWhenNoURL(t *testing.T) {
 	ft := newFakeTransport()
 	mgr := New(ManagerOptions{
-		URLTimeout: 30 * time.Millisecond,
+		URLTimeout:     30 * time.Millisecond,
 		SpawnTransport: func(args []string) (Transport, error) { return ft, nil },
 	})
 	// Drain any kill signal then complete Wait after kill.
@@ -158,6 +172,34 @@ func TestStartUsesFallbackRegexAfterExit(t *testing.T) {
 		t.Fatalf("unexpected url from fallback: %q", url)
 	}
 	waitForEvent(t, events, EventSuccess)
+}
+
+func TestStartReturnsQueuedURLWhenNonZeroExitWinsRace(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		mgr := New(ManagerOptions{
+			URLTimeout: time.Second,
+			SpawnTransport: func(args []string) (Transport, error) {
+				return instantExitTransport{
+					stdout: strings.NewReader("Open this URL: https://example.com/auth?code=race\n"),
+					stderr: strings.NewReader("login rejected\n"),
+					code:   7,
+				}, nil
+			},
+		})
+		events := captureEvents(mgr)
+
+		url, err := mgr.Start(context.Background())
+		if err != nil {
+			t.Fatalf("iteration %d: Start: %v", i, err)
+		}
+		if url != "https://example.com/auth?code=race" {
+			t.Fatalf("iteration %d: unexpected url: %q", i, url)
+		}
+		ev := waitForEvent(t, events, EventFailure)
+		if !strings.Contains(ev.Message, "code=7") {
+			t.Fatalf("iteration %d: failure message missing exit code: %q", i, ev.Message)
+		}
+	}
 }
 
 func TestStartEmitsFailureOnNonZeroExit(t *testing.T) {

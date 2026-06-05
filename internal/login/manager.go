@@ -179,6 +179,15 @@ func (m *Manager) Start(ctx context.Context) (string, error) {
 		m.markExited(0, nil)
 		return "", ctx.Err()
 	case result := <-waitDone:
+		// stdout may have matched and queued the URL while the subprocess also
+		// exited quickly. Prefer the queued URL before treating the exit as an
+		// early failure.
+		select {
+		case url := <-urlCh:
+			m.completeAfterExit(result)
+			return url, nil
+		default:
+		}
 		// Process exited before any URL was streamed; try the fallback regex.
 		url, ok := m.fallbackURL()
 		if ok {
