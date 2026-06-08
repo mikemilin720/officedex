@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.20] - 2026-06-08
+
+### Added
+- Paid users can now manage image watermark controls from Settings.
+
+### Changed
+- Free image generations now include clearer OfficeDex watermarks.
+- Bundled the latest OfficeCLI runtime.
+- Removed the custom watermark text setting to keep watermark behavior predictable.
+
+### Fixed
+- Watermark opt-out now follows explicit paid-user status consistently.
+
 ## [0.5.19] - 2026-06-05
 
 ### Fixed
