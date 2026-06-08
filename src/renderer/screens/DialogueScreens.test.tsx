@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { message as antdMessage } from "antd";
 import type { DesktopAPI, DesktopTask, GenerateInput } from "../../shared/types";
@@ -72,11 +72,13 @@ let issuePreviewTokenSpy: ReturnType<typeof vi.fn>;
 let readArtifactFileSpy: ReturnType<typeof vi.fn>;
 let revokePreviewTokenSpy: ReturnType<typeof vi.fn>;
 let copyImageToClipboardSpy: ReturnType<typeof vi.fn>;
+let savePastedImageSpy: ReturnType<typeof vi.fn>;
 let writeTextSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   resizeObserverRecords = [];
   installDomStubs();
   respondSpy = vi.fn(async () => undefined);
@@ -88,6 +90,7 @@ beforeEach(() => {
   readArtifactFileSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]) }));
   revokePreviewTokenSpy = vi.fn(async () => undefined);
   copyImageToClipboardSpy = vi.fn(async () => undefined);
+  savePastedImageSpy = vi.fn(async (_data: Uint8Array, ext: string) => `/tmp/dropped-template-reference.${ext}`);
   writeTextSpy = vi.fn(async () => undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -103,6 +106,7 @@ beforeEach(() => {
     readArtifactFile: officecli.readArtifactFile,
     revokePreviewToken: officecli.revokePreviewToken,
     copyImageToClipboard: officecli.copyImageToClipboard,
+    savePastedImage: officecli.savePastedImage,
   };
   officecli.respond = respondSpy as unknown as DesktopAPI["respond"];
   officecli.cancel = cancelSpy as unknown as DesktopAPI["cancel"];
@@ -113,6 +117,7 @@ beforeEach(() => {
   officecli.readArtifactFile = readArtifactFileSpy as unknown as DesktopAPI["readArtifactFile"];
   officecli.revokePreviewToken = revokePreviewTokenSpy as unknown as DesktopAPI["revokePreviewToken"];
   officecli.copyImageToClipboard = copyImageToClipboardSpy as unknown as DesktopAPI["copyImageToClipboard"];
+  officecli.savePastedImage = savePastedImageSpy as unknown as DesktopAPI["savePastedImage"];
 });
 
 afterEach(() => {
@@ -148,6 +153,23 @@ function makeCompletedImageTask(overrides: Partial<DesktopTask> = {}): DesktopTa
       filePath: "/tmp/banner.png",
       fileName: "banner.png",
       documentType: "img",
+    },
+    ...overrides,
+  };
+}
+
+function makeCompletedGIFTask(overrides: Partial<DesktopTask> = {}): DesktopTask {
+  return {
+    id: "task-gif",
+    conversationId: "task-gif",
+    status: "completed",
+    events: [{ task_id: "task-gif", type: "task.completed", payload: { message: "done" } }],
+    userInput: { prompt: "Make a reaction GIF", fps: 16 },
+    artifact: {
+      taskId: "task-gif",
+      filePath: "/tmp/reaction.gif",
+      fileName: "reaction.gif",
+      documentType: "gif",
     },
     ...overrides,
   };
@@ -297,6 +319,24 @@ describe("DialogueScreen state machine", () => {
     expect(screen.getByRole("button", { name: /show in folder/i })).toBeTruthy();
   });
 
+  it("shows paid users that image watermarks can be disabled in Settings", () => {
+    const task = makeCompletedImageTask({
+      imageWatermark: { applied: true, paidEntitlement: true, canDisable: true },
+    });
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    expect(screen.getByText(/You're a paid user/i)).toBeTruthy();
+    expect(screen.getByText(/turn off the image watermark in Settings/i)).toBeTruthy();
+  });
+
+  it("shows unpaid users that buying any credits unlocks watermark control", () => {
+    const task = makeCompletedImageTask({
+      imageWatermark: { applied: true, paidEntitlement: false, canDisable: false },
+    });
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    expect(screen.getByText(/This image includes an OfficeDex watermark/i)).toBeTruthy();
+    expect(screen.getByText(/Buy any amount of credits/i)).toBeTruthy();
+  });
+
   it("keeps more actions directly beside Show in folder on completed image cards", () => {
     const task = makeCompletedImageTask({
       events: [{ task_id: "task-img", type: "task.completed", request_id: "req-img-1", payload: { message: "done" } }],
@@ -309,6 +349,30 @@ describe("DialogueScreen state machine", () => {
 
     expect(fileActions).toBeTruthy();
     expect(fileActions?.contains(moreActions)).toBe(true);
+  });
+
+  it("renders completed image actions in a compact single-row toolbar", () => {
+    const task = makeCompletedImageTask({
+      events: [{ task_id: "task-img", type: "task.completed", request_id: "req-img-1", payload: { message: "done" } }],
+    });
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const continueEditing = screen.getByRole("button", { name: /continue editing/i });
+    const actions = continueEditing.closest(".result-image-actions");
+
+    expect(actions).toBeTruthy();
+    expect(actions?.classList.contains("result-image-actions-single-row")).toBe(true);
+    const buttons = within(actions as HTMLElement).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label") || button.textContent?.trim())).toEqual([
+      "Open",
+      "Continue editing",
+      "Show in folder",
+      "More actions",
+    ]);
+    const openButton = within(actions as HTMLElement).getByRole("button", { name: /^open$/i });
+    expect(openButton.classList.contains("ant-btn-primary")).toBe(false);
+    expect(within(actions as HTMLElement).getByRole("button", { name: /show in folder/i })).toBeTruthy();
+    expect(within(actions as HTMLElement).getByRole("button", { name: /more actions/i })).toBeTruthy();
   });
 
   it("submits a completed image task and private template for public review", async () => {
@@ -446,6 +510,69 @@ describe("DialogueScreen state machine", () => {
     expect(submitted).not.toHaveProperty("promptTemplateId");
   });
 
+  it("keeps dropped reference images when submitting an image template", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt: replace PRODUCT", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },
+    ]);
+    const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText("Poster")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Poster/i }));
+    expect(screen.getByRole("button", { name: /Attach reference images/i })).toBeTruthy();
+    await waitFor(() => expect((screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement).value).toBe("Template prompt: replace PRODUCT"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const dropTarget = document.querySelector(".fluid-new-task") as HTMLElement;
+    const form = document.querySelector(".fluid-command-bar") as HTMLFormElement;
+    const droppedFile = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "reference.png", { type: "image/png" });
+    fireDropWithFile(dropTarget, droppedFile);
+
+    await waitFor(() => expect(savePastedImageSpy).toHaveBeenCalledWith(expect.any(Uint8Array), "png"));
+
+    const textarea = screen.getByPlaceholderText(/Enter what you want to generate/i);
+    fireEvent.change(textarea, { target: { value: "A red bicycle using the reference image" } });
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      documentType: "img",
+      prompt: "A red bicycle using the reference image",
+      referenceImages: ["/tmp/dropped-template-reference.png"],
+    }));
+  });
+
+  it("prepends enabled local image templates before platform templates", async () => {
+    localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+      version: 1,
+      templates: [
+        { slug: "local-admission", title: "Local Admission", description: "Stored locally", promptPreset: "Local prompt", enabled: true },
+        { slug: "disabled-local", title: "Disabled Local", description: "", promptPreset: "Disabled prompt", enabled: false },
+      ],
+    }));
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Platform prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
+    ]);
+
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    const localTitle = await screen.findByText("Local Admission");
+    const platformTitle = await screen.findByText("Poster");
+    expect(Boolean(localTitle.compareDocumentPosition(platformTitle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.getByText("Local")).toBeTruthy();
+    expect(screen.queryByText("Disabled Local")).toBeNull();
+  });
+
+  it("keeps local image-template management out of the picker", async () => {
+    listImageTemplatesSpy.mockResolvedValue([]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText(/No image templates are configured yet/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Import JSON/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Export JSON/i })).toBeNull();
+    expect(document.querySelector(".image-template-file-input")).toBeNull();
+  });
+
   it("submits the selected image ratio for new image generation only", async () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
     render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast", imageRatio: "square" }} />);
@@ -477,6 +604,28 @@ describe("DialogueScreen state machine", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ documentType: "pptx", prompt: "Build a deck" }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
+  });
+
+  it("submits fps for new GIF generation and omits imageRatio", async () => {
+    const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "gif", topic: "", prompt: "", mode: "fast", fps: 16 }} />);
+
+    expect(screen.getByText("GIF FPS")).toBeTruthy();
+    expect(screen.queryByText("Image ratio")).toBeNull();
+    const fpsInput = screen.getByRole("spinbutton", { name: /GIF FPS/i });
+    fireEvent.change(fpsInput, { target: { value: "12" } });
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
+      target: { value: "一个女生先眨眼，然后说话，最后笑一下。" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      documentType: "gif",
+      prompt: "一个女生先眨眼，然后说话，最后笑一下。",
+      fps: 12,
+    }));
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
   });
 
@@ -571,6 +720,25 @@ describe("DialogueScreen state machine", () => {
     expect(screen.getByText("My template")).toBeTruthy();
   });
 });
+
+function fireDropWithFile(target: HTMLElement, file: File) {
+  fireEvent.dragOver(target, {
+    dataTransfer: {
+      files: [file],
+      items: [],
+      types: ["Files"],
+      dropEffect: "copy",
+    },
+  });
+  fireEvent.drop(target, {
+    dataTransfer: {
+      files: [file],
+      items: [],
+      types: ["Files"],
+      dropEffect: "copy",
+    },
+  });
+}
 
 const SLOTTED_TEMPLATE = {
   id: 8,
@@ -952,6 +1120,24 @@ describe("Bottom continuation composer — acceptance criteria", () => {
 
     expect(onContinueGeneration).toHaveBeenCalledTimes(1);
     expect(onContinueGeneration).toHaveBeenCalledWith("img", "Add a sunset", undefined, "portrait");
+  });
+
+  it("continues GIF generation with fps and no imageRatio", () => {
+    const onContinueGeneration = vi.fn();
+    const task = makeCompletedGIFTask();
+    render(<DialogueScreen {...baseProps({ onContinueGeneration })} tasks={[task]} />);
+
+    expect(screen.getByText("GIF FPS")).toBeTruthy();
+    expect(screen.queryByText("Image ratio")).toBeNull();
+    const fpsInput = screen.getByRole("spinbutton", { name: /GIF FPS/i });
+    fireEvent.change(fpsInput, { target: { value: "12" } });
+    const textarea = screen.getByPlaceholderText(/describe what you want to generate/i);
+    fireEvent.change(textarea, { target: { value: "Make the wink slower" } });
+    const submitBtn = document.querySelector(".composer-row .ant-btn-primary") as HTMLButtonElement;
+    fireEvent.click(submitBtn);
+
+    expect(onContinueGeneration).toHaveBeenCalledTimes(1);
+    expect(onContinueGeneration).toHaveBeenCalledWith("gif", "Make the wink slower", undefined, undefined, 12);
   });
 
   it("T6: Enter submits, Shift+Enter does not", () => {

@@ -4,7 +4,7 @@
  *   - src/renderer/generated/wailsjs/go/models.ts (Wails auto-generated)
  * Adding/removing fields requires updating all three.
  */
-export type DocumentType = "pptx" | "docx" | "xlsx" | "report" | "img";
+export type DocumentType = "pptx" | "docx" | "xlsx" | "report" | "img" | "gif";
 export type ImageRatio = "square" | "landscape" | "portrait";
 
 export type AttachmentSlot = "sourceWorkbook" | "referenceImages";
@@ -67,9 +67,26 @@ export const DOCUMENT_TYPE_CAPABILITIES: Record<DocumentType, DocumentTypeCapabi
       },
     ],
   },
+  gif: {
+    type: "gif",
+    label: "GIF",
+    icon: "gif",
+    attachments: [
+      {
+        slot: "referenceImages",
+        required: false,
+        multiple: true,
+        maxCount: 6,
+        extensions: ["png", "jpg", "jpeg", "webp", "svg", "bmp"],
+        bridgeArgKey: "reference_images",
+        label: "Reference images",
+        description: "Optional style references blended into the generated GIF sheet.",
+      },
+    ],
+  },
 };
 
-export const DOCUMENT_TYPES: DocumentType[] = ["pptx", "docx", "xlsx", "report", "img"];
+export const DOCUMENT_TYPES: DocumentType[] = ["pptx", "docx", "xlsx", "report", "img", "gif"];
 
 export function getCapability(type: DocumentType): DocumentTypeCapability {
   return DOCUMENT_TYPE_CAPABILITIES[type];
@@ -118,6 +135,8 @@ export interface GenerateInput {
   sourceFile?: string;
   referenceImages?: string[];
   imageRatio?: ImageRatio;
+  fps?: number;
+  imageWatermark?: ImageWatermarkGenerateOptions;
   outputDir?: string;
   publish?: boolean;
   enableImages?: boolean;
@@ -160,6 +179,7 @@ export interface TaskUserInput {
   sourceFile?: string;
   referenceImages?: string[];
   imageRatio?: ImageRatio;
+  fps?: number;
 }
 
 export interface ImagePromptSlot {
@@ -235,9 +255,22 @@ export interface DesktopTask {
   userInput?: TaskUserInput;
   creditCharged?: number | null;
   creditMode?: string;
+  imageWatermark?: ImageWatermarkTaskMetadata;
   lastProgressAt?: number;
   stalledSince?: number;
   runtimeSnapshot?: TaskRuntimeSnapshot;
+}
+
+export interface ImageWatermarkTaskMetadata {
+  applied: boolean;
+  paidEntitlement: boolean;
+  canDisable: boolean;
+}
+
+export interface ImageWatermarkGenerateOptions {
+  apply: boolean;
+  paidEntitlement: boolean;
+  canDisable: boolean;
 }
 
 export interface TaskRuntimeSnapshot {
@@ -266,6 +299,7 @@ export interface CreditStatus {
   mode: WhoAmIMode;
   accessMode: string;
   planName: string;
+  paidEntitlement: boolean;
   hostedCreditBalance: number | null;
   anonymousCreditAvailable: number | null;
   anonymousCreditReserved: number | null;
@@ -313,6 +347,11 @@ export interface ProxySettings {
   url: string;
 }
 
+export interface ImageWatermarkSettings {
+  showWatermark: boolean;
+  preferenceSource: "system" | "user";
+}
+
 export interface ProviderTestInput {
   useProviderOverride?: boolean;
   llmProvider?: LlmProvider | null;
@@ -328,6 +367,7 @@ export interface UserSettings {
   llmProvider: LlmProvider | null;
   onboardingCompletedAt: string | null;
   proxy: ProxySettings | null;
+  imageWatermark: ImageWatermarkSettings;
 }
 
 export interface AppUpdateAsset {

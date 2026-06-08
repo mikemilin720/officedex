@@ -59,6 +59,7 @@ const DEFAULT_BROWSER_SETTINGS: UserSettings = {
   llmProvider: null,
   onboardingCompletedAt: null,
   proxy: { ...defaultProxySettings },
+  imageWatermark: { showWatermark: true, preferenceSource: "system" },
 };
 
 function createBrowserPreviewAPI(): DesktopAPI {
@@ -137,6 +138,7 @@ function createBrowserPreviewAPI(): DesktopAPI {
         ...browserSettings,
         ...patch,
         defaults: { ...browserSettings.defaults, ...(patch.defaults ?? {}) },
+        imageWatermark: { ...browserSettings.imageWatermark, ...(patch.imageWatermark ?? {}) },
       };
       return browserSettings;
     },
@@ -254,6 +256,7 @@ function normaliseCreditStatus(raw: Partial<CreditStatus> | null | undefined): C
     paidKeyTotal: numberOrZero(raw?.paidKeyTotal),
     paidKeyUsed: numberOrZero(raw?.paidKeyUsed),
     paidKeyRemaining: numberOrZero(raw?.paidKeyRemaining),
+    paidEntitlement: raw?.paidEntitlement === true,
     raw: stringOrEmpty(raw?.raw),
   };
 }
@@ -295,6 +298,9 @@ function adaptSettingsPatch(patch: Partial<UserSettings>): settingsNS.Patch {
       out.proxy = patch.proxy;
     }
   }
+  if (patch.imageWatermark !== undefined) {
+    out.imageWatermark = patch.imageWatermark;
+  }
   return out as unknown as settingsNS.Patch;
 }
 
@@ -309,6 +315,10 @@ function normaliseUserSettings(raw: unknown): UserSettings {
     llmProvider: (merged.llmProvider ?? null) as LlmProvider | null,
     onboardingCompletedAt: merged.onboardingCompletedAt ?? null,
     proxy: merged.proxy ?? { ...defaultProxySettings },
+    imageWatermark: {
+      showWatermark: merged.imageWatermark?.showWatermark === true,
+      preferenceSource: merged.imageWatermark?.preferenceSource === "user" ? "user" : "system",
+    },
   };
 }
 

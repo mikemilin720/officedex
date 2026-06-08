@@ -1,9 +1,22 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Modal } from "antd";
+import { Modal, message as antdMessage } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DesktopAPI, UserSettings, WhoAmIResult } from "../../shared/types";
+import type { CreditStatus, DesktopAPI, UserSettings, WhoAmIResult } from "../../shared/types";
 import { officecli } from "../bridge";
 import { NOTIFICATIONS_STORAGE_KEY, readNotificationsEnabled } from "../notifications";
+
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd");
+  return {
+    ...actual,
+    message: {
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      destroy: vi.fn(),
+    },
+  };
+});
 
 const DEFAULT_PROXY = { enabled: false, url: "http://127.0.0.1:7890" };
 
@@ -62,6 +75,12 @@ function installDomStubs() {
         getPropertyValue: () => "",
       }) as unknown as CSSStyleDeclaration,
   );
+  if (!URL.createObjectURL) {
+    URL.createObjectURL = vi.fn(() => "blob:test-json");
+  }
+  if (!URL.revokeObjectURL) {
+    URL.revokeObjectURL = vi.fn();
+  }
 }
 
 function makeSettings(overrides: Partial<UserSettings> = {}): UserSettings {
@@ -78,6 +97,7 @@ function makeSettings(overrides: Partial<UserSettings> = {}): UserSettings {
     llmProvider: overrides.llmProvider ?? null,
     onboardingCompletedAt: overrides.onboardingCompletedAt ?? "2026-05-22T00:00:00Z",
     proxy: overrides.proxy ?? DEFAULT_PROXY,
+    imageWatermark: overrides.imageWatermark ?? { showWatermark: true, preferenceSource: "system" },
   };
 }
 
@@ -87,6 +107,7 @@ let getDefaultWorkspaceDirSpy: ReturnType<typeof vi.fn>;
 let openDirectoryDialogSpy: ReturnType<typeof vi.fn>;
 let testProviderSpy: ReturnType<typeof vi.fn>;
 let whoamiSpy: ReturnType<typeof vi.fn>;
+let getCreditStatusSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 
 async function cleanupAntdPortals() {
@@ -115,6 +136,22 @@ beforeEach(() => {
   openDirectoryDialogSpy = vi.fn(async () => null);
   testProviderSpy = vi.fn(async () => ({ ok: true, httpStatus: 200, latencyMs: 10, url: "official" }));
   whoamiSpy = vi.fn(async (): Promise<WhoAmIResult> => ({ mode: "logged_in", userId: "user-settings" }));
+  getCreditStatusSpy = vi.fn(async (): Promise<CreditStatus> => ({
+    mode: "logged_in",
+    accessMode: "hosted",
+    planName: "Pro",
+    paidEntitlement: true,
+    hostedCreditBalance: 100,
+    anonymousCreditAvailable: null,
+    anonymousCreditReserved: null,
+    anonymousCreditBalance: null,
+    rewardRemaining: 0,
+    paidKeyPrefix: "",
+    paidKeyTotal: 0,
+    paidKeyUsed: 0,
+    paidKeyRemaining: 0,
+    raw: "",
+  }));
   originals = {
     getSettings: officecli.getSettings,
     updateSettings: officecli.updateSettings,
@@ -122,6 +159,7 @@ beforeEach(() => {
     openDirectoryDialog: officecli.openDirectoryDialog,
     testProvider: officecli.testProvider,
     whoami: officecli.whoami,
+    getCreditStatus: officecli.getCreditStatus,
   };
   officecli.getSettings = getSettingsSpy as unknown as DesktopAPI["getSettings"];
   officecli.updateSettings = updateSettingsSpy as unknown as DesktopAPI["updateSettings"];
@@ -129,6 +167,7 @@ beforeEach(() => {
   officecli.openDirectoryDialog = openDirectoryDialogSpy as unknown as DesktopAPI["openDirectoryDialog"];
   officecli.testProvider = testProviderSpy as unknown as DesktopAPI["testProvider"];
   officecli.whoami = whoamiSpy as unknown as DesktopAPI["whoami"];
+  officecli.getCreditStatus = getCreditStatusSpy as unknown as DesktopAPI["getCreditStatus"];
 });
 
 afterEach(async () => {
@@ -209,7 +248,7 @@ describe("SettingsScreen", () => {
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
     await screen.findByText("Desktop notifications");
 
-    const desktopNotificationsSwitch = screen.getAllByRole("switch")[1];
+    const desktopNotificationsSwitch = screen.getByRole("switch", { name: /desktop notifications/i });
     fireEvent.click(desktopNotificationsSwitch);
 
     expect(readNotificationsEnabled()).toBe(false);
@@ -466,6 +505,198 @@ describe("SettingsScreen", () => {
     expect(
       updateSettingsSpy.mock.calls.every((args) => (args[0] as Partial<UserSettings>).proxy === undefined),
     ).toBe(true);
+  });
+
+  it("disables watermark opt-out for users without paid entitlement", async () => {
+    getCreditStatusSpy.mockResolvedValueOnce({
+      mode: "logged_in",
+      accessMode: "hosted",
+      planName: "Free",
+      paidEntitlement: false,
+      hostedCreditBalance: null,
+      anonymousCreditAvailable: null,
+      anonymousCreditReserved: null,
+      anonymousCreditBalance: null,
+      rewardRemaining: 0,
+      paidKeyPrefix: "",
+      paidKeyTotal: 0,
+      paidKeyUsed: 0,
+      paidKeyRemaining: 0,
+      raw: "",
+    } satisfies CreditStatus);
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+
+    expect(await screen.findByText(/free images include the officedex watermark/i)).toBeTruthy();
+    expect(screen.getByRole("switch", { name: /show watermark/i }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("does not let hosted credit accounts disable watermark when entitlement flag is false", async () => {
+    currentSettings = makeSettings({ imageWatermark: { showWatermark: true, preferenceSource: "user" } });
+    getCreditStatusSpy.mockResolvedValueOnce({
+      mode: "logged_in",
+      accessMode: "hosted",
+      planName: "",
+      paidEntitlement: false,
+      hostedCreditBalance: 1097930,
+      anonymousCreditAvailable: null,
+      anonymousCreditReserved: null,
+      anonymousCreditBalance: null,
+      rewardRemaining: 0,
+      paidKeyPrefix: "",
+      paidKeyTotal: 0,
+      paidKeyUsed: 0,
+      paidKeyRemaining: 0,
+      raw: "",
+    } satisfies CreditStatus);
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+
+    const toggle = await screen.findByRole("switch", { name: /show watermark/i });
+    expect(toggle.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(toggle);
+
+    expect(
+      updateSettingsSpy.mock.calls.every((args) => (args[0] as Partial<UserSettings>).imageWatermark === undefined),
+    ).toBe(true);
+  });
+
+  it("lets paid users opt into watermark and saves the setting", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+
+    const toggle = await screen.findByRole("switch", { name: /show watermark/i });
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({
+        imageWatermark: { showWatermark: true, preferenceSource: "user" },
+      }));
+    });
+  });
+
+  it("lets paid users turn off watermark and removes custom text input", async () => {
+    currentSettings = makeSettings({ imageWatermark: { showWatermark: true, preferenceSource: "user" } });
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+
+    const toggle = await screen.findByRole("switch", { name: /show watermark/i });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({
+        imageWatermark: { showWatermark: false, preferenceSource: "user" },
+      }));
+    });
+    expect(screen.queryByLabelText(/watermark text/i)).toBeNull();
+  });
+
+  it("imports local image-template JSON from a selected file in Settings", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByText("0 local templates saved")).toBeTruthy();
+    const file = new File([
+      JSON.stringify({
+        version: 1,
+        templates: [
+          { slug: "local-admission", title: "Local Admission", description: "Stored locally", promptPreset: "Local prompt", enabled: true },
+        ],
+      }),
+    ], "templates.json", { type: "application/json" });
+    const input = document.querySelector(".local-image-template-file-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText("1 local template saved")).toBeTruthy());
+    expect(JSON.parse(localStorage.getItem("officedex:local-image-templates") || "{}").templates[0].title).toBe("Local Admission");
+    expect(antdMessage.success).toHaveBeenCalledWith("Imported 1 local templates");
+  });
+
+  it("imports local image-template JSON from the paste modal in Settings", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Paste JSON/i }));
+    const textarea = await screen.findByPlaceholderText(/Paste local image-template JSON/i);
+    fireEvent.change(textarea, {
+      target: {
+        value: JSON.stringify([
+          { slug: "pasted-admission", title: "Pasted Admission", description: "Pasted locally", promptPreset: "Pasted prompt", enabled: true },
+        ]),
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Import$/i }));
+
+    await waitFor(() => expect(screen.getByText("1 local template saved")).toBeTruthy());
+    expect(JSON.parse(localStorage.getItem("officedex:local-image-templates") || "{}").templates[0].title).toBe("Pasted Admission");
+    expect(antdMessage.success).toHaveBeenCalledWith("Imported 1 local templates");
+  });
+
+  it("downloads local image-template JSON from Settings", async () => {
+    localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+      version: 1,
+      templates: [
+        { slug: "local-admission", title: "Local Admission", description: "Stored locally", promptPreset: "Local prompt", enabled: true },
+      ],
+    }));
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:local-templates");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Download JSON/i }));
+
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:local-templates");
+    expect(antdMessage.success).toHaveBeenCalledWith("Exported 1 local templates");
+  });
+
+  it("copies local image-template JSON to the clipboard from Settings", async () => {
+    const writeTextSpy = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: writeTextSpy },
+    });
+    localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+      version: 1,
+      templates: [
+        { slug: "local-admission", title: "Local Admission", description: "Stored locally", promptPreset: "Local prompt", enabled: true },
+      ],
+    }));
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Copy JSON/i }));
+
+    await waitFor(() => expect(writeTextSpy).toHaveBeenCalledTimes(1));
+    expect(writeTextSpy.mock.calls[0][0]).toContain("\"title\": \"Local Admission\"");
+    expect(antdMessage.success).toHaveBeenCalledWith("Copied 1 local templates");
+  });
+
+  it("keeps existing local image templates when pasted JSON is invalid", async () => {
+    localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+      version: 1,
+      templates: [
+        { slug: "existing", title: "Existing", description: "Existing local", promptPreset: "Existing prompt", enabled: true },
+      ],
+    }));
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Paste JSON/i }));
+    fireEvent.change(await screen.findByPlaceholderText(/Paste local image-template JSON/i), { target: { value: "{not-json" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Import$/i }));
+
+    expect(JSON.parse(localStorage.getItem("officedex:local-image-templates") || "{}").templates[0].title).toBe("Existing");
+    expect(antdMessage.error).toHaveBeenCalledWith(expect.stringMatching(/^Template import failed:/));
   });
 });
 

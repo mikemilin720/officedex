@@ -8,6 +8,7 @@ export const defaultGenerateInput: Partial<GenerateInput> = {
   mode: "fast",
   enableImages: true,
   imageRatio: "square",
+  fps: 16,
 };
 
 export const defaultProxySettings: ProxySettings = {

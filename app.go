@@ -288,6 +288,11 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("load settings: %w", err)
 	}
+	if input.DocumentType == types.DocIMG {
+		var watermark *types.ImageWatermarkGenerateOptions
+		settings, watermark = a.refreshImageWatermarkSettingsForGenerate(settings)
+		input.ImageWatermark = watermark
+	}
 	if err := validateCustomProvider(settings); err != nil {
 		return GenerateResult{}, err
 	}
@@ -2141,6 +2146,10 @@ func (a *App) ensureBridge() (*bridge.Client, error) {
 				}
 			}
 		}
+		completedArtifact := (*types.Artifact)(nil)
+		if event.Type == "task.completed" {
+			completedArtifact = artifactFromCompletedEvent(event)
+		}
 		if a.localStore != nil {
 			_ = a.localStore.RecordEvent(event)
 		}
@@ -2156,12 +2165,12 @@ func (a *App) ensureBridge() (*bridge.Client, error) {
 			}
 		}
 		if event.Type == "task.completed" {
-			if artifact := artifactFromCompletedEvent(event); artifact != nil {
-				if err := a.previewReg.AllowArtifact(*artifact); err != nil {
+			if completedArtifact != nil {
+				if err := a.previewReg.AllowArtifact(*completedArtifact); err != nil {
 					wailsruntime.LogWarningf(ctx, "preview register: %v", err)
 				}
 				if a.localStore != nil {
-					_ = a.localStore.RecordArtifact(*artifact)
+					_ = a.localStore.RecordArtifact(*completedArtifact)
 				}
 			}
 		}
@@ -2628,6 +2637,71 @@ func artifactFromCompletedEvent(event types.BridgeEvent) *types.Artifact {
 	}
 	artifact.TaskID = event.TaskID
 	return artifact
+}
+
+func (a *App) refreshImageWatermarkSettingsForGenerate(current types.UserSettings) (types.UserSettings, *types.ImageWatermarkGenerateOptions) {
+	credit, creditErr := a.GetCreditStatus()
+	next, changed := syncImageWatermarkSettingsForCredit(current, credit, creditErr)
+	if !changed {
+		return next, imageWatermarkGenerateOptions(next, credit, creditErr)
+	}
+	updated, err := a.settingsStore.Update(settings.Patch{ImageWatermark: &next.ImageWatermark})
+	if err != nil {
+		if a.ctx != nil {
+			wailsruntime.LogWarningf(a.ctx, "image watermark sync settings: %v", err)
+		}
+		return next, imageWatermarkGenerateOptions(next, credit, creditErr)
+	}
+	return updated, imageWatermarkGenerateOptions(updated, credit, creditErr)
+}
+
+func syncImageWatermarkSettingsForCredit(s types.UserSettings, credit types.CreditStatus, creditErr error) (types.UserSettings, bool) {
+	next := s
+	source := strings.ToLower(strings.TrimSpace(next.ImageWatermark.PreferenceSource))
+	if source != "user" {
+		source = "system"
+	}
+	next.ImageWatermark.PreferenceSource = source
+
+	if source == "user" {
+		return next, next.ImageWatermark.PreferenceSource != s.ImageWatermark.PreferenceSource
+	}
+
+	wantShow := true
+	if hasImageWatermarkEntitlement(credit, creditErr) {
+		wantShow = false
+	}
+	if next.ImageWatermark.ShowWatermark != wantShow {
+		next.ImageWatermark.ShowWatermark = wantShow
+		return next, true
+	}
+	return next, next.ImageWatermark.PreferenceSource != s.ImageWatermark.PreferenceSource
+}
+
+func imageWatermarkGenerateOptions(s types.UserSettings, credit types.CreditStatus, creditErr error) *types.ImageWatermarkGenerateOptions {
+	paid := hasImageWatermarkEntitlement(credit, creditErr)
+	return &types.ImageWatermarkGenerateOptions{
+		Apply:           shouldRequestImageWatermark(s, credit, creditErr),
+		PaidEntitlement: paid,
+		CanDisable:      paid,
+	}
+}
+
+func shouldRequestImageWatermark(s types.UserSettings, credit types.CreditStatus, creditErr error) bool {
+	if s.ImageWatermark.ShowWatermark {
+		return true
+	}
+	if creditErr != nil {
+		return true
+	}
+	return !hasImageWatermarkEntitlement(credit, creditErr)
+}
+
+func hasImageWatermarkEntitlement(credit types.CreditStatus, creditErr error) bool {
+	if creditErr != nil {
+		return false
+	}
+	return credit.PaidEntitlement
 }
 
 // resolveUserDataDir mirrors what Electron's app.getPath("userData") returns.

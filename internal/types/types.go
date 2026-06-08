@@ -8,9 +8,10 @@ const (
 	DocXLSX   DocumentType = "xlsx"
 	DocReport DocumentType = "report"
 	DocIMG    DocumentType = "img"
+	DocGIF    DocumentType = "gif"
 )
 
-var DocumentTypes = []DocumentType{DocPPTX, DocDOCX, DocXLSX, DocReport, DocIMG}
+var DocumentTypes = []DocumentType{DocPPTX, DocDOCX, DocXLSX, DocReport, DocIMG, DocGIF}
 
 func IsValidDocumentType(value string) bool {
 	for _, t := range DocumentTypes {
@@ -87,6 +88,21 @@ var DocumentTypeCapabilities = map[DocumentType]DocumentTypeCapability{
 			Description:  "Optional style references blended into the generated image.",
 		}},
 	},
+	DocGIF: {
+		Type:  DocGIF,
+		Label: "GIF",
+		Icon:  "gif",
+		Attachments: []AttachmentSpec{{
+			Slot:         SlotReferenceImages,
+			Required:     false,
+			Multiple:     true,
+			MaxCount:     6,
+			Extensions:   []string{"png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"},
+			BridgeArgKey: BridgeArgReferenceImages,
+			Label:        "Reference images",
+			Description:  "Optional style references blended into the generated GIF sheet.",
+		}},
+	},
 }
 
 func GetCapability(t DocumentType) (DocumentTypeCapability, bool) {
@@ -134,20 +150,22 @@ type Artifact struct {
 }
 
 type GenerateInput struct {
-	DocumentType     DocumentType `json:"documentType"`
-	Topic            string       `json:"topic"`
-	Prompt           string       `json:"prompt"`
-	Mode             string       `json:"mode,omitempty"`
-	RuntimeMode      string       `json:"runtimeMode,omitempty"`
-	PromptTemplateID string       `json:"promptTemplateId,omitempty"`
-	SourceFile       string       `json:"sourceFile,omitempty"`
-	ReferenceImages  []string     `json:"referenceImages,omitempty"`
-	ImageRatio       string       `json:"imageRatio,omitempty"`
-	OutputDir        string       `json:"outputDir,omitempty"`
-	Publish          bool         `json:"publish,omitempty"`
-	EnableImages     *bool        `json:"enableImages,omitempty"`
-	ImageQuality     string       `json:"imageQuality,omitempty"`
-	LocalPreview     bool         `json:"localPreview,omitempty"`
+	DocumentType     DocumentType                   `json:"documentType"`
+	Topic            string                         `json:"topic"`
+	Prompt           string                         `json:"prompt"`
+	Mode             string                         `json:"mode,omitempty"`
+	RuntimeMode      string                         `json:"runtimeMode,omitempty"`
+	PromptTemplateID string                         `json:"promptTemplateId,omitempty"`
+	SourceFile       string                         `json:"sourceFile,omitempty"`
+	ReferenceImages  []string                       `json:"referenceImages,omitempty"`
+	ImageRatio       string                         `json:"imageRatio,omitempty"`
+	FPS              int                            `json:"fps,omitempty"`
+	ImageWatermark   *ImageWatermarkGenerateOptions `json:"imageWatermark,omitempty"`
+	OutputDir        string                         `json:"outputDir,omitempty"`
+	Publish          bool                           `json:"publish,omitempty"`
+	EnableImages     *bool                          `json:"enableImages,omitempty"`
+	ImageQuality     string                         `json:"imageQuality,omitempty"`
+	LocalPreview     bool                           `json:"localPreview,omitempty"`
 }
 
 // ModifyInput is the renderer payload for the office.modify ("继续修改") flow:
@@ -310,6 +328,7 @@ type CreditStatus struct {
 	Mode                     WhoAmIMode `json:"mode"`
 	AccessMode               string     `json:"accessMode"`
 	PlanName                 string     `json:"planName"`
+	PaidEntitlement          bool       `json:"paidEntitlement"`
 	HostedCreditBalance      *int       `json:"hostedCreditBalance"`
 	AnonymousCreditAvailable *int       `json:"anonymousCreditAvailable"`
 	AnonymousCreditReserved  *int       `json:"anonymousCreditReserved"`
@@ -403,6 +422,23 @@ type ProxySettings struct {
 	URL     string `json:"url"`
 }
 
+type ImageWatermarkSettings struct {
+	ShowWatermark    bool   `json:"showWatermark"`
+	PreferenceSource string `json:"preferenceSource,omitempty"`
+}
+
+type ImageWatermarkTaskMetadata struct {
+	Applied         bool `json:"applied"`
+	PaidEntitlement bool `json:"paidEntitlement"`
+	CanDisable      bool `json:"canDisable"`
+}
+
+type ImageWatermarkGenerateOptions struct {
+	Apply           bool `json:"apply"`
+	PaidEntitlement bool `json:"paidEntitlement"`
+	CanDisable      bool `json:"canDisable"`
+}
+
 // ProviderTestInput optionally overrides provider/proxy settings for a single
 // provider test without mutating persisted settings or the app-wide proxy pool.
 type ProviderTestInput struct {
@@ -414,15 +450,16 @@ type ProviderTestInput struct {
 }
 
 type UserSettings struct {
-	Version               int              `json:"version"`
-	Defaults              GenerateDefaults `json:"defaults"`
-	OutputDir             *string          `json:"outputDir"`
-	BridgeBinaryPath      *string          `json:"bridgeBinaryPath"`
-	LlmProvider           *LlmProvider     `json:"llmProvider"`
-	OnboardingCompletedAt *string          `json:"onboardingCompletedAt"`
-	SupportReportEndpoint *string          `json:"supportReportEndpoint"`
-	SupportReportToken    *string          `json:"supportReportToken"`
-	Proxy                 *ProxySettings   `json:"proxy,omitempty"`
+	Version               int                    `json:"version"`
+	Defaults              GenerateDefaults       `json:"defaults"`
+	OutputDir             *string                `json:"outputDir"`
+	BridgeBinaryPath      *string                `json:"bridgeBinaryPath"`
+	LlmProvider           *LlmProvider           `json:"llmProvider"`
+	OnboardingCompletedAt *string                `json:"onboardingCompletedAt"`
+	SupportReportEndpoint *string                `json:"supportReportEndpoint"`
+	SupportReportToken    *string                `json:"supportReportToken"`
+	Proxy                 *ProxySettings         `json:"proxy,omitempty"`
+	ImageWatermark        ImageWatermarkSettings `json:"imageWatermark"`
 }
 
 // RuntimeStatus mirrors the renderer-facing status object emitted by the

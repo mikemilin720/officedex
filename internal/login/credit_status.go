@@ -16,6 +16,7 @@ var (
 	paidQuotaLine       = regexp.MustCompile(`(?im)^\s*Paid quota on current key\s*\(([^)]*)\):\s*(\d+)\s*total\s*/\s*(\d+)\s*used\s*/\s*(\d+)\s*remaining\s*$`)
 	currentAccessLine   = regexp.MustCompile(`(?im)^\s*Current access mode:\s*(.+?)\s*$`)
 	currentPlanLine     = regexp.MustCompile(`(?im)^\s*Current plan:\s*(.+?)\s*$`)
+	paidEntitlementLine = regexp.MustCompile(`(?im)^\s*Paid entitlement:\s*(true|false)\s*$`)
 )
 
 // GetCreditStatus spawns `officecli auth status`, waits for exit, and parses
@@ -70,6 +71,9 @@ func ParseCreditStatus(stdout string, exitCode int) types.CreditStatus {
 	}
 	if m := currentPlanLine.FindStringSubmatch(stdout); len(m) == 2 {
 		result.PlanName = strings.TrimSpace(m[1])
+	}
+	if m := paidEntitlementLine.FindStringSubmatch(stdout); len(m) == 2 {
+		result.PaidEntitlement = strings.EqualFold(strings.TrimSpace(m[1]), "true")
 	}
 	return result
 }

@@ -44,6 +44,10 @@ var defaultSettings = types.UserSettings{
 		Enabled: false,
 		URL:     "http://127.0.0.1:7890",
 	},
+	ImageWatermark: types.ImageWatermarkSettings{
+		ShowWatermark:    true,
+		PreferenceSource: "system",
+	},
 }
 
 // Defaults returns a copy of the package-level defaults.
@@ -159,14 +163,15 @@ func (s *Store) warn(msg string, err error) {
 // wire shape camelCase so the Wails-generated TypeScript matches the rest of
 // the renderer-facing types.
 type Patch struct {
-	Defaults              *GenerateDefaultsPatch `json:"defaults,omitempty"`
-	OutputDir             *string                `json:"outputDir,omitempty"`
-	BridgeBinaryPath      *string                `json:"bridgeBinaryPath,omitempty"`
-	LlmProvider           *types.LlmProvider     `json:"llmProvider,omitempty"`
-	OnboardingCompletedAt *string                `json:"onboardingCompletedAt,omitempty"`
-	SupportReportEndpoint *string                `json:"supportReportEndpoint,omitempty"`
-	SupportReportToken    *string                `json:"supportReportToken,omitempty"`
-	Proxy                 *types.ProxySettings   `json:"proxy,omitempty"`
+	Defaults              *GenerateDefaultsPatch        `json:"defaults,omitempty"`
+	OutputDir             *string                       `json:"outputDir,omitempty"`
+	BridgeBinaryPath      *string                       `json:"bridgeBinaryPath,omitempty"`
+	LlmProvider           *types.LlmProvider            `json:"llmProvider,omitempty"`
+	OnboardingCompletedAt *string                       `json:"onboardingCompletedAt,omitempty"`
+	SupportReportEndpoint *string                       `json:"supportReportEndpoint,omitempty"`
+	SupportReportToken    *string                       `json:"supportReportToken,omitempty"`
+	Proxy                 *types.ProxySettings          `json:"proxy,omitempty"`
+	ImageWatermark        *types.ImageWatermarkSettings `json:"imageWatermark,omitempty"`
 	// ClearLlmProvider, when true, removes the stored provider. Ignored when
 	// LlmProvider is non-nil.
 	ClearLlmProvider bool `json:"clearLlmProvider,omitempty"`
@@ -227,21 +232,25 @@ func applyPatch(base types.UserSettings, patch Patch) types.UserSettings {
 		defaults := cloneDefaults()
 		out.Proxy = defaults.Proxy
 	}
+	if patch.ImageWatermark != nil {
+		out.ImageWatermark = *patch.ImageWatermark
+	}
 	return out
 }
 
 // rawSettings mirrors the on-disk JSON with every field optional, so we can
 // distinguish "missing field" from "explicit zero" during sanitize.
 type rawSettings struct {
-	Version               *int                 `json:"version,omitempty"`
-	Defaults              *rawGenerateDefaults `json:"defaults,omitempty"`
-	OutputDir             *string              `json:"outputDir,omitempty"`
-	BridgeBinaryPath      *string              `json:"bridgeBinaryPath,omitempty"`
-	LlmProvider           *rawLlmProvider      `json:"llmProvider,omitempty"`
-	OnboardingCompletedAt *string              `json:"onboardingCompletedAt,omitempty"`
-	SupportReportEndpoint *string              `json:"supportReportEndpoint,omitempty"`
-	SupportReportToken    *string              `json:"supportReportToken,omitempty"`
-	Proxy                 *rawProxySettings    `json:"proxy,omitempty"`
+	Version               *int                       `json:"version,omitempty"`
+	Defaults              *rawGenerateDefaults       `json:"defaults,omitempty"`
+	OutputDir             *string                    `json:"outputDir,omitempty"`
+	BridgeBinaryPath      *string                    `json:"bridgeBinaryPath,omitempty"`
+	LlmProvider           *rawLlmProvider            `json:"llmProvider,omitempty"`
+	OnboardingCompletedAt *string                    `json:"onboardingCompletedAt,omitempty"`
+	SupportReportEndpoint *string                    `json:"supportReportEndpoint,omitempty"`
+	SupportReportToken    *string                    `json:"supportReportToken,omitempty"`
+	Proxy                 *rawProxySettings          `json:"proxy,omitempty"`
+	ImageWatermark        *rawImageWatermarkSettings `json:"imageWatermark,omitempty"`
 }
 
 type rawGenerateDefaults struct {
@@ -261,6 +270,11 @@ type rawLlmProvider struct {
 type rawProxySettings struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 	URL     *string `json:"url,omitempty"`
+}
+
+type rawImageWatermarkSettings struct {
+	ShowWatermark    *bool   `json:"showWatermark,omitempty"`
+	PreferenceSource *string `json:"preferenceSource,omitempty"`
 }
 
 func sanitizeRaw(raw rawSettings) types.UserSettings {
@@ -296,6 +310,9 @@ func sanitizeRaw(raw rawSettings) types.UserSettings {
 	if raw.Proxy != nil {
 		out.Proxy = sanitizeRawProxy(raw.Proxy)
 	}
+	if raw.ImageWatermark != nil {
+		out.ImageWatermark = sanitizeRawImageWatermark(raw.ImageWatermark)
+	}
 	return out
 }
 
@@ -323,6 +340,7 @@ func sanitizeCanonical(s types.UserSettings) types.UserSettings {
 	out.SupportReportEndpoint = trimNullable(s.SupportReportEndpoint)
 	out.SupportReportToken = trimNullable(s.SupportReportToken)
 	out.Proxy = sanitizeCanonicalProxy(s.Proxy)
+	out.ImageWatermark = sanitizeCanonicalImageWatermark(s.ImageWatermark)
 	return out
 }
 
@@ -455,4 +473,34 @@ func sanitizeCanonicalProxy(p *types.ProxySettings) *types.ProxySettings {
 		return nil
 	}
 	return &types.ProxySettings{Enabled: p.Enabled, URL: url}
+}
+
+func sanitizeRawImageWatermark(w *rawImageWatermarkSettings) types.ImageWatermarkSettings {
+	if w == nil {
+		return cloneDefaults().ImageWatermark
+	}
+	out := cloneDefaults().ImageWatermark
+	if w.ShowWatermark != nil {
+		out.ShowWatermark = *w.ShowWatermark
+	}
+	if w.PreferenceSource != nil {
+		out.PreferenceSource = sanitizeImageWatermarkPreferenceSource(*w.PreferenceSource)
+	}
+	return out
+}
+
+func sanitizeCanonicalImageWatermark(w types.ImageWatermarkSettings) types.ImageWatermarkSettings {
+	return types.ImageWatermarkSettings{
+		ShowWatermark:    w.ShowWatermark,
+		PreferenceSource: sanitizeImageWatermarkPreferenceSource(w.PreferenceSource),
+	}
+}
+
+func sanitizeImageWatermarkPreferenceSource(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "user":
+		return "user"
+	default:
+		return "system"
+	}
 }

@@ -33,6 +33,7 @@ type PendingGenerate = {
     sourceFile?: string;
     referenceImages?: string[];
     imageRatio?: GenerateInput["imageRatio"];
+    fps?: number;
   };
   parentTaskId?: string;
 };
@@ -281,6 +282,7 @@ export function App() {
         sourceFile: values.sourceFile,
         referenceImages: values.referenceImages,
         imageRatio: values.imageRatio,
+        fps: values.fps,
       },
     };
     const pendingInput = pendingGenerateRef.current.input;
@@ -338,6 +340,9 @@ export function App() {
     if (documentType === "img") {
       values.referenceImages = input.referenceImages;
       values.imageRatio = input.imageRatio;
+    } else if (documentType === "gif") {
+      values.referenceImages = input.referenceImages;
+      values.fps = input.fps;
     }
     void submit(values);
   }
@@ -354,7 +359,7 @@ export function App() {
     setActiveNav("dialogue");
   }, []);
 
-  const continueGeneration = useCallback(async (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: GenerateInput["imageRatio"]) => {
+  const continueGeneration = useCallback(async (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: GenerateInput["imageRatio"], fps?: number) => {
     if (forceUpdate) {
       recordError("Update required before continuing", "setup");
       return;
@@ -369,6 +374,7 @@ export function App() {
         prompt,
         referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
         imageRatio,
+        fps,
       },
       parentTaskId,
     };
@@ -396,6 +402,7 @@ export function App() {
         imageQuality: persistedSettings.defaults.imageQuality,
         referenceImages,
         imageRatio,
+        fps,
       });
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
@@ -629,6 +636,7 @@ function createNewGenerationDraft(input: Partial<GenerateInput> = {}): NewGenera
     sourceFile: input.sourceFile,
     referenceImages: input.referenceImages,
     imageRatio: input.imageRatio ?? defaultGenerateInput.imageRatio,
+    fps: input.fps ?? defaultGenerateInput.fps,
   };
 }
 
@@ -642,7 +650,7 @@ function documentTypeFromTask(task: DesktopTask): GenerateInput["documentType"] 
 }
 
 function isGenerateDocumentType(value: unknown): value is GenerateInput["documentType"] {
-  return value === "pptx" || value === "docx" || value === "xlsx" || value === "report" || value === "img";
+  return value === "pptx" || value === "docx" || value === "xlsx" || value === "report" || value === "img" || value === "gif";
 }
 
 function errorMessage(error: unknown): string {

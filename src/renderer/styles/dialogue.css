@@ -178,6 +178,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .image-template-picker-head button {
@@ -308,6 +310,11 @@
 .image-template-scope-private {
   border-color: color-mix(in srgb, var(--n-primary) 38%, var(--n-hairline));
   color: var(--n-primary);
+}
+
+.image-template-scope-local {
+  border-color: color-mix(in srgb, var(--n-success) 38%, var(--n-hairline));
+  color: var(--n-success);
 }
 
 .image-template-card span {
@@ -1075,13 +1082,54 @@
   margin-top: 4px;
 }
 
+.image-watermark-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--n-hairline);
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  color: var(--n-ink);
+  padding: 9px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.image-watermark-notice .material-symbols-rounded {
+  flex: 0 0 auto;
+  color: var(--n-slate);
+  font-size: 16px;
+  margin-top: 1px;
+}
+
+.image-watermark-notice.free {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.image-watermark-notice.free .material-symbols-rounded {
+  color: #c2410c;
+}
+
 .result-image-actions {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   max-width: 100%;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+}
+
+.result-image-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.result-image-actions-single-row {
+  flex-wrap: nowrap;
 }
 
 .result-image-actions .ant-btn {
@@ -1089,17 +1137,39 @@
   max-width: 100%;
 }
 
+.result-image-actions-single-row > .ant-btn,
+.result-image-actions-single-row .result-image-file-actions > .ant-btn,
+.result-image-actions-single-row .ant-dropdown-trigger {
+  height: 36px;
+  padding-inline: 12px;
+  font-size: 14px;
+}
+
+.result-image-actions-single-row > .ant-btn:first-child {
+  max-width: 176px;
+}
+
 .result-image-file-actions {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
   white-space: nowrap;
 }
 
+.result-image-actions-single-row .result-image-file-actions > .ant-btn:first-child {
+  flex: 0 1 auto;
+  max-width: 168px;
+}
+
 .result-image-file-actions .ant-dropdown-trigger {
   flex: 0 0 auto;
+}
+
+.result-image-actions-single-row .ant-dropdown-trigger {
+  width: 36px;
+  padding-inline: 0;
 }
 
 .result-image-actions .ant-btn > span:not(.ant-btn-icon) {

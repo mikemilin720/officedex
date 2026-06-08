@@ -20,6 +20,7 @@ const settings: UserSettings = {
   llmProvider: null,
   onboardingCompletedAt: "2026-05-22T00:00:00.000Z",
   proxy: null,
+  imageWatermark: { showWatermark: true, preferenceSource: "system" },
 };
 
 vi.mock("./notifications", () => ({

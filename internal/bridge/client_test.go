@@ -552,6 +552,214 @@ func TestInvokeGenerateDoesNotSendImageRatioForNonIMG(t *testing.T) {
 	}
 }
 
+func TestInvokeGenerateSendsImageWatermarkForIMG(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType: types.DocIMG,
+			Topic:        "Poster",
+			Prompt:       "red bicycle",
+			ImageWatermark: &types.ImageWatermarkGenerateOptions{
+				Apply:           true,
+				PaidEntitlement: false,
+				CanDisable:      false,
+			},
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	if second.Method != "capabilities/get" {
+		t.Fatalf("second method = %q, want capabilities/get", second.Method)
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"image_generation": map[string]any{
+			"watermark": map[string]any{"supported": true},
+		},
+	}, nil)
+
+	third := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(third.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	watermark, ok := args["image_watermark"].(map[string]any)
+	if !ok {
+		t.Fatalf("image_watermark = %#v", args["image_watermark"])
+	}
+	if watermark["apply"] != true || watermark["paidEntitlement"] != false || watermark["canDisable"] != false {
+		t.Fatalf("image_watermark = %#v", watermark)
+	}
+	if _, ok := watermark["text"]; ok {
+		t.Fatalf("image_watermark = %#v", watermark)
+	}
+	fake.writeResponse(t, third.idString(), map[string]any{
+		"task_id":    "task-img",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateOmitsImageWatermarkWhenCapabilityIsMissing(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType: types.DocIMG,
+			Topic:        "Poster",
+			Prompt:       "red bicycle",
+			ImageWatermark: &types.ImageWatermarkGenerateOptions{
+				Apply: true,
+			},
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	if second.Method != "capabilities/get" {
+		t.Fatalf("second method = %q, want capabilities/get", second.Method)
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"image_generation": map[string]any{},
+	}, nil)
+
+	third := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(third.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if _, ok := args["image_watermark"]; ok {
+		t.Fatalf("image_watermark should be omitted when unsupported: %#v", args["image_watermark"])
+	}
+	fake.writeResponse(t, third.idString(), map[string]any{
+		"task_id":    "task-img",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateDoesNotSendImageWatermarkForNonIMG(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType: types.DocGIF,
+			Topic:        "Reaction",
+			Prompt:       "make gif",
+			ImageWatermark: &types.ImageWatermarkGenerateOptions{
+				Apply: true,
+			},
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(second.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if _, ok := args["image_watermark"]; ok {
+		t.Fatalf("image_watermark should not be sent for gif generation: %#v", args["image_watermark"])
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"task_id":    "task-gif",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateSendsGIFFPSAndReferenceImagesWithoutRatio(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType:    types.DocGIF,
+			Topic:           "Token Reaction",
+			Prompt:          "make a stable 4x4 reaction sheet",
+			ImageRatio:      "portrait",
+			FPS:             12,
+			ReferenceImages: []string{"/tmp/ref.png"},
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(second.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if args["document_type"] != string(types.DocGIF) {
+		t.Fatalf("document_type = %v, want gif", args["document_type"])
+	}
+	if args["fps"] != float64(12) {
+		t.Fatalf("fps = %v, want 12", args["fps"])
+	}
+	if _, ok := args["ratio"]; ok {
+		t.Fatalf("ratio should not be sent for gif generation: %#v", args["ratio"])
+	}
+	refs, ok := args["reference_images"].([]any)
+	if !ok || len(refs) != 1 || refs[0] != "/tmp/ref.png" {
+		t.Fatalf("reference_images = %#v", args["reference_images"])
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"task_id":    "task-gif",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateRejectsInvalidGIFFPS(t *testing.T) {
+	client, _ := newClientWithFake(t)
+	defer client.Stop()
+
+	_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+		DocumentType: types.DocGIF,
+		Topic:        "Token Reaction",
+		Prompt:       "make a gif",
+		FPS:          3,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported gif fps") {
+		t.Fatalf("err = %v, want unsupported gif fps", err)
+	}
+}
+
 func TestInvokeGenerateRejectsInvalidImageRatio(t *testing.T) {
 	client, _ := newClientWithFake(t)
 	defer client.Stop()
@@ -836,6 +1044,20 @@ func TestBuildAttachmentArgsImageReferenceCap(t *testing.T) {
 		if r == "" {
 			t.Errorf("empty entry leaked through filter: %v", refs)
 		}
+	}
+}
+
+func TestBuildAttachmentArgsGIFReferenceImages(t *testing.T) {
+	args := buildAttachmentArgs(types.GenerateInput{
+		DocumentType:    types.DocGIF,
+		ReferenceImages: []string{"a.png"},
+	})
+	refs, ok := args["reference_images"].([]string)
+	if !ok {
+		t.Fatalf("reference_images type = %T, want []string", args["reference_images"])
+	}
+	if len(refs) != 1 || refs[0] != "a.png" {
+		t.Fatalf("reference_images = %#v", refs)
 	}
 }
 

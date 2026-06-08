@@ -18,6 +18,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -82,7 +83,13 @@ type Client struct {
 	reconnectTimer   *time.Timer
 	stoppedManually  bool
 	initialized      bool
+	capabilities     bridgeCapabilities
 	logfile          *Logfile
+}
+
+type bridgeCapabilities struct {
+	loaded                  bool
+	imageWatermarkSupported bool
 }
 
 type listenerEntry struct {
@@ -305,7 +312,12 @@ func (c *Client) Initialize(ctx context.Context) ([]byte, error) {
 
 // GetCapabilities calls "capabilities/get".
 func (c *Client) GetCapabilities(ctx context.Context) ([]byte, error) {
-	return c.Request(ctx, "capabilities/get", nil)
+	raw, err := c.Request(ctx, "capabilities/get", nil)
+	if err != nil {
+		return nil, err
+	}
+	c.rememberCapabilities(raw)
+	return raw, nil
 }
 
 type bridgeImagePromptSlot struct {
@@ -496,6 +508,10 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 	if err != nil {
 		return TaskInvokeResult{}, err
 	}
+	fps, err := gifFPSArg(input)
+	if err != nil {
+		return TaskInvokeResult{}, err
+	}
 	c.mu.Lock()
 	sessionID := c.sessionID
 	c.mu.Unlock()
@@ -537,6 +553,12 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 	if ratio != "" {
 		args["ratio"] = ratio
 	}
+	if fps > 0 {
+		args["fps"] = fps
+	}
+	if watermark := c.imageWatermarkArg(ctx, input); watermark != nil {
+		args["image_watermark"] = watermark
+	}
 	for k, v := range buildAttachmentArgs(input) {
 		args[k] = v
 	}
@@ -568,6 +590,82 @@ func imageRatioArg(input types.GenerateInput) (string, error) {
 	default:
 		return "", fmt.Errorf("bridge: unsupported image ratio: %s", input.ImageRatio)
 	}
+}
+
+func gifFPSArg(input types.GenerateInput) (int, error) {
+	if input.DocumentType != types.DocGIF || input.FPS == 0 {
+		return 0, nil
+	}
+	if input.FPS < 4 || input.FPS > 24 {
+		return 0, fmt.Errorf("bridge: unsupported gif fps: %d", input.FPS)
+	}
+	return input.FPS, nil
+}
+
+func (c *Client) imageWatermarkArg(ctx context.Context, input types.GenerateInput) map[string]any {
+	if input.DocumentType != types.DocIMG || input.ImageWatermark == nil {
+		return nil
+	}
+	if !c.supportsImageWatermark(ctx) {
+		return nil
+	}
+	return map[string]any{
+		"apply":           input.ImageWatermark.Apply,
+		"paidEntitlement": input.ImageWatermark.PaidEntitlement,
+		"canDisable":      input.ImageWatermark.CanDisable,
+	}
+}
+
+func (c *Client) supportsImageWatermark(ctx context.Context) bool {
+	c.mu.Lock()
+	caps := c.capabilities
+	c.mu.Unlock()
+	if caps.loaded {
+		return caps.imageWatermarkSupported
+	}
+	raw, err := c.GetCapabilities(ctx)
+	if err != nil {
+		c.mu.Lock()
+		c.capabilities.loaded = true
+		c.capabilities.imageWatermarkSupported = false
+		c.mu.Unlock()
+		return false
+	}
+	return bridgeCapabilitiesFromPayload(raw).imageWatermarkSupported
+}
+
+func (c *Client) rememberCapabilities(raw []byte) {
+	caps := bridgeCapabilitiesFromPayload(raw)
+	c.mu.Lock()
+	c.capabilities = caps
+	c.mu.Unlock()
+}
+
+func bridgeCapabilitiesFromPayload(raw []byte) bridgeCapabilities {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return bridgeCapabilities{loaded: true}
+	}
+	return bridgeCapabilities{
+		loaded:                  true,
+		imageWatermarkSupported: nestedBool(payload, true, "image_generation", "watermark", "supported") || nestedBool(payload, true, "document_generation", "img", "image_generation", "watermark", "supported"),
+	}
+}
+
+func nestedBool(root map[string]any, want bool, path ...string) bool {
+	var current any = root
+	for _, key := range path {
+		next, ok := current.(map[string]any)
+		if !ok {
+			return false
+		}
+		current, ok = next[key]
+		if !ok {
+			return false
+		}
+	}
+	got, ok := current.(bool)
+	return ok && got == want
 }
 
 // InvokeModify calls "task/invoke" with the office.modify tool args projected

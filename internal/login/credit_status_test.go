@@ -42,6 +42,7 @@ API key configured: false
 			exitCode: 0,
 			stdout: `Current access mode: hosted
 Current plan: Pro
+Paid entitlement: true
 
 Quota summary
 Account hosted credits: 42
@@ -57,10 +58,55 @@ API key configured: false
 				PlanName:            "Pro",
 				RewardRemaining:     5,
 				HostedCreditBalance: intPtr(42),
+				PaidEntitlement:     true,
 			},
 		},
 		{
-			name:     "api_key: paid quota line",
+			name:     "logged_in: paid entitlement with zero hosted credits",
+			exitCode: 0,
+			stdout: `Current access mode: hosted
+Current plan: Pro
+Paid entitlement: true
+
+Quota summary
+Account hosted credits: 0
+Reward quota remaining: 0
+API key: none configured
+Access checks enabled: true
+Account session configured: true
+API key configured: false
+`,
+			want: types.CreditStatus{
+				Mode:                types.WhoAmILoggedIn,
+				AccessMode:          "hosted",
+				PlanName:            "Pro",
+				HostedCreditBalance: intPtr(0),
+				PaidEntitlement:     true,
+			},
+		},
+		{
+			name:     "logged_in: hosted credits do not override false entitlement line",
+			exitCode: 0,
+			stdout: `Current access mode: hosted
+Paid entitlement: false
+
+Quota summary
+Account hosted credits: 1097930
+Reward quota remaining: 0
+API key: none configured
+Access checks enabled: true
+Account session configured: true
+API key configured: false
+`,
+			want: types.CreditStatus{
+				Mode:                types.WhoAmILoggedIn,
+				AccessMode:          "hosted",
+				HostedCreditBalance: intPtr(1097930),
+				PaidEntitlement:     false,
+			},
+		},
+		{
+			name:     "api_key: paid quota line does not imply entitlement",
 			exitCode: 0,
 			stdout: `Mode: API key
 Current access mode: api-key
@@ -78,12 +124,35 @@ API key configured: true
 				Mode:                types.WhoAmIAPIKey,
 				AccessMode:          "api-key",
 				PlanName:            "API",
+				PaidEntitlement:     false,
 				RewardRemaining:     0,
 				HostedCreditBalance: intPtr(0),
 				PaidKeyPrefix:       "sk-abc123",
 				PaidKeyTotal:        1000,
 				PaidKeyUsed:         100,
 				PaidKeyRemaining:    900,
+			},
+		},
+		{
+			name:     "logged_in: legacy paid plan does not imply entitlement",
+			exitCode: 0,
+			stdout: `Current access mode: hosted
+Current plan: Pro
+
+Quota summary
+Account hosted credits: 0
+Reward quota remaining: 0
+API key: none configured
+Access checks enabled: true
+Account session configured: true
+API key configured: false
+`,
+			want: types.CreditStatus{
+				Mode:                types.WhoAmILoggedIn,
+				AccessMode:          "hosted",
+				PlanName:            "Pro",
+				HostedCreditBalance: intPtr(0),
+				PaidEntitlement:     false,
 			},
 		},
 		{
@@ -116,7 +185,7 @@ API key configured: false
 			},
 		},
 		{
-			name:     "logged_in: anonymous line absent leaves pointers nil",
+			name:     "logged_in: anonymous line absent leaves pointers nil and does not infer entitlement",
 			exitCode: 0,
 			stdout: `Current access mode: hosted
 Current plan: Pro
@@ -133,6 +202,7 @@ API key configured: false
 				Mode:                     types.WhoAmILoggedIn,
 				AccessMode:               "hosted",
 				PlanName:                 "Pro",
+				PaidEntitlement:          false,
 				HostedCreditBalance:      intPtr(7),
 				AnonymousCreditAvailable: nil,
 				AnonymousCreditReserved:  nil,

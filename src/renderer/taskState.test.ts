@@ -99,6 +99,27 @@ describe("taskState", () => {
     expect(state.tasks["task-1"].creditMode).toBe("hosted");
   });
 
+  it("captures image watermark metadata from task.completed payload", () => {
+    const state = applyTaskEvent(createInitialTaskState(), {
+      event_id: "event-watermark",
+      task_id: "task-img",
+      type: "task.completed",
+      payload: {
+        result: { file_path: "/tmp/banner.png", file_name: "banner.png", document_type: "img" },
+        image_watermark: {
+          applied: true,
+          paidEntitlement: false,
+          canDisable: false,
+        },
+      },
+    });
+    expect(state.tasks["task-img"].imageWatermark).toEqual({
+      applied: true,
+      paidEntitlement: false,
+      canDisable: false,
+    });
+  });
+
   it("captures credits on task.failed payload (zero allowed)", () => {
     const state = applyTaskEvent(createInitialTaskState(), {
       event_id: "event-1",

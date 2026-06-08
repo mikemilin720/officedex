@@ -734,6 +734,35 @@ describe("App task flow", () => {
     );
   });
 
+  it("submits fps for new GIF generation", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Start a New Generation" });
+
+    fireEvent.click(screen.getByLabelText("GIF"));
+    expect(await screen.findByText("GIF FPS")).toBeTruthy();
+    expect(screen.queryByText("Image ratio")).toBeNull();
+    const fpsInput = screen.getByRole("spinbutton", { name: /GIF FPS/i });
+    fireEvent.change(fpsInput, { target: { value: "12" } });
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
+      target: { value: "Make a stable reaction GIF" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
+
+    await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
+    expect(bridge.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentType: "gif",
+        prompt: "Make a stable reaction GIF",
+        fps: 12,
+      }),
+    );
+    expect(bridge.generate).toHaveBeenCalledWith(expect.not.objectContaining({ imageRatio: expect.anything() }));
+  });
+
   it("does not include referenceImages when documentType is not Image", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");
@@ -1093,6 +1122,7 @@ describe("App credit display", () => {
     paidKeyTotal?: number;
     paidKeyUsed?: number;
     paidKeyRemaining?: number;
+    paidEntitlement?: boolean;
   }) {
     const api = (window as unknown as { officecli: DesktopAPI }).officecli;
     api.getCreditStatus = (async () => ({
@@ -1108,6 +1138,7 @@ describe("App credit display", () => {
       paidKeyTotal: status.paidKeyTotal ?? 0,
       paidKeyUsed: status.paidKeyUsed ?? 0,
       paidKeyRemaining: status.paidKeyRemaining ?? 0,
+      paidEntitlement: status.paidEntitlement ?? false,
       raw: "",
     })) as unknown as DesktopAPI["getCreditStatus"];
   }
@@ -1197,6 +1228,7 @@ describe("App credit display", () => {
         paidKeyTotal: 0,
         paidKeyUsed: 0,
         paidKeyRemaining: 0,
+        paidEntitlement: false,
         raw: "",
       };
     }) as unknown as DesktopAPI["getCreditStatus"];
@@ -1291,6 +1323,7 @@ function installBridgeMock() {
       paidKeyTotal: 0,
       paidKeyUsed: 0,
       paidKeyRemaining: 0,
+      paidEntitlement: false,
       raw: "",
     })),
     redeem: vi.fn(async () => ({
@@ -1312,6 +1345,7 @@ function installBridgeMock() {
       llmProvider: null,
       onboardingCompletedAt: "2026-05-22T00:00:00.000Z",
       proxy: null,
+      imageWatermark: { showWatermark: true, preferenceSource: "system" as const },
     })),
     updateSettings: vi.fn(async (patch) => ({
       version: 1,
@@ -1326,6 +1360,7 @@ function installBridgeMock() {
       llmProvider: patch.llmProvider ?? null,
       onboardingCompletedAt: patch.onboardingCompletedAt ?? "2026-05-22T00:00:00.000Z",
       proxy: patch.proxy ?? null,
+      imageWatermark: patch.imageWatermark ?? { showWatermark: true, preferenceSource: "system" as const },
     })),
     getDefaultWorkspaceDir: vi.fn(async () => "/Users/test/Library/Application Support/OfficeDex/workspace"),
     onAuthEvent: vi.fn(() => () => undefined),

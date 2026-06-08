@@ -1,4 +1,4 @@
-import { Button, Dropdown, Form, Image, Input, message, Modal, Progress, Radio, Space, Spin, Tag, Timeline, Tooltip, type MenuProps } from "antd";
+import { Button, Dropdown, Form, Image, Input, InputNumber, message, Modal, Progress, Radio, Space, Spin, Tag, Timeline, Tooltip, type MenuProps } from "antd";
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -36,6 +36,7 @@ import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
 import { ReportIssueDialog } from "../components/ReportIssueDialog";
 import { Check as CheckIcon, Copy as CopyIcon } from "lucide-react";
+import { loadLocalImageTemplates } from "../localImageTemplates";
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -49,6 +50,7 @@ export interface NewGenerationDraft {
   sourceFile?: string;
   referenceImages?: string[];
   imageRatio?: ImageRatio;
+  fps?: number;
 }
 
 interface DialogueProps {
@@ -68,7 +70,7 @@ interface DialogueProps {
   onPreview: (artifact: Artifact) => void;
   onNewGenerationDraftChange?: (patch: Partial<NewGenerationDraft>) => void;
   onForceCancel?: (taskId: string) => void;
-  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
+  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio, fps?: number) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onRetryTask?: (task: DesktopTask) => void;
 }
@@ -79,9 +81,13 @@ const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
   prompt: "",
   mode: "fast",
   imageRatio: "square",
+  fps: 16,
 };
 
 const IMAGE_RATIO_OPTIONS: ImageRatio[] = ["square", "landscape", "portrait"];
+const GIF_FPS_MIN = 4;
+const GIF_FPS_MAX = 24;
+const DEFAULT_GIF_FPS = 16;
 
 function normalizeImageRatio(value: unknown): ImageRatio {
   return IMAGE_RATIO_OPTIONS.includes(value as ImageRatio) ? (value as ImageRatio) : "square";
@@ -92,6 +98,12 @@ function imageRatioOptions(t: Translator) {
     value: ratio,
     label: t(`dialogue.imageRatio.${ratio}`),
   }));
+}
+
+function normalizeGIFFPS(value: unknown): number {
+  const fps = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(fps)) return DEFAULT_GIF_FPS;
+  return Math.min(GIF_FPS_MAX, Math.max(GIF_FPS_MIN, Math.round(fps)));
 }
 
 /**
@@ -192,6 +204,11 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   const [rawDecoupled, setRawDecoupled] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const imageTemplateRequestId = useRef(0);
+  const dropTargetRef = useRef<HTMLDivElement | null>(null);
+  const attachmentDropHandlersRef = useRef({
+    dragOver: (_event: globalThis.DragEvent) => {},
+    drop: (_event: globalThis.DragEvent) => {},
+  });
   const selectedTemplate = useMemo(
     () => imageTemplates.find((tpl) => String(tpl.id) === selectedTemplateId),
     [imageTemplates, selectedTemplateId],
@@ -207,6 +224,31 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
     onChange: (next) => onDraftChange(next),
   });
 
+  attachmentDropHandlersRef.current = {
+    dragOver: (event: globalThis.DragEvent) => handleAttachmentDragOver(event, attachments),
+    drop: (event: globalThis.DragEvent) => handleAttachmentDrop(event, attachments, t),
+  };
+
+  const nativeDragOverHandler = useCallback((event: globalThis.DragEvent) => {
+    attachmentDropHandlersRef.current.dragOver(event);
+  }, []);
+
+  const nativeDropHandler = useCallback((event: globalThis.DragEvent) => {
+    attachmentDropHandlersRef.current.drop(event);
+  }, []);
+
+  const bindDropTarget = useCallback((target: HTMLDivElement | null) => {
+    if (dropTargetRef.current) {
+      dropTargetRef.current.removeEventListener("dragover", nativeDragOverHandler);
+      dropTargetRef.current.removeEventListener("drop", nativeDropHandler);
+    }
+    dropTargetRef.current = target;
+    if (target) {
+      target.addEventListener("dragover", nativeDragOverHandler);
+      target.addEventListener("drop", nativeDropHandler);
+    }
+  }, [nativeDragOverHandler, nativeDropHandler]);
+
   useEffect(() => {
     form.setFieldsValue({
       documentType: draft.documentType,
@@ -214,8 +256,9 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
       prompt: draft.prompt,
       mode: draft.mode,
       imageRatio: normalizeImageRatio(draft.imageRatio),
+      fps: normalizeGIFFPS(draft.fps),
     });
-  }, [form, draft.documentType, draft.topic, draft.prompt, draft.mode, draft.imageRatio]);
+  }, [form, draft.documentType, draft.topic, draft.prompt, draft.mode, draft.imageRatio, draft.fps]);
 
   const loadImageTemplates = useCallback(() => {
     const requestId = imageTemplateRequestId.current + 1;
@@ -224,7 +267,8 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
     officecli.listImageTemplates()
       .then((items) => {
         if (requestId !== imageTemplateRequestId.current) return;
-        setImageTemplates(items.filter((item) => item.enabled));
+        const localTemplates = loadLocalImageTemplates().filter((item) => item.enabled);
+        setImageTemplates([...localTemplates, ...items.filter((item) => item.enabled)]);
         setTemplatesError("");
       })
       .catch((error: unknown) => {
@@ -364,7 +408,10 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   }
 
   return (
-    <div className="fluid-new-task">
+    <div
+      className="fluid-new-task"
+      ref={bindDropTarget}
+    >
       <section className="fluid-start-card">
         <div className="fluid-spark">
           <MaterialSymbol name="auto_awesome" />
@@ -396,6 +443,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
           prompt: values.prompt ?? "",
           mode: values.mode,
           imageRatio: normalizeImageRatio(values.imageRatio),
+          fps: normalizeGIFFPS(values.fps),
         });
       }} onFinish={(values) => {
         const validation = attachments.validateForSubmit();
@@ -408,7 +456,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
           if (slotCheck.firstError) message.warning(slotCheck.firstError);
           return;
         }
-        const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, ...submitValues } = values;
+        const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, fps: rawFPS, ...submitValues } = values;
         void _promptTemplateId;
         const prompt = hasSlots && !rawDecoupled && selectedTemplate
           ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
@@ -416,6 +464,8 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
         const nextInput: GenerateInput = { ...submitValues, prompt, ...attachments.collect() };
         if (submitValues.documentType === "img") {
           nextInput.imageRatio = normalizeImageRatio(rawImageRatio);
+        } else if (submitValues.documentType === "gif") {
+          nextInput.fps = normalizeGIFFPS(rawFPS);
         }
         onSubmit(nextInput);
       }} className="fluid-command-bar">
@@ -433,6 +483,14 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
             <span>{t("dialogue.imageRatio.label")}</span>
             <Form.Item name="imageRatio" noStyle>
               <Radio.Group optionType="button" options={imageRatioOptions(t)} />
+            </Form.Item>
+          </div>
+        ) : null}
+        {docType === "gif" ? (
+          <div className="image-ratio-row">
+            <span>{t("dialogue.gifFps.label")}</span>
+            <Form.Item name="fps" noStyle>
+              <InputNumber min={GIF_FPS_MIN} max={GIF_FPS_MAX} precision={0} aria-label={t("dialogue.gifFps.label")} />
             </Form.Item>
           </div>
         ) : null}
@@ -578,6 +636,7 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
           {templates.map((template) => {
             const id = String(template.id);
             const selected = selectedId === id;
+            const isLocal = template.visibility === "local";
             return (
               <div
                 key={id}
@@ -592,21 +651,23 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                   <div className="image-template-thumb">
                     {template.thumbnailUrl ? <img src={template.thumbnailUrl} alt="" /> : <MaterialSymbol name="image" />}
                   </div>
-                  <span className={`image-template-scope image-template-scope-${template.visibility === "user_private" ? "private" : "public"}`}>
-                    {template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public")}
+                  <span className={`image-template-scope image-template-scope-${isLocal ? "local" : template.visibility === "user_private" ? "private" : "public"}`}>
+                    {isLocal ? t("dialogue.imageTemplates.scope.local") : template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public")}
                   </span>
                   <strong>{template.title}</strong>
                   {template.description ? <span>{template.description}</span> : null}
                 </button>
-                <button
-                  type="button"
-                  className="image-template-copy"
-                  onClick={() => onCopy(template)}
-                  disabled={copyingId === id}
-                  aria-label={t("dialogue.imageTemplates.copyAria", { title: template.title })}
-                >
-                  {copyingId === id ? t("dialogue.imageTemplates.copying") : t("dialogue.imageTemplates.copy")}
-                </button>
+                {!isLocal ? (
+                  <button
+                    type="button"
+                    className="image-template-copy"
+                    onClick={() => onCopy(template)}
+                    disabled={copyingId === id}
+                    aria-label={t("dialogue.imageTemplates.copyAria", { title: template.title })}
+                  >
+                    {copyingId === id ? t("dialogue.imageTemplates.copying") : t("dialogue.imageTemplates.copy")}
+                  </button>
+                ) : null}
               </div>
             );
           })}
@@ -689,7 +750,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
   busy: boolean;
   onPreview: (artifact: Artifact) => void;
   onForceCancel?: (taskId: string) => void;
-  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
+  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio, fps?: number) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onRetryTask?: (task: DesktopTask) => void;
   onOpenLogin: () => void;
@@ -976,20 +1037,21 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
                 <strong>{artifact.fileName}</strong>
                 <span>{t("dialogue.completed.imageMeta", { type: artifact.documentType.toUpperCase(), time: completedAt })}</span>
               </div>
-              <div className="result-image-actions">
-                <Button icon={<LinkOutlined />} onClick={() => onUseAsReference(artifact.filePath)}>
-                  {t("dialogue.completed.continueEditing")}
-                </Button>
-                <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => officecli.openPath(artifact.filePath)}>
+              <ImageWatermarkNotice task={task} />
+              <div className="result-image-actions result-image-actions-single-row">
+                <Button size="middle" aria-label={t("dialogue.completed.open")} icon={<PlayCircleOutlined />} onClick={() => officecli.openPath(artifact.filePath)}>
                   {t("dialogue.completed.open")}
                 </Button>
+                <Button size="middle" aria-label={t("dialogue.completed.continueEditing")} icon={<LinkOutlined />} onClick={() => onUseAsReference(artifact.filePath)}>
+                  {t("dialogue.completed.continueEditing")}
+                </Button>
                 <div className="result-image-file-actions">
-                  <Button icon={<FolderOpenOutlined />} onClick={() => officecli.showItemInFolder(artifact.filePath)}>
+                  <Button size="middle" aria-label={t("dialogue.completed.showInFolder")} icon={<FolderOpenOutlined />} onClick={() => officecli.showItemInFolder(artifact.filePath)}>
                     {t("dialogue.completed.showInFolder")}
                   </Button>
                   {publishMenu ? (
                     <Dropdown menu={publishMenu} trigger={["click"]} placement="bottomRight">
-                      <Button aria-label={t("dialogue.completed.moreActions")} icon={<MoreOutlined />} />
+                      <Button size="middle" aria-label={t("dialogue.completed.moreActions")} icon={<MoreOutlined />} />
                     </Dropdown>
                   ) : null}
                 </div>
@@ -1126,7 +1188,7 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
 function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinueModify, onForceCancel, onOpenLogin, referenceImages, onReferenceImagesChange }: {
   latestTask: DesktopTask;
   busy: boolean;
-  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio) => void;
+  onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio, fps?: number) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onForceCancel?: (taskId: string) => void;
   onOpenLogin: () => void;
@@ -1137,16 +1199,22 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
   const status = latestTask.status;
   const artifact = latestTask.artifact;
   const docType = latestTask.documentType || artifact?.documentType || "docx";
-  const isImageGeneration = docType === "img" || (artifact ? isImageArtifact(artifact) : false);
+  const isGIFGeneration = docType === "gif" || (artifact ? isGIFArtifact(artifact) : false);
+  const isImageGeneration = !isGIFGeneration && (docType === "img" || (artifact ? isImageArtifact(artifact) : false));
   const [imageRatio, setImageRatio] = useState<ImageRatio>(() => normalizeImageRatio(latestTask.userInput?.imageRatio));
+  const [gifFPS, setGIFFPS] = useState<number>(() => normalizeGIFFPS(latestTask.userInput?.fps));
   const [continuationPrompt, setContinuationPrompt] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  const referenceImagesSpec = getAttachmentSpec("img", "referenceImages");
+  const referenceImagesSpec = getAttachmentSpec(isGIFGeneration ? "gif" : "img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
 
   useEffect(() => {
     setImageRatio(normalizeImageRatio(latestTask.userInput?.imageRatio));
   }, [latestTask.id, latestTask.userInput?.imageRatio]);
+
+  useEffect(() => {
+    setGIFFPS(normalizeGIFFPS(latestTask.userInput?.fps));
+  }, [latestTask.id, latestTask.userInput?.fps]);
 
   // Running / Starting / Question: readonly composer with cancel
   if (status === "running" || status === "starting") {
@@ -1211,7 +1279,7 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
     const isModifiable = status === "completed" && Boolean(artifact) && isModifiableArtifact(artifact!) && Boolean(onContinueModify);
     // Disable input only for completed non-image, non-modifiable artifacts (e.g. report).
     const inputDisabled = Boolean(artifact && !isImageArtifact(artifact) && !isModifiable);
-    const supportsReferenceImages = isImageGeneration;
+    const supportsReferenceImages = isImageGeneration || isGIFGeneration;
     const referenceLimitReached = referenceImages.length >= referenceImageMaxCount;
     const pickReferenceImages = async () => {
       if (!referenceImagesSpec || referenceLimitReached) return;
@@ -1231,7 +1299,12 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
       if (isModifiable && onContinueModify) {
         onContinueModify(docType, continuationPrompt.trim());
       } else if (onContinueGeneration) {
-        onContinueGeneration(docType, continuationPrompt.trim(), referenceImages.length > 0 ? referenceImages : undefined, isImageGeneration ? imageRatio : undefined);
+        const refs = referenceImages.length > 0 ? referenceImages : undefined;
+        if (isGIFGeneration) {
+          onContinueGeneration(docType, continuationPrompt.trim(), refs, undefined, gifFPS);
+        } else {
+          onContinueGeneration(docType, continuationPrompt.trim(), refs, isImageGeneration ? imageRatio : undefined);
+        }
       } else {
         return;
       }
@@ -1257,6 +1330,19 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
               options={imageRatioOptions(t)}
               value={imageRatio}
               onChange={(event) => setImageRatio(normalizeImageRatio(event.target.value))}
+            />
+          </div>
+        ) : null}
+        {isGIFGeneration ? (
+          <div className="image-ratio-row image-ratio-row-compact">
+            <span>{t("dialogue.gifFps.label")}</span>
+            <InputNumber
+              min={GIF_FPS_MIN}
+              max={GIF_FPS_MAX}
+              precision={0}
+              value={gifFPS}
+              aria-label={t("dialogue.gifFps.label")}
+              onChange={(value) => setGIFFPS(normalizeGIFFPS(value))}
             />
           </div>
         ) : null}
@@ -1570,6 +1656,24 @@ function eventMeta(event: BridgeEvent, t: Translator): string {
   return ts ? `${ts} · ${text}` : text;
 }
 
+function ImageWatermarkNotice({ task }: { task: DesktopTask }) {
+  const t = useT();
+  const metadata = task.imageWatermark;
+  if (!metadata) return null;
+  const notice = metadata.canDisable
+    ? t("dialogue.completed.watermarkPaidNotice")
+    : metadata.applied
+      ? t("dialogue.completed.watermarkFreeNotice")
+      : "";
+  if (!notice) return null;
+  return (
+    <div className={`image-watermark-notice ${metadata.canDisable ? "paid" : "free"}`}>
+      <MaterialSymbol name="info" />
+      <span>{notice}</span>
+    </div>
+  );
+}
+
 function taskSubject(task: DesktopTask, t: Translator): string {
   return task.topic || task.artifact?.fileName || task.documentType || t("dialogue.history.subject.fallback");
 }
@@ -1625,10 +1729,7 @@ function makePasteHandler(attachments: ReturnType<typeof useAttachments>, t: Tra
   return (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const items = event.clipboardData?.files;
     if (!items || items.length === 0) return;
-    const images: File[] = [];
-    for (const file of Array.from(items)) {
-      if (file.type.startsWith("image/")) images.push(file);
-    }
+    const images = imageFilesFrom(items);
     if (images.length === 0) return;
     if (!attachments.supportsPaste) return;
     event.preventDefault();
@@ -1649,6 +1750,43 @@ function makePasteHandler(attachments: ReturnType<typeof useAttachments>, t: Tra
       message.error(t("dialogue.attach.paste.error", { error: (error as Error).message }));
     });
   };
+}
+
+function handleAttachmentDragOver(event: { dataTransfer: DataTransfer | null; preventDefault: () => void }, attachments: ReturnType<typeof useAttachments>) {
+  const files = event.dataTransfer?.files;
+  if (!attachments.supportsPaste || !files || imageFilesFrom(files).length === 0) return;
+  event.preventDefault();
+  event.dataTransfer!.dropEffect = attachments.isReferenceLimitReached ? "none" : "copy";
+}
+
+function handleAttachmentDrop(event: { dataTransfer: DataTransfer | null; preventDefault: () => void; stopPropagation: () => void }, attachments: ReturnType<typeof useAttachments>, t: Translator) {
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  const images = imageFilesFrom(files);
+  if (images.length === 0) return;
+  if (!attachments.supportsPaste) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (attachments.isReferenceLimitReached) {
+    message.warning(t("dialogue.attach.referenceImages.limit", { max: attachments.referenceImagesSpec?.maxCount ?? 0 }));
+    return;
+  }
+  void attachments.handlePastedFiles(images).then((added) => {
+    const max = attachments.referenceImagesSpec?.maxCount;
+    if (added === 0) {
+      if (max !== undefined) {
+        message.warning(t("dialogue.attach.referenceImages.limit", { max }));
+      }
+      return;
+    }
+    message.success(added === 1 ? t("dialogue.attach.paste.attached") : t("dialogue.attach.paste.attachedMany", { count: added }));
+  }).catch((error) => {
+    message.error(t("dialogue.attach.paste.error", { error: (error as Error).message }));
+  });
+}
+
+function imageFilesFrom(files: FileList | File[]): File[] {
+  return Array.from(files).filter((file) => file.type.startsWith("image/"));
 }
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
@@ -1717,6 +1855,13 @@ function isImageArtifact(artifact: Artifact): boolean {
   if (type === "img" || IMAGE_EXTENSIONS.includes(type)) return true;
   const extension = artifact.fileName.split(".").pop()?.toLowerCase() || "";
   return IMAGE_EXTENSIONS.includes(extension);
+}
+
+function isGIFArtifact(artifact: Artifact): boolean {
+  const type = (artifact.documentType || "").toLowerCase();
+  if (type === "gif") return true;
+  const extension = artifact.fileName.split(".").pop()?.toLowerCase() || "";
+  return extension === "gif";
 }
 
 // office.modify supports in-place editing of these office document types.

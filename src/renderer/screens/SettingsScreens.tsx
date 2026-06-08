@@ -25,7 +25,8 @@ import { formatTestResult, ProviderForm } from "../components/ProviderForm";
 import { useT, useLocale, useSetLocale, type Locale } from "../i18n";
 import { defaultProxySettings, isValidProxyUrl } from "../defaults";
 import { readNotificationsEnabled, setNotificationsEnabled as persistNotificationsEnabled } from "../notifications";
-import type { AuthEvent, DocumentType, GenerateDefaults, LlmProvider, ProviderTestResult, ProxySettings, WhoAmIResult } from "../../shared/types";
+import type { AuthEvent, CreditStatus, DocumentType, GenerateDefaults, ImagePromptTemplate, LlmProvider, ProviderTestResult, ProxySettings, WhoAmIResult } from "../../shared/types";
+import { exportLocalImageTemplatesJSON, importLocalImageTemplatesJSON, loadLocalImageTemplates, saveLocalImageTemplates } from "../localImageTemplates";
 
 export function SettingsScreen({
   onCreditRefresh,
@@ -40,6 +41,11 @@ export function SettingsScreen({
   const setLocale = useSetLocale();
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => readNotificationsEnabled());
   const [whoami, setWhoami] = useState<WhoAmIResult | null>(null);
+  const [creditStatus, setCreditStatus] = useState<CreditStatus | null>(null);
+  const [localTemplates, setLocalTemplates] = useState<ImagePromptTemplate[]>(() => loadLocalImageTemplates());
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [pasteTemplateJSON, setPasteTemplateJSON] = useState("");
+  const localTemplateFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +56,21 @@ export function SettingsScreen({
       })
       .catch(() => {
         if (!cancelled) setWhoami({ mode: "anonymous" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    officecli
+      .getCreditStatus()
+      .then((result) => {
+        if (!cancelled) setCreditStatus(result);
+      })
+      .catch(() => {
+        if (!cancelled) setCreditStatus(null);
       });
     return () => {
       cancelled = true;
@@ -75,6 +96,14 @@ export function SettingsScreen({
     },
     [settings.defaults, update],
   );
+
+  const hasPaidEntitlement = hasImageWatermarkEntitlement(creditStatus);
+  const watermarkSettings = settings.imageWatermark ?? { showWatermark: true, preferenceSource: "system" as const };
+  const displayedShowWatermark = hasPaidEntitlement
+    ? watermarkSettings.preferenceSource === "user"
+      ? watermarkSettings.showWatermark
+      : false
+    : true;
 
   const pickOutputDir = useCallback(async () => {
     const picked = await officecli.openDirectoryDialog();
@@ -119,9 +148,62 @@ export function SettingsScreen({
           outputDir: null,
           llmProvider: null,
           onboardingCompletedAt: null,
+          imageWatermark: { showWatermark: true, preferenceSource: "system" },
         }).catch(() => undefined),
     });
   }, [update, t]);
+
+  const replaceLocalTemplates = useCallback((raw: string): boolean => {
+    try {
+      const imported = importLocalImageTemplatesJSON(raw);
+      saveLocalImageTemplates(imported);
+      setLocalTemplates(imported);
+      void message.success(t("settings.localImageTemplates.importSuccess", { count: imported.length }));
+      return true;
+    } catch (error) {
+      void message.error(t("settings.localImageTemplates.importError", { error: error instanceof Error ? error.message : String(error) }));
+      return false;
+    }
+  }, [t]);
+
+  const importLocalTemplatesFile = useCallback(async (file: File) => {
+    try {
+      replaceLocalTemplates(await readFileText(file));
+    } catch (error) {
+      void message.error(t("settings.localImageTemplates.importError", { error: error instanceof Error ? error.message : String(error) }));
+    }
+  }, [replaceLocalTemplates, t]);
+
+  const downloadLocalTemplates = useCallback(() => {
+    const json = exportLocalImageTemplatesJSON(localTemplates);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "officedex-local-image-templates.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    void message.success(t("settings.localImageTemplates.exportSuccess", { count: localTemplates.length }));
+  }, [localTemplates, t]);
+
+  const copyLocalTemplatesJSON = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(exportLocalImageTemplatesJSON(localTemplates));
+      void message.success(t("settings.localImageTemplates.copySuccess", { count: localTemplates.length }));
+    } catch {
+      void message.error(t("settings.localImageTemplates.copyError"));
+    }
+  }, [localTemplates, t]);
+
+  const importPastedLocalTemplates = useCallback(() => {
+    const ok = replaceLocalTemplates(pasteTemplateJSON);
+    if (ok) {
+      setPasteTemplateJSON("");
+      setPasteModalOpen(false);
+    }
+  }, [pasteTemplateJSON, replaceLocalTemplates]);
 
   return (
     <div className="settings-layout">
@@ -171,7 +253,67 @@ export function SettingsScreen({
                 />
               </SettingRow>
               <SettingRow title={t("settings.row.enableImages.title")} desc={t("settings.row.enableImages.desc")}>
-                <Switch checked={settings.defaults.enableImages} onChange={(checked) => updateDefaults({ enableImages: checked })} />
+                <Switch
+                  aria-label={t("settings.row.enableImages.title")}
+                  checked={settings.defaults.enableImages}
+                  onChange={(checked) => updateDefaults({ enableImages: checked })}
+                />
+              </SettingRow>
+            </div>
+            <div className="setting-group">
+              <h2>{t("settings.group.imageWatermark")}</h2>
+              <SettingRow title={t("settings.row.imageWatermark.title")} desc={t("settings.row.imageWatermark.desc")}>
+                <div className="settings-stack">
+                  <Switch
+                    aria-label={t("settings.row.imageWatermark.showLabel")}
+                    checked={displayedShowWatermark}
+                    disabled={!hasPaidEntitlement}
+                    onChange={(checked) =>
+                      update({
+                        imageWatermark: { ...watermarkSettings, showWatermark: checked, preferenceSource: "user" },
+                      }).catch(() => undefined)
+                    }
+                  />
+                  <span className="settings-inline-label">{t("settings.row.imageWatermark.showLabel")}</span>
+                  <div className="settings-note">
+                    {hasPaidEntitlement
+                      ? t("settings.row.imageWatermark.paidNotice")
+                      : t("settings.row.imageWatermark.freeNotice")}
+                  </div>
+                </div>
+              </SettingRow>
+            </div>
+            <div className="setting-group">
+              <h2>{t("settings.group.localImageTemplates")}</h2>
+              <SettingRow title={t("settings.localImageTemplates.title")} desc={t("settings.localImageTemplates.desc")}>
+                <div className="local-image-template-tools">
+                  <div className="settings-note">{formatLocalTemplateCount(localTemplates.length, t)}</div>
+                  <Space wrap>
+                    <Button icon={<FolderOpenOutlined />} onClick={() => localTemplateFileInputRef.current?.click()}>
+                      {t("settings.localImageTemplates.importFile")}
+                    </Button>
+                    <Button icon={<CopyOutlined />} onClick={() => setPasteModalOpen(true)}>
+                      {t("settings.localImageTemplates.paste")}
+                    </Button>
+                    <Button icon={<DownloadOutlined />} onClick={downloadLocalTemplates}>
+                      {t("settings.localImageTemplates.download")}
+                    </Button>
+                    <Button icon={<CopyOutlined />} onClick={copyLocalTemplatesJSON}>
+                      {t("settings.localImageTemplates.copy")}
+                    </Button>
+                  </Space>
+                  <input
+                    ref={localTemplateFileInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="local-image-template-file-input"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) void importLocalTemplatesFile(file);
+                    }}
+                  />
+                </div>
               </SettingRow>
             </div>
             <div className="setting-group">
@@ -188,7 +330,11 @@ export function SettingsScreen({
                 />
               </SettingRow>
               <SettingRow title={t("settings.notifications.label")} desc={t("settings.notifications.desc")}>
-                <Switch checked={notificationsEnabled} onChange={updateNotificationsEnabled} />
+                <Switch
+                  aria-label={t("settings.notifications.label")}
+                  checked={notificationsEnabled}
+                  onChange={updateNotificationsEnabled}
+                />
               </SettingRow>
             </div>
             <div className="setting-group">
@@ -253,11 +399,48 @@ export function SettingsScreen({
               <h2>{t("settings.group.about")}</h2>
               <AboutCard />
             </div>
+            <Modal
+              title={t("settings.localImageTemplates.pasteTitle")}
+              open={pasteModalOpen}
+              okText={t("settings.localImageTemplates.import")}
+              cancelText={t("settings.common.cancel")}
+              onOk={importPastedLocalTemplates}
+              onCancel={() => setPasteModalOpen(false)}
+              destroyOnHidden
+            >
+              <Input.TextArea
+                value={pasteTemplateJSON}
+                onChange={(event) => setPasteTemplateJSON(event.target.value)}
+                placeholder={t("settings.localImageTemplates.pastePlaceholder")}
+                autoSize={{ minRows: 8, maxRows: 16 }}
+              />
+            </Modal>
           </>
         )}
       </section>
     </div>
   );
+}
+
+function hasImageWatermarkEntitlement(status: CreditStatus | null | undefined): boolean {
+  if (!status) return false;
+  return status.paidEntitlement === true;
+}
+
+function formatLocalTemplateCount(count: number, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  return count === 1
+    ? t("settings.localImageTemplates.countOne")
+    : t("settings.localImageTemplates.countOther", { count });
+}
+
+function readFileText(file: File): Promise<string> {
+  if (typeof file.text === "function") return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file."));
+    reader.readAsText(file);
+  });
 }
 
 type LoginPhase = "loading" | "anonymous" | "awaiting" | "success" | "failure";

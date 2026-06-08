@@ -123,7 +123,7 @@ export function useAttachments(documentType: DocumentType, options: UseAttachmen
         if (!file.type.startsWith("image/")) continue;
         const ext = inferImageExtension(file, allowedExtensions);
         if (!ext) continue;
-        const buffer = await file.arrayBuffer();
+        const buffer = await readFileAsArrayBuffer(file);
         const path = await officecli.savePastedImage(new Uint8Array(buffer), ext);
         if (path && !referenceImagesRef.current.includes(path) && !savedPaths.includes(path)) {
           savedPaths.push(path);
@@ -141,11 +141,12 @@ export function useAttachments(documentType: DocumentType, options: UseAttachmen
     if (sourceWorkbookSpec && sourceFile) {
       bundle.sourceFile = sourceFile;
     }
-    if (referenceImagesSpec && referenceImages.length > 0) {
-      bundle.referenceImages = referenceImages.slice(0, referenceImagesSpec.maxCount);
+    const currentReferenceImages = referenceImagesRef.current;
+    if (referenceImagesSpec && currentReferenceImages.length > 0) {
+      bundle.referenceImages = currentReferenceImages.slice(0, referenceImagesSpec.maxCount);
     }
     return bundle;
-  }, [sourceWorkbookSpec, referenceImagesSpec, sourceFile, referenceImages]);
+  }, [sourceWorkbookSpec, referenceImagesSpec, sourceFile]);
 
   const validateForSubmit = useCallback((): { ok: true } | { ok: false; reason: string } => {
     if (sourceWorkbookSpec?.required && !sourceFile) {
@@ -154,14 +155,14 @@ export function useAttachments(documentType: DocumentType, options: UseAttachmen
         reason: `${sourceWorkbookSpec.label} is required for ${documentType.toUpperCase()} generation. Attach a .${sourceWorkbookSpec.extensions[0]} file to continue.`,
       };
     }
-    if (referenceImagesSpec?.required && referenceImages.length === 0) {
+    if (referenceImagesSpec?.required && referenceImagesRef.current.length === 0) {
       return {
         ok: false,
         reason: `${referenceImagesSpec.label} is required.`,
       };
     }
     return { ok: true };
-  }, [documentType, sourceWorkbookSpec, referenceImagesSpec, sourceFile, referenceImages]);
+  }, [documentType, sourceWorkbookSpec, referenceImagesSpec, sourceFile]);
 
   return {
     sourceWorkbookSpec,
@@ -188,6 +189,25 @@ function inferImageExtension(file: File, allowed: Set<string>): string | undefin
   if (fromMime && allowed.has(fromMime)) return fromMime;
   if (allowed.has("png")) return "png";
   return undefined;
+}
+
+function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+  const nativeArrayBuffer = (file as { arrayBuffer?: () => Promise<ArrayBuffer> }).arrayBuffer;
+  if (typeof nativeArrayBuffer === "function") {
+    return nativeArrayBuffer.call(file);
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error(`Failed to read ${file.name}`));
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error(`Failed to read ${file.name} as ArrayBuffer`));
+    };
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function mergeUnique(current: string[], incoming: string[], maxCount: number): string[] {

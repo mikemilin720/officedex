@@ -15,6 +15,7 @@ const FALLBACK: UserSettings = {
   llmProvider: null,
   onboardingCompletedAt: null,
   proxy: { ...defaultProxySettings },
+  imageWatermark: { showWatermark: true, preferenceSource: "system" },
 };
 
 // Cross-instance broadcast: multiple components call useSettings() independently

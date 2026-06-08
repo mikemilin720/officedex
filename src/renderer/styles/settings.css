@@ -63,6 +63,38 @@
   justify-self: end;
 }
 
+.settings-stack {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 12px;
+  align-items: center;
+}
+
+.settings-stack .ant-input {
+  grid-column: 1 / -1;
+}
+
+.settings-inline-label {
+  color: var(--n-charcoal);
+  font-size: 14px;
+}
+
+.settings-note {
+  grid-column: 1 / -1;
+  color: var(--n-slate);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.local-image-template-tools {
+  display: grid;
+  gap: 10px;
+}
+
+.local-image-template-file-input {
+  display: none;
+}
+
 .runtime-choice {
   display: flex;
   gap: 10px;

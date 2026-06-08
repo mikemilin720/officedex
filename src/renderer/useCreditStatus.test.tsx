@@ -25,6 +25,7 @@ function makeStatus(overrides: Partial<CreditStatus> = {}): CreditStatus {
     paidKeyTotal: 0,
     paidKeyUsed: 0,
     paidKeyRemaining: 0,
+    paidEntitlement: false,
     raw: "",
     ...overrides,
   };

@@ -17,6 +17,7 @@ const baseSettings: UserSettings = {
   llmProvider: null,
   onboardingCompletedAt: null,
   proxy: null,
+  imageWatermark: { showWatermark: true, preferenceSource: "system" },
 };
 
 let updateSettingsSpy: ReturnType<typeof vi.fn>;

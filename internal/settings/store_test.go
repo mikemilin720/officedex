@@ -46,6 +46,9 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if got.Proxy == nil || got.Proxy.Enabled || got.Proxy.URL != "http://127.0.0.1:7890" {
 		t.Errorf("Proxy = %+v, want disabled default proxy URL", got.Proxy)
 	}
+	if !got.ImageWatermark.ShowWatermark || got.ImageWatermark.PreferenceSource != "system" {
+		t.Errorf("ImageWatermark = %+v, want enabled system default", got.ImageWatermark)
+	}
 	if len(logger.calls) != 0 {
 		t.Errorf("expected no warnings for missing file, got %v", logger.calls)
 	}
@@ -146,6 +149,50 @@ func TestUpdatePersistsAndSanitizes(t *testing.T) {
 	}
 	if roundtrip.Defaults.DocumentType != types.DocDOCX {
 		t.Errorf("persisted DocumentType = %v, want docx", roundtrip.Defaults.DocumentType)
+	}
+}
+
+func TestUpdatePersistsImageWatermark(t *testing.T) {
+	store, _, _ := newTempStore(t)
+	got, err := store.Update(Patch{
+		ImageWatermark: &types.ImageWatermarkSettings{
+			ShowWatermark:    true,
+			PreferenceSource: "user",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !got.ImageWatermark.ShowWatermark {
+		t.Fatal("ShowWatermark = false, want true")
+	}
+	if got.ImageWatermark.PreferenceSource != "user" {
+		t.Fatalf("PreferenceSource = %q, want user", got.ImageWatermark.PreferenceSource)
+	}
+}
+
+func TestLoadLegacyImageWatermarkDefaultsToSystemSource(t *testing.T) {
+	store, path, _ := newTempStore(t)
+	raw := map[string]any{
+		"version": 1,
+		"imageWatermark": map[string]any{
+			"showWatermark": false,
+			"text":          " legacy ",
+		},
+	}
+	body, _ := json.Marshal(raw)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.ImageWatermark.ShowWatermark {
+		t.Fatalf("ShowWatermark = true, want legacy false preserved")
+	}
+	if got.ImageWatermark.PreferenceSource != "system" {
+		t.Fatalf("PreferenceSource = %q, want system", got.ImageWatermark.PreferenceSource)
 	}
 }
 

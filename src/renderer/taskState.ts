@@ -149,6 +149,7 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
     if (artifact) {
       nextTask.artifact = artifact;
     }
+    nextTask.imageWatermark = imageWatermarkFromPayload(event.payload);
     nextTask.question = undefined;
     nextTask.stalledSince = undefined;
     applyCreditPayload(nextTask, event.payload);
@@ -245,6 +246,18 @@ function applyCreditPayload(task: DesktopTask, payload: BridgeEvent["payload"]):
   task.creditMode = typeof payload.credit_mode === "string" ? payload.credit_mode : "";
 }
 
+function imageWatermarkFromPayload(payload: BridgeEvent["payload"]): DesktopTask["imageWatermark"] {
+  if (!payload) return undefined;
+  const raw = payload.image_watermark ?? payload.imageWatermark;
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  return {
+    applied: record.applied === true,
+    paidEntitlement: record.paidEntitlement === true,
+    canDisable: record.canDisable === true,
+  };
+}
+
 function userInputFromPayload(payload: BridgeEvent["payload"]): TaskUserInput | undefined {
   if (!payload) return undefined;
   const prompt = stringValue(payload.prompt);
@@ -253,11 +266,17 @@ function userInputFromPayload(payload: BridgeEvent["payload"]): TaskUserInput | 
   const raw = payload.reference_images;
   const referenceImages = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : undefined;
   const imageRatio = normalizeImageRatio(payload.image_ratio) ?? normalizeImageRatio(payload.imageRatio);
-  return { prompt, sourceFile, referenceImages, imageRatio };
+  const fps = normalizeGIFFPS(payload.fps);
+  return { prompt, sourceFile, referenceImages, imageRatio, fps };
 }
 
 function normalizeImageRatio(value: unknown): ImageRatio | undefined {
   return value === "square" || value === "landscape" || value === "portrait" ? value : undefined;
+}
+
+function normalizeGIFFPS(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value >= 4 && value <= 24 ? Math.round(value) : undefined;
 }
 
 function stringValue(value: unknown): string {
