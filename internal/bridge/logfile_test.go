@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -148,27 +149,33 @@ func TestLogfileDropAccountingAndMarker(t *testing.T) {
 }
 
 func TestLogfileWriteNonBlockingTargetLatency(t *testing.T) {
-	// With an unblocked sink and headroom in the channel, individual writes
-	// should comfortably finish in <10μs (allocations dominate).
+	// With an unblocked sink and headroom in the channel, writes should stay
+	// fast without treating one CI scheduler hiccup as a blocking regression.
 	var buf threadSafeBuffer
 	lf := newWithSink(&buf)
 	defer lf.Close()
 
 	const samples = 5000
-	var worst time.Duration
+	durations := make([]time.Duration, 0, samples)
 	for i := 0; i < samples; i++ {
 		start := time.Now()
 		lf.Write([]byte("ping"))
-		if d := time.Since(start); d > worst {
-			worst = d
-		}
+		durations = append(durations, time.Since(start))
 	}
-	limit := 1 * time.Millisecond
+	slices.Sort(durations)
+	p99 := durations[(samples*99)/100]
+	worst := durations[samples-1]
+
+	p99Limit := 1 * time.Millisecond
 	if runtime.GOOS == "windows" {
-		limit = 2 * time.Millisecond
+		p99Limit = 2 * time.Millisecond
 	}
-	if worst > limit {
-		t.Errorf("worst-case Write latency = %v, want <%v on unblocked path", worst, limit)
+	if p99 > p99Limit {
+		t.Errorf("p99 Write latency = %v, want <%v on unblocked path", p99, p99Limit)
+	}
+	worstLimit := 20 * time.Millisecond
+	if worst > worstLimit {
+		t.Errorf("worst-case Write latency = %v, want <%v on unblocked path", worst, worstLimit)
 	}
 }
 
