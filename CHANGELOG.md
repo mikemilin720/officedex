@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.24] - 2026-06-09
+
+### Changed
+- Image template slot fields now show their default values as placeholders instead of pre-filled text, making templates easier to customize before generating.
+
+### Fixed
+- Image template cards now show a polished placeholder when a local template has no thumbnail or a thumbnail fails to load.
+
 ## [0.5.23] - 2026-06-09
 
 ### Changed
