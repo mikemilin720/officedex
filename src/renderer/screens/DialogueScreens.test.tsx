@@ -563,6 +563,38 @@ describe("DialogueScreen state machine", () => {
     expect(screen.queryByText("Disabled Local")).toBeNull();
   });
 
+  it("shows a polished placeholder for local image templates without thumbnails", async () => {
+    localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+      version: 1,
+      templates: [
+        { slug: "local-admission", title: "Local Admission", description: "Stored locally", promptPreset: "Local prompt", enabled: true },
+      ],
+    }));
+    listImageTemplatesSpy.mockResolvedValueOnce([]);
+
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText("Local Admission")).toBeTruthy();
+    const placeholder = document.querySelector(".image-template-thumb-placeholder");
+    expect(placeholder).toBeTruthy();
+    expect(document.querySelector(".image-template-thumb img")).toBeNull();
+  });
+
+  it("replaces failed image-template thumbnails with the same placeholder", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/missing-thumbnail.png", sortOrder: 10, enabled: true },
+    ]);
+
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText("Poster")).toBeTruthy();
+    const image = document.querySelector(".image-template-thumb img") as HTMLImageElement;
+    expect(image).toBeTruthy();
+    fireEvent.error(image);
+    expect(document.querySelector(".image-template-thumb-placeholder")).toBeTruthy();
+    expect(document.querySelector(".image-template-thumb img")).toBeNull();
+  });
+
   it("keeps local image-template management out of the picker", async () => {
     listImageTemplatesSpy.mockResolvedValue([]);
     render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);

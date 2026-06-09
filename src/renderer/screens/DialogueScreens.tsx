@@ -649,9 +649,7 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                   aria-pressed={selected}
                   onClick={() => onSelect(template)}
                 >
-                  <div className="image-template-thumb">
-                    {template.thumbnailUrl ? <img src={template.thumbnailUrl} alt="" /> : <MaterialSymbol name="image" />}
-                  </div>
+                  <ImageTemplateThumbnail src={template.thumbnailUrl} />
                   <span className={`image-template-scope image-template-scope-${isLocal ? "local" : template.visibility === "user_private" ? "private" : "public"}`}>
                     {isLocal ? t("dialogue.imageTemplates.scope.local") : template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public")}
                   </span>
@@ -672,6 +670,27 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImageTemplateThumbnail({ src }: { src?: string }) {
+  const [failedSrc, setFailedSrc] = useState<string | undefined>();
+  const showImage = Boolean(src && failedSrc !== src);
+
+  useEffect(() => {
+    setFailedSrc(undefined);
+  }, [src]);
+
+  return (
+    <div className="image-template-thumb">
+      {showImage ? (
+        <img src={src} alt="" draggable={false} onError={() => setFailedSrc(src)} />
+      ) : (
+        <div className="image-template-thumb-placeholder" aria-hidden="true">
+          <MaterialSymbol name="image" />
         </div>
       )}
     </div>
