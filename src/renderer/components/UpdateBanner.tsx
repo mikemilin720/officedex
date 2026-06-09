@@ -27,11 +27,12 @@ export function UpdateBanner({
   const t = useT();
   const downloading = phase === "downloading";
   const downloaded = phase === "downloaded" || phase === "installing";
+  const stacked = downloading || Boolean(error);
   const percent =
     progress.bytesTotal > 0 ? Math.min(100, Math.round((progress.bytesDone / progress.bytesTotal) * 100)) : 0;
 
   return (
-    <div className="update-banner" role="status" aria-live="polite">
+    <div className={`update-banner${stacked ? " update-banner--stacked" : ""}`} role="status" aria-live="polite">
       <div className="update-banner-icon">
         <RocketOutlined />
       </div>

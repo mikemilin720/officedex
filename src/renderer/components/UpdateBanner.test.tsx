@@ -31,7 +31,7 @@ describe("UpdateBanner", () => {
   });
 
   it("disables download button and shows progress while downloading", () => {
-    render(
+    const { container } = render(
       <UpdateBanner
         release={release}
         phase="downloading"
@@ -45,6 +45,24 @@ describe("UpdateBanner", () => {
     const dlBtn = screen.getByText("Downloading...").closest("button");
     expect(dlBtn?.disabled).toBe(true);
     expect(screen.getByText("512 B / 2.0 KB")).toBeTruthy();
+    const banner = container.querySelector(".update-banner");
+    expect(banner?.classList.contains("update-banner--stacked")).toBe(true);
+  });
+
+  it("keeps single-line update banners vertically centered", () => {
+    const { container } = render(
+      <UpdateBanner
+        release={release}
+        phase="available"
+        progress={{ bytesDone: 0, bytesTotal: 0 }}
+        error={null}
+        onUpdate={vi.fn()}
+        onInstall={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+    const banner = container.querySelector(".update-banner");
+    expect(banner?.classList.contains("update-banner--stacked")).toBe(false);
   });
 
   it("shows Restart to install when phase=downloaded", () => {

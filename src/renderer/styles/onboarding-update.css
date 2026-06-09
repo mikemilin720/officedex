@@ -217,6 +217,10 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.update-banner--stacked {
+  align-items: flex-end;
+}
+
 .update-banner-icon {
   display: flex;
   align-items: center;
@@ -226,6 +230,10 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.16);
   font-size: 18px;
+}
+
+.update-banner--stacked .update-banner-icon {
+  align-self: center;
 }
 
 .update-banner-body {
@@ -268,7 +276,12 @@
 .update-banner-actions {
   display: flex;
   align-items: center;
+  align-self: center;
   gap: 8px;
+}
+
+.update-banner--stacked .update-banner-actions {
+  align-self: flex-end;
 }
 
 .update-banner-actions .ant-btn-primary {
