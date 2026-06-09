@@ -24,7 +24,7 @@ describe("local image templates", () => {
           prompt_preset: "Show {{university_name}}",
           enabled: true,
           slots: [
-            { key: "university_name", label: "University name", required: true },
+            { key: "university_name", label: "University name", example: "Stanford", default_value: "Cambridge", required: true },
           ],
         },
       ],
@@ -41,10 +41,11 @@ describe("local image templates", () => {
         enabled: true,
         visibility: "local",
         slots: [
-          expect.objectContaining({ key: "university_name", label: "University name", required: true }),
+          expect.objectContaining({ key: "university_name", label: "University name", defaultValue: "Cambridge", required: true }),
         ],
       }),
     ]);
+    expect(imported[0].slots?.[0]).not.toHaveProperty("example");
   });
 
   it("persists and exports a stable local-template JSON file", () => {

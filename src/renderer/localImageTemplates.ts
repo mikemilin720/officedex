@@ -104,7 +104,6 @@ function normalizeSlots(raw: unknown): ImagePromptSlot[] | undefined {
     return {
       key,
       label,
-      example: stringValue(slot.example).trim() || undefined,
       defaultValue: stringValue(slot.defaultValue ?? slot.default_value).trim() || undefined,
       helpText: stringValue(slot.helpText ?? slot.help_text).trim() || undefined,
       required: booleanValue(slot.required, false),
@@ -122,8 +121,19 @@ function toStoredTemplate(template: ImagePromptTemplate): ImagePromptTemplate {
     sortOrder: template.sortOrder,
     enabled: template.enabled,
     ...(template.thumbnailUrl ? { thumbnailUrl: template.thumbnailUrl } : {}),
-    ...(template.slots?.length ? { slots: template.slots } : {}),
+    ...(template.slots?.length ? { slots: toStoredSlots(template.slots) } : {}),
   } as ImagePromptTemplate;
+}
+
+function toStoredSlots(slots: ImagePromptSlot[]): ImagePromptSlot[] {
+  return slots.map((slot) => ({
+    key: slot.key,
+    label: slot.label,
+    ...(slot.defaultValue ? { defaultValue: slot.defaultValue } : {}),
+    ...(slot.helpText ? { helpText: slot.helpText } : {}),
+    ...(slot.required ? { required: slot.required } : {}),
+    ...(slot.multiline ? { multiline: slot.multiline } : {}),
+  }));
 }
 
 function stringValue(value: unknown): string {

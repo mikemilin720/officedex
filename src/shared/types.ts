@@ -186,7 +186,6 @@ export interface ImagePromptSlot {
   /** Matches a {{key}} marker in promptPreset. Server-validated as ^[a-z0-9_]+$ and unique. */
   key: string;
   label: string;
-  example?: string;
   defaultValue?: string;
   helpText?: string;
   required?: boolean;

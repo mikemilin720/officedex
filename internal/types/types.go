@@ -185,7 +185,6 @@ type ModifyInput struct {
 type ImagePromptSlot struct {
 	Key          string `json:"key"`
 	Label        string `json:"label"`
-	Example      string `json:"example,omitempty"`
 	DefaultValue string `json:"defaultValue,omitempty"`
 	HelpText     string `json:"helpText,omitempty"`
 	Required     bool   `json:"required,omitempty"`

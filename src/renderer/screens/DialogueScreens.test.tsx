@@ -747,9 +747,9 @@ const SLOTTED_TEMPLATE = {
   sortOrder: 5,
   enabled: true,
   slots: [
-    { key: "product", label: "Product", example: "PRODUCT_HINT", required: true },
-    { key: "style", label: "Style", example: "STYLE_HINT", defaultValue: "minimalist" },
-    { key: "notes", label: "Notes", example: "NOTES_HINT", multiline: true },
+    { key: "product", label: "Product", defaultValue: "PRODUCT_HINT", required: true },
+    { key: "style", label: "Style", defaultValue: "minimalist" },
+    { key: "notes", label: "Notes", defaultValue: "NOTES_HINT", multiline: true },
   ] as ImagePromptSlot[],
 };
 
@@ -758,7 +758,7 @@ async function selectSlottedTemplate(locale?: Locale, template = SLOTTED_TEMPLAT
   render(locale ? <LocaleProvider value={locale}>{screenNode}</LocaleProvider> : screenNode);
   expect(await screen.findByText("Promo")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
-  return screen.getByPlaceholderText(template.slots[0].example!) as HTMLInputElement;
+  return screen.getByPlaceholderText(template.slots[0].defaultValue!) as HTMLInputElement;
 }
 
 describe("assembleSlots (pure assembly)", () => {
@@ -796,9 +796,10 @@ describe("Image template slots (guided fill-in)", () => {
     // multiline slot renders a <textarea>, single-line slots render <input>
     expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLElement).tagName).toBe("INPUT");
     expect((screen.getByPlaceholderText("NOTES_HINT") as HTMLElement).tagName).toBe("TEXTAREA");
+    expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLInputElement).value).toBe("");
 
     const preview = document.querySelector(".template-slot-preview-body")!;
-    expect(preview.textContent).toBe("Poster for [Product], minimalist style. Notes: [Notes]");
+    expect(preview.textContent).toBe("Poster for PRODUCT_HINT, minimalist style. Notes: NOTES_HINT");
     expect(preview.textContent).not.toContain("{{");
   });
 
@@ -808,10 +809,10 @@ describe("Image template slots (guided fill-in)", () => {
     fireEvent.change(productInput, { target: { value: "sneakers" } });
 
     const preview = document.querySelector(".template-slot-preview-body")!;
-    expect(preview.textContent).toBe("Poster for sneakers, minimalist style. Notes: [Notes]");
+    expect(preview.textContent).toBe("Poster for sneakers, minimalist style. Notes: NOTES_HINT");
   });
 
-  it("blocks submit when a required slot is empty", async () => {
+  it("uses a required slot defaultValue when the user leaves it empty", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
     render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
@@ -821,8 +822,10 @@ describe("Image template slots (guided fill-in)", () => {
     const productInput = screen.getByPlaceholderText("PRODUCT_HINT");
     fireEvent.submit(productInput.closest("form")!);
 
-    await waitFor(() => expect(screen.getAllByText(/Please fill in Product/i).length).toBeGreaterThan(0));
-    expect(onSubmit).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      prompt: "Poster for PRODUCT_HINT, minimalist style. Notes: NOTES_HINT",
+    }));
   });
 
   it("rejects a slot value containing double-brace markers", async () => {
@@ -861,7 +864,15 @@ describe("Image template slots (guided fill-in)", () => {
   });
 
   it("renders zh slot labels and uses them in required warnings", async () => {
-    listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
+    const requiredNoDefaultTemplate = {
+      ...SLOTTED_TEMPLATE,
+      slots: [
+        { key: "product", label: "Product", required: true },
+        { key: "style", label: "Style", defaultValue: "minimalist" },
+        { key: "notes", label: "Notes", defaultValue: "NOTES_HINT", multiline: true },
+      ] as ImagePromptSlot[],
+    };
+    listImageTemplatesSpy.mockResolvedValueOnce([requiredNoDefaultTemplate]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
     render(
       <LocaleProvider value="zh">
@@ -875,7 +886,7 @@ describe("Image template slots (guided fill-in)", () => {
     expect(screen.getByText("风格")).toBeTruthy();
     expect(screen.getByText("备注")).toBeTruthy();
 
-    fireEvent.submit(screen.getByPlaceholderText("PRODUCT_HINT").closest("form")!);
+    fireEvent.submit(document.querySelector(".template-slot-form input")!.closest("form")!);
     await waitFor(() => expect(screen.getAllByText(/请填写产品/).length).toBeGreaterThan(0));
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -886,7 +897,7 @@ describe("Image template slots (guided fill-in)", () => {
       id: 9,
       slug: "untranslated",
       slots: [
-        { key: "hero", label: "Hero Product", example: "HERO_HINT", required: true },
+        { key: "hero", label: "Hero Product", defaultValue: "HERO_HINT", required: true },
       ] as ImagePromptSlot[],
     };
     listImageTemplatesSpy.mockResolvedValueOnce([untranslatedTemplate]);
@@ -917,7 +928,7 @@ describe("Image template slots (guided fill-in)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reset to template/i }));
     expect(screen.getByText("Fill in the template")).toBeTruthy();
     expect((screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement).value)
-      .toBe("Poster for [Product], minimalist style. Notes: [Notes]");
+      .toBe("Poster for PRODUCT_HINT, minimalist style. Notes: NOTES_HINT");
   });
 });
 

@@ -323,7 +323,6 @@ func (c *Client) GetCapabilities(ctx context.Context) ([]byte, error) {
 type bridgeImagePromptSlot struct {
 	Key          string `json:"key"`
 	Label        string `json:"label"`
-	Example      string `json:"example,omitempty"`
 	DefaultValue string `json:"default_value,omitempty"`
 	HelpText     string `json:"help_text,omitempty"`
 	Required     bool   `json:"required,omitempty"`
@@ -376,7 +375,6 @@ func (c *Client) ListImageTemplates(ctx context.Context) ([]types.ImagePromptTem
 				slots = append(slots, types.ImagePromptSlot{
 					Key:          s.Key,
 					Label:        s.Label,
-					Example:      s.Example,
 					DefaultValue: s.DefaultValue,
 					HelpText:     s.HelpText,
 					Required:     s.Required,
@@ -416,7 +414,6 @@ func (c *Client) CreateImageTemplate(ctx context.Context, input types.CreateUser
 			slots = append(slots, map[string]any{
 				"key":           slot.Key,
 				"label":         slot.Label,
-				"example":       slot.Example,
 				"default_value": slot.DefaultValue,
 				"help_text":     slot.HelpText,
 				"required":      slot.Required,

@@ -305,7 +305,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   function seedSlots(template: ImagePromptTemplate) {
     const templateSlots = template.slots ?? [];
     const initial: Record<string, string> = {};
-    for (const slot of templateSlots) initial[slot.key] = slot.defaultValue ?? "";
+    for (const slot of templateSlots) initial[slot.key] = "";
     const assembled = assembleSlots(template.promptPreset, templateSlots, initial);
     setSlotValues(initial);
     setSlotErrors({});
@@ -396,7 +396,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
     const errs: Record<string, string> = {};
     for (const slot of slots) {
       const value = slotValues[slot.key] ?? "";
-      if (slot.required && !value.trim()) {
+      if (slot.required && !value.trim() && !slot.defaultValue?.trim()) {
         errs[slot.key] = t("dialogue.imageTemplates.slotRequired", { label: localizedSlotLabel(slot, selectedTemplate?.slug ?? "", t) });
       } else if (value.includes("{{")) {
         errs[slot.key] = t("dialogue.imageTemplates.slotBraceForbidden");
@@ -712,13 +712,13 @@ function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, 
             <Input.TextArea
               autoSize={{ minRows: 2, maxRows: 6 }}
               value={values[slot.key] ?? ""}
-              placeholder={slot.example}
+              placeholder={slot.defaultValue}
               onChange={(e) => onChange(slot.key, e.target.value)}
             />
           ) : (
             <Input
               value={values[slot.key] ?? ""}
-              placeholder={slot.example}
+              placeholder={slot.defaultValue}
               onChange={(e) => onChange(slot.key, e.target.value)}
             />
           )}
