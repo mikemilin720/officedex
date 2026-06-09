@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.22] - 2026-06-09
+
+### Changed
+- Updated the generated-image footer watermark wording.
+- Bundled the latest OfficeCLI runtime.
+
 ## [0.5.21] - 2026-06-09
 
 ### Changed
