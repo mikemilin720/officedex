@@ -821,7 +821,7 @@ describe("assembleSlots (pure assembly)", () => {
 });
 
 describe("Image template slots (guided fill-in)", () => {
-  it("renders the slot form with default values prefilled and a live preview free of markers", async () => {
+  it("renders the slot form with default values prefilled and keeps the live preview collapsed by default", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     await selectSlottedTemplate();
 
@@ -832,7 +832,14 @@ describe("Image template slots (guided fill-in)", () => {
     expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLInputElement).value).toBe("PRODUCT_HINT");
     expect((screen.getByPlaceholderText("NOTES_HINT") as HTMLTextAreaElement).value).toBe("NOTES_HINT");
 
+    expect(document.querySelector(".template-slot-preview-body")).toBeNull();
+    const previewToggle = screen.getByRole("button", { name: /Live preview/i });
+    expect(previewToggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(previewToggle);
+
     const preview = document.querySelector(".template-slot-preview-body")!;
+    expect(previewToggle.getAttribute("aria-expanded")).toBe("true");
     expect(preview.textContent).toBe("Poster for PRODUCT_HINT, minimalist style. Notes: NOTES_HINT");
     expect(preview.textContent).not.toContain("{{");
   });
@@ -841,9 +848,18 @@ describe("Image template slots (guided fill-in)", () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     const productInput = await selectSlottedTemplate();
     fireEvent.change(productInput, { target: { value: "sneakers" } });
+    fireEvent.click(screen.getByRole("button", { name: /Live preview/i }));
 
     const preview = document.querySelector(".template-slot-preview-body")!;
     expect(preview.textContent).toBe("Poster for sneakers, minimalist style. Notes: NOTES_HINT");
+  });
+
+  it("labels the image reference upload button with visible upload guidance", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
+    await selectSlottedTemplate();
+
+    const uploadButton = screen.getByRole("button", { name: /Attach reference images/i });
+    expect(within(uploadButton).getByText(/Upload reference images/i)).toBeTruthy();
   });
 
   it("uses a required slot defaultValue when the user leaves it empty", async () => {

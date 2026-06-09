@@ -429,18 +429,39 @@
   border: 1px solid color-mix(in srgb, var(--n-primary) 16%, transparent);
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--n-primary) 6%, var(--n-canvas));
-  padding: 10px 12px;
+  overflow: hidden;
 }
 
-.template-slot-preview-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.template-slot-preview-toggle {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
   color: var(--n-slate);
-  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.template-slot-preview-toggle:hover {
+  color: var(--n-slate);
+  background: color-mix(in srgb, var(--n-primary) 5%, transparent);
+}
+
+.template-slot-preview-toggle .anticon {
+  flex: 0 0 auto;
+  font-size: 11px;
 }
 
 .template-slot-preview-body {
+  border-top: 1px solid color-mix(in srgb, var(--n-primary) 12%, transparent);
+  padding: 10px 12px 12px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--n-ink);
@@ -503,6 +524,10 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.reference-image-upload-button {
+  min-width: 150px;
 }
 
 .attached-file {

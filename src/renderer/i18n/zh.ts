@@ -110,6 +110,7 @@ export const zh: Record<string, string> = {
   "dialogue.attach.referenceImages.tooltip": "添加参考图片（最多 {max} 张）",
   "dialogue.attach.referenceImages.aria": "添加参考图片",
   "dialogue.attach.referenceImages.attach": "附加参考图片",
+  "dialogue.attach.referenceImages.uploadCta": "点击上传参考图",
   "dialogue.attach.referenceImages.add": "添加参考图片",
   "dialogue.attach.referenceImages.addMore": "继续添加",
   "dialogue.attach.referenceImages.limit": "已达到参考图片数量上限（{max}）。",

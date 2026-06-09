@@ -90,6 +90,7 @@ export const en: Record<string, string> = {
   "dialogue.attach.referenceImages.tooltip": "Attach reference images (up to {max})",
   "dialogue.attach.referenceImages.aria": "Add reference image",
   "dialogue.attach.referenceImages.attach": "Attach reference images",
+  "dialogue.attach.referenceImages.uploadCta": "Upload reference images",
   "dialogue.attach.referenceImages.add": "Add reference images",
   "dialogue.attach.referenceImages.addMore": "Add more",
   "dialogue.attach.referenceImages.limit": "Reference images limit reached ({max}).",

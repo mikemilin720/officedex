@@ -7,6 +7,7 @@ import {
   CopyOutlined,
   DeleteOutlined,
   DisconnectOutlined,
+  DownOutlined,
 
   FileTextOutlined,
   FolderOpenOutlined,
@@ -15,6 +16,7 @@ import {
   MoreOutlined,
   PaperClipOutlined,
   PlayCircleOutlined,
+  RightOutlined,
   SendOutlined,
   StopOutlined,
   UserOutlined,
@@ -574,11 +576,14 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
             {attachments.referenceImagesSpec ? (
               <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
                 <Button
+                  className="reference-image-upload-button"
                   icon={<MaterialSymbol name="image" />}
                   onClick={attachments.pickReferenceImages}
                   disabled={attachments.isReferenceLimitReached}
                   aria-label={t("dialogue.attach.referenceImages.attach")}
-                />
+                >
+                  {t("dialogue.attach.referenceImages.uploadCta")}
+                </Button>
               </Tooltip>
             ) : null}
             <Tooltip title={t("dialogue.attach.advancedOptions")}>
@@ -713,6 +718,8 @@ function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, 
   onChange: (key: string, value: string) => void;
   t: Translator;
 }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   return (
     <div className="template-slot-form">
       <div className="template-slot-form-title">{t("dialogue.imageTemplates.slotFormTitle")}</div>
@@ -742,8 +749,16 @@ function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, 
         </Form.Item>
       ))}
       <div className="template-slot-preview">
-        <div className="template-slot-preview-label">{t("dialogue.imageTemplates.previewLabel")}</div>
-        <div className="template-slot-preview-body">{previewText}</div>
+        <button
+          type="button"
+          className="template-slot-preview-toggle"
+          aria-expanded={previewOpen}
+          onClick={() => setPreviewOpen((open) => !open)}
+        >
+          {previewOpen ? <DownOutlined /> : <RightOutlined />}
+          <span>{t("dialogue.imageTemplates.previewLabel")}</span>
+        </button>
+        {previewOpen ? <div className="template-slot-preview-body">{previewText}</div> : null}
       </div>
     </div>
   );
@@ -1368,11 +1383,14 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
           {supportsReferenceImages ? (
             <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: referenceImageMaxCount })}>
               <Button
+                className="reference-image-upload-button"
                 icon={<MaterialSymbol name="image" />}
                 onClick={pickReferenceImages}
                 disabled={inputDisabled || referenceLimitReached}
                 aria-label={t("dialogue.attach.referenceImages.attach")}
-              />
+              >
+                {t("dialogue.attach.referenceImages.uploadCta")}
+              </Button>
             </Tooltip>
           ) : null}
           <Input.TextArea
