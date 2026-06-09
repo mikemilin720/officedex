@@ -577,6 +577,7 @@ describe("DialogueScreen state machine", () => {
     expect(await screen.findByText("Local Admission")).toBeTruthy();
     const placeholder = document.querySelector(".image-template-thumb-placeholder");
     expect(placeholder).toBeTruthy();
+    expect(placeholder?.querySelector(".material-symbol")).toBeNull();
     expect(document.querySelector(".image-template-thumb img")).toBeNull();
   });
 
@@ -820,7 +821,7 @@ describe("assembleSlots (pure assembly)", () => {
 });
 
 describe("Image template slots (guided fill-in)", () => {
-  it("renders the slot form with a multiline field and a live preview free of markers", async () => {
+  it("renders the slot form with default values prefilled and a live preview free of markers", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     await selectSlottedTemplate();
 
@@ -828,7 +829,8 @@ describe("Image template slots (guided fill-in)", () => {
     // multiline slot renders a <textarea>, single-line slots render <input>
     expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLElement).tagName).toBe("INPUT");
     expect((screen.getByPlaceholderText("NOTES_HINT") as HTMLElement).tagName).toBe("TEXTAREA");
-    expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLInputElement).value).toBe("PRODUCT_HINT");
+    expect((screen.getByPlaceholderText("NOTES_HINT") as HTMLTextAreaElement).value).toBe("NOTES_HINT");
 
     const preview = document.querySelector(".template-slot-preview-body")!;
     expect(preview.textContent).toBe("Poster for PRODUCT_HINT, minimalist style. Notes: NOTES_HINT");

@@ -323,21 +323,6 @@
   transform: translate(24%, 16%) rotate(7deg);
 }
 
-.image-template-thumb-placeholder .material-symbol {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 1px solid rgba(104, 85, 224, 0.18);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--n-primary);
-  font-size: 18px;
-  box-shadow: 0 8px 18px rgba(104, 85, 224, 0.12);
-}
-
 .image-template-card strong {
   color: var(--n-charcoal);
   font-size: 13px;

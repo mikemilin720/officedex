@@ -305,7 +305,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   function seedSlots(template: ImagePromptTemplate) {
     const templateSlots = template.slots ?? [];
     const initial: Record<string, string> = {};
-    for (const slot of templateSlots) initial[slot.key] = "";
+    for (const slot of templateSlots) initial[slot.key] = slot.defaultValue ?? "";
     const assembled = assembleSlots(template.promptPreset, templateSlots, initial);
     setSlotValues(initial);
     setSlotErrors({});
@@ -689,9 +689,7 @@ function ImageTemplateThumbnail({ src }: { src?: string }) {
       {showImage ? (
         <img src={src} alt="" draggable={false} onError={() => setFailedSrc(src)} />
       ) : (
-        <div className="image-template-thumb-placeholder" aria-hidden="true">
-          <MaterialSymbol name="image" />
-        </div>
+        <div className="image-template-thumb-placeholder" aria-hidden="true" />
       )}
     </div>
   );

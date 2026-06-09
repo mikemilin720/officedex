@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Changed
+- Image template slot fields now pre-fill each field with the template default value, so users can generate from defaults immediately and edit only the fields they want to customize.
+- Image template fallback thumbnails now use the abstract card artwork without the center circle or file icon.
 
 ## [0.5.24] - 2026-06-09
 
