@@ -37,7 +37,7 @@ import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
 import { ReportIssueDialog } from "../components/ReportIssueDialog";
 import { Check as CheckIcon, Copy as CopyIcon } from "lucide-react";
-import { loadLocalImageTemplates } from "../localImageTemplates";
+import { loadLocalImageTemplates, saveLocalImageTemplates } from "../localImageTemplates";
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -374,6 +374,21 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
     }
   }
 
+  function deleteLocalImageTemplate(template: ImagePromptTemplate) {
+    if (template.visibility !== "local") return;
+    const targetId = String(template.id);
+    const remainingLocalTemplates = loadLocalImageTemplates().filter((item) => String(item.id) !== targetId);
+    saveLocalImageTemplates(remainingLocalTemplates);
+    setImageTemplates((items) => items.filter((item) => !(item.visibility === "local" && String(item.id) === targetId)));
+    if (selectedTemplateId === targetId) {
+      setSelectedTemplateId(undefined);
+      setSlotValues({});
+      setSlotErrors({});
+      setRawDecoupled(false);
+      setRawOpen(false);
+    }
+  }
+
   function handleSlotChange(key: string, value: string) {
     const next = { ...slotValues, [key]: value };
     setSlotValues(next);
@@ -511,6 +526,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
             error={templatesError}
             onSelect={applyImageTemplate}
             onCopy={copyImageTemplate}
+            onDeleteLocal={deleteLocalImageTemplate}
             onClear={() => setSelectedTemplateId(undefined)}
             onRefresh={loadImageTemplates}
             copyingId={copyingTemplateId}
@@ -599,13 +615,14 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   );
 }
 
-function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onCopy, onClear, onRefresh, copyingId, t }: {
+function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onCopy, onDeleteLocal, onClear, onRefresh, copyingId, t }: {
   templates: ImagePromptTemplate[];
   selectedId?: string;
   loading: boolean;
   error: string;
   onSelect: (template: ImagePromptTemplate) => void;
   onCopy: (template: ImagePromptTemplate) => void;
+  onDeleteLocal: (template: ImagePromptTemplate) => void;
   onClear: () => void;
   onRefresh: () => void;
   copyingId?: string;
@@ -661,7 +678,17 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                   <strong>{template.title}</strong>
                   {template.description ? <span>{template.description}</span> : null}
                 </button>
-                {!isLocal ? (
+                {isLocal ? (
+                  <button
+                    type="button"
+                    className="image-template-delete"
+                    onClick={() => onDeleteLocal(template)}
+                    aria-label={t("dialogue.imageTemplates.deleteLocalAria", { title: template.title })}
+                  >
+                    <DeleteOutlined />
+                    <span>{t("dialogue.imageTemplates.delete")}</span>
+                  </button>
+                ) : (
                   <button
                     type="button"
                     className="image-template-copy"
@@ -671,7 +698,7 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                   >
                     {copyingId === id ? t("dialogue.imageTemplates.copying") : t("dialogue.imageTemplates.copy")}
                   </button>
-                ) : null}
+                )}
               </div>
             );
           })}

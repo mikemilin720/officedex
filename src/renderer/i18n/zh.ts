@@ -78,6 +78,8 @@ export const zh: Record<string, string> = {
   "dialogue.imageTemplates.local.importSuccess": "已导入 {count} 个本地模板",
   "dialogue.imageTemplates.local.importError": "模板导入失败：{error}",
   "dialogue.imageTemplates.local.exportSuccess": "已导出 {count} 个本地模板",
+  "dialogue.imageTemplates.delete": "删除",
+  "dialogue.imageTemplates.deleteLocalAria": "删除本地模板 {title}",
   "dialogue.imageTemplates.copy": "复制",
   "dialogue.imageTemplates.copying": "保存中……",
   "dialogue.imageTemplates.copyAria": "复制到我的模板",

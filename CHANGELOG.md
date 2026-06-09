@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.26] - 2026-06-09
+
+### Added
+- Local image templates can now be deleted directly from the image template picker.
+
 ### Changed
+- OfficeDex now uses the new app logo across the desktop app, app icon, favicon, and README surfaces.
 - Image template slot fields now pre-fill each field with the template default value, so users can generate from defaults immediately and edit only the fields they want to customize.
 - Image template fallback thumbnails now use the abstract card artwork without the center circle or file icon.
 

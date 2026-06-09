@@ -581,6 +581,43 @@ describe("DialogueScreen state machine", () => {
     expect(document.querySelector(".image-template-thumb img")).toBeNull();
   });
 
+  it("deletes local image templates from the picker and local storage only", async () => {
+    localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+      version: 1,
+      templates: [
+        { slug: "local-admission", title: "Local Admission", description: "Stored locally", promptPreset: "Local prompt", enabled: true },
+        { slug: "local-poster", title: "Local Poster", description: "", promptPreset: "Poster prompt", enabled: true },
+      ],
+    }));
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Platform prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
+    ]);
+
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText("Local Admission")).toBeTruthy();
+    expect(screen.getByText("Local Poster")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Delete local template Local Admission$/i }));
+
+    await waitFor(() => expect(screen.queryByText("Local Admission")).toBeNull());
+    expect(screen.getByText("Local Poster")).toBeTruthy();
+    expect(screen.getByText("Poster")).toBeTruthy();
+    expect(listImageTemplatesSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem("officedex:local-image-templates") ?? "{}")).toEqual({
+      version: 1,
+      templates: [
+        {
+          slug: "local-poster",
+          title: "Local Poster",
+          description: "",
+          promptPreset: "Poster prompt",
+          sortOrder: 1,
+          enabled: true,
+        },
+      ],
+    });
+  });
+
   it("replaces failed image-template thumbnails with the same placeholder", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/missing-thumbnail.png", sortOrder: 10, enabled: true },

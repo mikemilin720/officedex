@@ -255,7 +255,12 @@
   text-align: left;
 }
 
-.image-template-copy {
+.image-template-copy,
+.image-template-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   border: 1px solid var(--n-hairline);
   border-radius: var(--radius-sm);
   background: var(--n-white);
@@ -265,6 +270,14 @@
   font-weight: 600;
   min-height: 28px;
   padding: 4px 8px;
+}
+
+.image-template-delete {
+  color: var(--n-error);
+}
+
+.image-template-delete .anticon {
+  font-size: 12px;
 }
 
 .image-template-copy:disabled {

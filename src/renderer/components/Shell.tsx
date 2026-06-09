@@ -116,7 +116,9 @@ export function Shell({
     <div className={`app-shell fluid-shell ${inspector ? "preview-active sidebar-collapsed" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand-block">
-          <div className="brand-mark"><AppstoreOutlined /></div>
+          <div className="brand-mark">
+            <img src="./officedex-logo.svg" alt="OfficeDex logo" />
+          </div>
           <div className="brand-text">
             <div className="brand">{t("shell.brand")}</div>
             <div className={`bridge-pill ${failed ? "failed" : ""}`}>{t(pillLabelKey(failed, errorKind))}</div>

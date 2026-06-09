@@ -25,6 +25,33 @@ afterEach(() => {
 });
 
 describe("Shell sidebar layout", () => {
+  it("uses the OfficeDex SVG logo for the sidebar brand mark", () => {
+    render(
+      <LocaleProvider value="en">
+        {createElement(
+          Shell as unknown as ComponentType<Record<string, unknown>>,
+          {
+            activeNav: "tasks",
+            bridgeStatus: "connected",
+            failed: false,
+            tasks: [],
+            selectedTaskId: undefined,
+            conversations: [],
+            selectedConversationId: undefined,
+            onNavChange: vi.fn(),
+            onNewGeneration: vi.fn(),
+            onSelectTask: vi.fn(),
+            onDeleteTask: vi.fn(),
+            onDeleteConversation: vi.fn(),
+          },
+          <div />,
+        )}
+      </LocaleProvider>,
+    );
+
+    expect(screen.getByAltText("OfficeDex logo").getAttribute("src")).toBe("./officedex-logo.svg");
+  });
+
   it("places the credit meter above Profile in the sidebar footer", () => {
     render(
       <LocaleProvider value="en">

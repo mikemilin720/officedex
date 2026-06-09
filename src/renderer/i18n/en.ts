@@ -78,6 +78,8 @@ export const en: Record<string, string> = {
   "dialogue.imageTemplates.local.importSuccess": "Imported {count} local templates",
   "dialogue.imageTemplates.local.importError": "Template import failed: {error}",
   "dialogue.imageTemplates.local.exportSuccess": "Exported {count} local templates",
+  "dialogue.imageTemplates.delete": "Delete",
+  "dialogue.imageTemplates.deleteLocalAria": "Delete local template {title}",
   "dialogue.imageTemplates.copy": "Copy",
   "dialogue.imageTemplates.copying": "Saving…",
   "dialogue.imageTemplates.copyAria": "Copy to my templates",
