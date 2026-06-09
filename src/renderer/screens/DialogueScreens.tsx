@@ -23,11 +23,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { getAttachmentSpec } from "../../shared/types";
 import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState } from "../../shared/types";
-import { defaultGenerateInput } from "../defaults";
+import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
 import { officecli } from "../bridge";
-import { documentTypeOptions } from "../defaults";
 import { FileGlyph, MaterialSymbol } from "../components/Shell";
 import { TaskRuntimePanel } from "../components/TaskRuntimePanel";
 import { acquireBlob, releaseBlob } from "../imageCache";
@@ -193,6 +192,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   const { settings } = useSettings();
   const t = useT();
   const initialValues = { ...defaultGenerateInput, ...settings.defaults, ...draft };
+  initialValues.documentType = normalizeNewGenerationDocumentType(initialValues.documentType);
   const docType = (Form.useWatch("documentType", form) ?? initialValues.documentType) as DocumentType;
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>();
   const [imageTemplates, setImageTemplates] = useState<ImagePromptTemplate[]>([]);
@@ -251,7 +251,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
 
   useEffect(() => {
     form.setFieldsValue({
-      documentType: draft.documentType,
+      documentType: normalizeNewGenerationDocumentType(draft.documentType),
       topic: draft.topic,
       prompt: draft.prompt,
       mode: draft.mode,
@@ -438,7 +438,7 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
       </section>
       <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
         onDraftChange({
-          documentType: (values.documentType ?? draft.documentType) as DocumentType,
+          documentType: normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType),
           topic: values.topic ?? "",
           prompt: values.prompt ?? "",
           mode: values.mode,
@@ -458,13 +458,14 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
         }
         const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, fps: rawFPS, ...submitValues } = values;
         void _promptTemplateId;
+        const documentType = normalizeNewGenerationDocumentType(submitValues.documentType);
         const prompt = hasSlots && !rawDecoupled && selectedTemplate
           ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
           : submitValues.prompt;
-        const nextInput: GenerateInput = { ...submitValues, prompt, ...attachments.collect() };
-        if (submitValues.documentType === "img") {
+        const nextInput: GenerateInput = { ...submitValues, documentType, prompt, ...attachments.collect() };
+        if (documentType === "img") {
           nextInput.imageRatio = normalizeImageRatio(rawImageRatio);
-        } else if (submitValues.documentType === "gif") {
+        } else if (documentType === "gif") {
           nextInput.fps = normalizeGIFFPS(rawFPS);
         }
         onSubmit(nextInput);

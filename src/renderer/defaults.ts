@@ -22,7 +22,13 @@ export function isValidProxyUrl(url: string): boolean {
   return PROXY_URL_PATTERN.test(url.trim());
 }
 
-export const documentTypeOptions: Array<{ value: DocumentType; label: string; icon: string }> = DOCUMENT_TYPES.map((type) => {
+export const newGenerationDocumentTypes: DocumentType[] = DOCUMENT_TYPES.filter((type) => type !== "gif");
+
+export function normalizeNewGenerationDocumentType(value: unknown): DocumentType {
+  return newGenerationDocumentTypes.includes(value as DocumentType) ? (value as DocumentType) : "pptx";
+}
+
+export const documentTypeOptions: Array<{ value: DocumentType; label: string; icon: string }> = newGenerationDocumentTypes.map((type) => {
   const capability = getCapability(type);
   return { value: capability.type, label: capability.label, icon: capability.icon };
 });

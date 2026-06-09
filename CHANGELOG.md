@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
+## [0.5.21] - 2026-06-09
+
+### Changed
+- Temporarily hid GIF generation from the new-generation format picker.
+
 ## [0.5.20] - 2026-06-08
 
 ### Added

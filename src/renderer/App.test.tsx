@@ -734,7 +734,7 @@ describe("App task flow", () => {
     );
   });
 
-  it("submits fps for new GIF generation", async () => {
+  it("hides GIF from new generation", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");
 
@@ -742,25 +742,21 @@ describe("App task flow", () => {
 
     await screen.findByRole("heading", { name: "Start a New Generation" });
 
-    fireEvent.click(screen.getByLabelText("GIF"));
-    expect(await screen.findByText("GIF FPS")).toBeTruthy();
-    expect(screen.queryByText("Image ratio")).toBeNull();
-    const fpsInput = screen.getByRole("spinbutton", { name: /GIF FPS/i });
-    fireEvent.change(fpsInput, { target: { value: "12" } });
+    expect(screen.queryByLabelText("GIF")).toBeNull();
+    expect(screen.queryByText("GIF FPS")).toBeNull();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
-      target: { value: "Make a stable reaction GIF" },
+      target: { value: "Create a launch deck" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
 
     await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
     expect(bridge.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        documentType: "gif",
-        prompt: "Make a stable reaction GIF",
-        fps: 12,
+        documentType: "pptx",
+        prompt: "Create a launch deck",
       }),
     );
-    expect(bridge.generate).toHaveBeenCalledWith(expect.not.objectContaining({ imageRatio: expect.anything() }));
+    expect(bridge.generate).toHaveBeenCalledWith(expect.not.objectContaining({ fps: expect.anything() }));
   });
 
   it("does not include referenceImages when documentType is not Image", async () => {

@@ -607,26 +607,23 @@ describe("DialogueScreen state machine", () => {
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
   });
 
-  it("submits fps for new GIF generation and omits imageRatio", async () => {
+  it("hides GIF from new generation and falls back to PPTX for GIF drafts", async () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
     render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "gif", topic: "", prompt: "", mode: "fast", fps: 16 }} />);
 
-    expect(screen.getByText("GIF FPS")).toBeTruthy();
-    expect(screen.queryByText("Image ratio")).toBeNull();
-    const fpsInput = screen.getByRole("spinbutton", { name: /GIF FPS/i });
-    fireEvent.change(fpsInput, { target: { value: "12" } });
+    expect(screen.queryByText("GIF")).toBeNull();
+    expect(screen.queryByText("GIF FPS")).toBeNull();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
-      target: { value: "一个女生先眨眼，然后说话，最后笑一下。" },
+      target: { value: "Build a launch deck" },
     });
     fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
-      documentType: "gif",
-      prompt: "一个女生先眨眼，然后说话，最后笑一下。",
-      fps: 12,
+      documentType: "pptx",
+      prompt: "Build a launch deck",
     }));
-    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("fps");
   });
 
   it("image generation confirms before replacing an existing prompt with a template", async () => {
