@@ -11,6 +11,7 @@ import {
 
   FileTextOutlined,
   FolderOpenOutlined,
+  GlobalOutlined,
   LinkOutlined,
   LoadingOutlined,
   MoreOutlined,
@@ -22,7 +23,7 @@ import {
   UserOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode } from "react";
 import { getAttachmentSpec } from "../../shared/types";
 import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
@@ -200,7 +201,6 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   const [imageTemplates, setImageTemplates] = useState<ImagePromptTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState("");
-  const [copyingTemplateId, setCopyingTemplateId] = useState<string | undefined>();
   const [slotValues, setSlotValues] = useState<Record<string, string>>({});
   const [slotErrors, setSlotErrors] = useState<Record<string, string>>({});
   const [rawDecoupled, setRawDecoupled] = useState(false);
@@ -350,28 +350,6 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
       return;
     }
     apply();
-  }
-
-  async function copyImageTemplate(template: ImagePromptTemplate) {
-    const sourceId = Number(template.id);
-    if (!Number.isFinite(sourceId) || sourceId <= 0) return;
-    const slugBase = slugifyTemplateTitle(template.slug || template.title || "image-template");
-    const titleBase = template.title.trim() || t("dialogue.imageTemplates.defaultCopiedTitle");
-    setCopyingTemplateId(String(template.id));
-    try {
-      await officecli.createImageTemplate({
-        sourceTemplateID: sourceId,
-        slug: `${slugBase}-copy`,
-        title: t("dialogue.imageTemplates.copyTitle", { title: titleBase }),
-        description: template.description,
-      });
-      void message.success(t("dialogue.imageTemplates.copySuccess"));
-      loadImageTemplates();
-    } catch (error) {
-      void message.error(t("dialogue.imageTemplates.copyError", { error: error instanceof Error ? error.message : String(error) }));
-    } finally {
-      setCopyingTemplateId(undefined);
-    }
   }
 
   function deleteLocalImageTemplate(template: ImagePromptTemplate) {
@@ -525,11 +503,9 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
             loading={templatesLoading}
             error={templatesError}
             onSelect={applyImageTemplate}
-            onCopy={copyImageTemplate}
             onDeleteLocal={deleteLocalImageTemplate}
             onClear={() => setSelectedTemplateId(undefined)}
             onRefresh={loadImageTemplates}
-            copyingId={copyingTemplateId}
             t={t}
           />
         ) : null}
@@ -615,17 +591,15 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
   );
 }
 
-function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onCopy, onDeleteLocal, onClear, onRefresh, copyingId, t }: {
+function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onDeleteLocal, onClear, onRefresh, t }: {
   templates: ImagePromptTemplate[];
   selectedId?: string;
   loading: boolean;
   error: string;
   onSelect: (template: ImagePromptTemplate) => void;
-  onCopy: (template: ImagePromptTemplate) => void;
   onDeleteLocal: (template: ImagePromptTemplate) => void;
   onClear: () => void;
   onRefresh: () => void;
-  copyingId?: string;
   t: Translator;
 }) {
   return (
@@ -660,6 +634,7 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
             const id = String(template.id);
             const selected = selectedId === id;
             const isLocal = template.visibility === "local";
+            const scopeLabel = isLocal ? t("dialogue.imageTemplates.scope.local") : template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public");
             return (
               <div
                 key={id}
@@ -671,12 +646,14 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                   aria-pressed={selected}
                   onClick={() => onSelect(template)}
                 >
-                  <ImageTemplateThumbnail src={template.thumbnailUrl} />
-                  <span className={`image-template-scope image-template-scope-${isLocal ? "local" : template.visibility === "user_private" ? "private" : "public"}`}>
-                    {isLocal ? t("dialogue.imageTemplates.scope.local") : template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public")}
-                  </span>
+                  <ImageTemplateThumbnail src={template.thumbnailUrl}>
+                    <ImageTemplateScopeIcon
+                      label={scopeLabel}
+                      scope={isLocal ? "local" : template.visibility === "user_private" ? "private" : "public"}
+                    />
+                  </ImageTemplateThumbnail>
                   <strong>{template.title}</strong>
-                  {template.description ? <span>{template.description}</span> : null}
+                  {template.description ? <span className="image-template-description">{template.description}</span> : null}
                 </button>
                 {isLocal ? (
                   <button
@@ -684,21 +661,11 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                     className="image-template-delete"
                     onClick={() => onDeleteLocal(template)}
                     aria-label={t("dialogue.imageTemplates.deleteLocalAria", { title: template.title })}
+                    title={t("dialogue.imageTemplates.deleteLocalAria", { title: template.title })}
                   >
                     <DeleteOutlined />
-                    <span>{t("dialogue.imageTemplates.delete")}</span>
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="image-template-copy"
-                    onClick={() => onCopy(template)}
-                    disabled={copyingId === id}
-                    aria-label={t("dialogue.imageTemplates.copyAria", { title: template.title })}
-                  >
-                    {copyingId === id ? t("dialogue.imageTemplates.copying") : t("dialogue.imageTemplates.copy")}
-                  </button>
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -708,7 +675,18 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
   );
 }
 
-function ImageTemplateThumbnail({ src }: { src?: string }) {
+function ImageTemplateScopeIcon({ scope, label }: { scope: "public" | "private" | "local"; label: string }) {
+  const Icon = scope === "public" ? GlobalOutlined : scope === "private" ? UserOutlined : FolderOpenOutlined;
+  return (
+    <Tooltip title={label}>
+      <span className={`image-template-scope-icon image-template-scope-icon-${scope}`} role="img" aria-label={label}>
+        <Icon />
+      </span>
+    </Tooltip>
+  );
+}
+
+function ImageTemplateThumbnail({ src, children }: { src?: string; children?: ReactNode }) {
   const [failedSrc, setFailedSrc] = useState<string | undefined>();
   const showImage = Boolean(src && failedSrc !== src);
 
@@ -717,23 +695,18 @@ function ImageTemplateThumbnail({ src }: { src?: string }) {
   }, [src]);
 
   return (
-    <div className="image-template-thumb">
+    <div
+      className="image-template-thumb"
+      style={showImage ? { "--image-template-thumb-src": `url("${src}")` } as CSSProperties : undefined}
+    >
       {showImage ? (
-        <img src={src} alt="" draggable={false} onError={() => setFailedSrc(src)} />
+        <img src={src} alt="" draggable={false} style={{ objectFit: "contain" }} onError={() => setFailedSrc(src)} />
       ) : (
         <div className="image-template-thumb-placeholder" aria-hidden="true" />
       )}
+      {children}
     </div>
   );
-}
-
-function slugifyTemplateTitle(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-  return slug || "image-template";
 }
 
 function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, t }: {

@@ -559,8 +559,33 @@ describe("DialogueScreen state machine", () => {
     const localTitle = await screen.findByText("Local Admission");
     const platformTitle = await screen.findByText("Poster");
     expect(Boolean(localTitle.compareDocumentPosition(platformTitle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(screen.getByText("Local")).toBeTruthy();
+    expect(screen.getByLabelText("Local")).toBeTruthy();
     expect(screen.queryByText("Disabled Local")).toBeNull();
+  });
+
+  it("shows complete image-template previews with icon tooltips instead of scope pills and copy buttons", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "public-poster", title: "Public Poster", description: "Cinematic poster", promptPreset: "Public prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
+      { id: 8, slug: "private-poster", title: "Private Poster", description: "Private poster", promptPreset: "Private prompt", thumbnailUrl: "/api/image-templates/8/thumbnail", sortOrder: 20, enabled: true, visibility: "user_private" },
+    ]);
+
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(await screen.findByText("Public Poster")).toBeTruthy();
+    expect(screen.getByText("Private Poster")).toBeTruthy();
+    expect(screen.queryByText("Public")).toBeNull();
+    expect(screen.queryByText("My template")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Copy to my templates$/i })).toBeNull();
+    expect((document.querySelector(".image-template-thumb img") as HTMLImageElement).style.objectFit).toBe("contain");
+
+    fireEvent.mouseEnter(screen.getByLabelText("Public"));
+    expect((await screen.findByRole("tooltip")).textContent).toContain("Public");
+    fireEvent.mouseLeave(screen.getByLabelText("Public"));
+
+    fireEvent.mouseEnter(screen.getByLabelText("My template"));
+    await waitFor(() => {
+      expect(screen.getAllByRole("tooltip").some((tooltip) => tooltip.textContent?.includes("My template"))).toBe(true);
+    });
   });
 
   it("shows a polished placeholder for local image templates without thumbnails", async () => {
@@ -763,28 +788,15 @@ describe("DialogueScreen state machine", () => {
     expect(await screen.findByText("Banner")).toBeTruthy();
   });
 
-  it("copies a public image template into the user's private library", async () => {
-    listImageTemplatesSpy
-      .mockResolvedValueOnce([
-        { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
-      ])
-      .mockResolvedValueOnce([
-        { id: 17, slug: "poster-copy", title: "Poster copy", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/17/thumbnail", sortOrder: 10, enabled: true, visibility: "user_private" },
-      ]);
+  it("does not expose image-template copy controls in the picker", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
+    ]);
     render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Copy to my templates$/i }));
-
-    await waitFor(() => expect(createImageTemplateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      sourceTemplateID: 7,
-      title: "Poster copy",
-      slug: "poster-copy",
-    })));
-    expect(antdMessage.success).toHaveBeenCalledWith("Saved to My templates");
-    await waitFor(() => expect(listImageTemplatesSpy).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("Poster copy")).toBeTruthy();
-    expect(screen.getByText("My template")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Copy to my templates$/i })).toBeNull();
+    expect(createImageTemplateSpy).not.toHaveBeenCalled();
   });
 });
 
