@@ -206,11 +206,8 @@ export function SettingsScreen({
     }
   }, [pasteTemplateJSON, replaceLocalTemplates]);
 
-  const scrollToSettingsSection = useCallback((section: string) => {
+  const selectSettingsSection = useCallback((section: string) => {
     setActiveSettingsSection(section);
-    document
-      .getElementById(settingsSectionId(section))
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
   const settingsSections = [
@@ -238,7 +235,7 @@ export function SettingsScreen({
               className={activeSettingsSection === section.key ? "active" : ""}
               aria-label={section.label}
               aria-current={activeSettingsSection === section.key ? "true" : undefined}
-              onClick={() => scrollToSettingsSection(section.key)}
+              onClick={() => selectSettingsSection(section.key)}
             >
               <MaterialSymbol name={section.icon} />
               <span>{section.label}</span>
@@ -263,6 +260,7 @@ export function SettingsScreen({
           <div className="settings-loading"><Spin /> <span>{t("settings.loading")}</span></div>
         ) : (
           <>
+            {activeSettingsSection === "generation" ? (
             <div className="setting-group" id={settingsSectionId("generation")}>
               <h2>{t("settings.group.generation")}</h2>
               <SettingRow title={t("settings.row.documentType.title")} desc={t("settings.row.documentType.desc")}>
@@ -306,6 +304,8 @@ export function SettingsScreen({
                 />
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "imageWatermark" ? (
             <div className="setting-group" id={settingsSectionId("imageWatermark")}>
               <h2>{t("settings.group.imageWatermark")}</h2>
               <SettingRow title={t("settings.row.imageWatermark.title")} desc={t("settings.row.imageWatermark.desc")}>
@@ -329,6 +329,8 @@ export function SettingsScreen({
                 </div>
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "localImageTemplates" ? (
             <div className="setting-group" id={settingsSectionId("localImageTemplates")}>
               <h2>{t("settings.group.localImageTemplates")}</h2>
               <SettingRow title={t("settings.localImageTemplates.title")} desc={t("settings.localImageTemplates.desc")}>
@@ -362,6 +364,8 @@ export function SettingsScreen({
                 </div>
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "appearance" ? (
             <div className="setting-group" id={settingsSectionId("appearance")}>
               <h2>{t("settings.group.appearance")}</h2>
               <SettingRow title={t("settings.row.language.title")} desc={t("settings.row.language.desc")}>
@@ -376,6 +380,8 @@ export function SettingsScreen({
                 />
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "workspace" ? (
             <div className="setting-group" id={settingsSectionId("workspace")}>
               <h2>{t("settings.group.workspace")}</h2>
               <SettingRow title={t("settings.row.outputDir.title")} desc={t("settings.row.outputDir.desc")}>
@@ -397,6 +403,8 @@ export function SettingsScreen({
                 ) : null}
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "connection" ? (
             <div className="setting-group" id={settingsSectionId("connection")}>
               <h2>{t("settings.group.connection")}</h2>
               <SettingRow title={t("settings.row.provider.title")} desc={t("settings.row.provider.desc")}>
@@ -415,16 +423,22 @@ export function SettingsScreen({
                 />
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "subscription" ? (
             <div className="setting-group" id={settingsSectionId("subscription")}>
               <h2>{t("settings.group.subscription")}</h2>
               <SettingRow title={t("settings.row.redeem.title")} desc={t("settings.row.redeem.desc")}>
                 <RedeemCodeCard onCreditRefresh={onCreditRefresh} />
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "diagnostics" ? (
             <div className="setting-group" id={settingsSectionId("diagnostics")}>
               <h2>{t("diagnostics.title")}</h2>
               <DiagnosticsPanel />
             </div>
+            ) : null}
+            {activeSettingsSection === "reset" ? (
             <div className="setting-group" id={settingsSectionId("reset")}>
               <h2>{t("settings.group.reset")}</h2>
               <SettingRow title={t("settings.row.onboarding.title")} desc={t("settings.row.onboarding.desc")}>
@@ -434,10 +448,13 @@ export function SettingsScreen({
                 <Button danger onClick={resetAll}>{t("settings.row.reset.button")}</Button>
               </SettingRow>
             </div>
+            ) : null}
+            {activeSettingsSection === "about" ? (
             <div className="setting-group" id={settingsSectionId("about")}>
               <h2>{t("settings.group.about")}</h2>
               <AboutCard />
             </div>
+            ) : null}
             <Modal
               title={t("settings.localImageTemplates.pasteTitle")}
               open={pasteModalOpen}

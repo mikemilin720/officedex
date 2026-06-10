@@ -101,6 +101,11 @@ function makeSettings(overrides: Partial<UserSettings> = {}): UserSettings {
   };
 }
 
+async function selectSettingsSection(label: string) {
+  const menu = await screen.findByRole("navigation", { name: "Settings sections" });
+  fireEvent.click(within(menu).getByRole("button", { name: label }));
+}
+
 let getSettingsSpy: ReturnType<typeof vi.fn>;
 let updateSettingsSpy: ReturnType<typeof vi.fn>;
 let getDefaultWorkspaceDirSpy: ReturnType<typeof vi.fn>;
@@ -183,11 +188,11 @@ describe("SettingsScreen", () => {
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("heading", { name: /generation defaults/i })).toBeTruthy();
-    expect(screen.getByText("Workspace Output Directory")).toBeTruthy();
-    expect(screen.getAllByText("Connection").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("heading", { name: "Workspace" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Connection" })).toBeNull();
   });
 
-  it("renders a secondary menu inside Settings and jumps to clicked sections", async () => {
+  it("renders a secondary menu inside Settings and switches the content section", async () => {
     const scrollIntoView = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
 
@@ -201,21 +206,24 @@ describe("SettingsScreen", () => {
 
     fireEvent.click(within(menu).getByRole("button", { name: "Connection" }));
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(scrollIntoView).not.toHaveBeenCalled();
     expect(within(menu).getByRole("button", { name: "Connection" }).getAttribute("aria-current")).toBe("true");
+    expect(await screen.findByRole("heading", { level: 2, name: "Connection" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Generation Defaults" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "Appearance" })).toBeNull();
   });
 
-  it("places About after the other Settings sections", async () => {
+  it("renders About only after selecting it from the Settings menu", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
 
-    const about = await screen.findByRole("heading", { level: 2, name: "About" });
-    const diagnostics = screen.getByRole("heading", { level: 2, name: "Diagnostics" });
-    const reset = screen.getByRole("heading", { level: 2, name: "Reset" });
+    expect(screen.queryByRole("heading", { level: 2, name: "About" })).toBeNull();
 
-    expect(diagnostics.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(reset.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await selectSettingsSection("About");
+
+    expect(await screen.findByRole("heading", { level: 2, name: "About" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Reset" })).toBeNull();
   });
 
   it("changing default document type calls updateSettings with the new value", async () => {
@@ -293,6 +301,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Workspace");
     await screen.findByText("Workspace Output Directory");
 
     const browseButtons = screen.getAllByRole("button", { name: /browse/i });
@@ -320,6 +329,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     // Select Custom endpoint to reveal the input fields (Official is default)
     // Ant Design Select: find the displayed value, click to open dropdown
@@ -347,6 +357,7 @@ describe("SettingsScreen", () => {
     render(<SettingsScreen onOpenLogin={onOpenLogin} />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(whoamiSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     expect(await screen.findByText(/sign in to use custom endpoints/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
@@ -374,6 +385,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     fireEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
@@ -407,6 +419,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     fireEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
@@ -419,7 +432,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
-    await screen.findByRole("heading", { name: /generation defaults/i });
+    await selectSettingsSection("Reset");
 
     fireEvent.click(screen.getByRole("button", { name: /reset everything/i }));
 
@@ -446,7 +459,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
-    await screen.findByRole("heading", { name: /generation defaults/i });
+    await selectSettingsSection("Reset");
 
     fireEvent.click(screen.getByRole("button", { name: /show wizard/i }));
 
@@ -471,6 +484,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     const enableSwitch = await screen.findByRole("switch", { name: /enable proxy/i });
     expect(enableSwitch.getAttribute("aria-checked")).toBe("false");
@@ -483,6 +497,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     const enableSwitch = await screen.findByRole("switch", { name: /enable proxy/i });
     fireEvent.click(enableSwitch);
@@ -506,6 +521,7 @@ describe("SettingsScreen", () => {
     updateSettingsSpy.mockClear();
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(2));
+    await selectSettingsSection("Connection");
     await waitFor(() => {
       expect(screen.getByRole("switch", { name: /enable proxy/i }).getAttribute("aria-checked")).toBe("true");
     });
@@ -526,6 +542,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Connection");
 
     fireEvent.click(await screen.findByRole("switch", { name: /enable proxy/i }));
     const urlInput = await screen.findByLabelText(/proxy url/i);
@@ -556,6 +573,7 @@ describe("SettingsScreen", () => {
     } satisfies CreditStatus);
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("Image Watermark");
 
     expect(await screen.findByText(/free images include the officedex watermark/i)).toBeTruthy();
     expect(screen.getByRole("switch", { name: /show watermark/i }).hasAttribute("disabled")).toBe(true);
@@ -581,6 +599,7 @@ describe("SettingsScreen", () => {
     } satisfies CreditStatus);
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("Image Watermark");
 
     const toggle = await screen.findByRole("switch", { name: /show watermark/i });
     expect(toggle.hasAttribute("disabled")).toBe(true);
@@ -594,6 +613,7 @@ describe("SettingsScreen", () => {
   it("lets paid users opt into watermark and saves the setting", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("Image Watermark");
 
     const toggle = await screen.findByRole("switch", { name: /show watermark/i });
     fireEvent.click(toggle);
@@ -609,6 +629,7 @@ describe("SettingsScreen", () => {
     currentSettings = makeSettings({ imageWatermark: { showWatermark: true, preferenceSource: "user" } });
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("Image Watermark");
 
     const toggle = await screen.findByRole("switch", { name: /show watermark/i });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
@@ -626,6 +647,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Local Image Templates");
 
     expect(await screen.findByText("0 local templates saved")).toBeTruthy();
     const file = new File([
@@ -648,6 +670,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Local Image Templates");
 
     fireEvent.click(await screen.findByRole("button", { name: /Paste JSON/i }));
     const textarea = await screen.findByPlaceholderText(/Paste local image-template JSON/i);
@@ -678,6 +701,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Local Image Templates");
 
     fireEvent.click(await screen.findByRole("button", { name: /Download JSON/i }));
 
@@ -702,6 +726,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Local Image Templates");
 
     fireEvent.click(await screen.findByRole("button", { name: /Copy JSON/i }));
 
@@ -720,6 +745,7 @@ describe("SettingsScreen", () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Local Image Templates");
 
     fireEvent.click(await screen.findByRole("button", { name: /Paste JSON/i }));
     fireEvent.change(await screen.findByPlaceholderText(/Paste local image-template JSON/i), { target: { value: "{not-json" } });
@@ -807,6 +833,7 @@ describe("SettingsScreen > About card", () => {
   it("renders the version and a Check for updates button", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("About");
     await waitFor(() => expect(getAppVersionSpy).toHaveBeenCalled());
     expect(await screen.findByRole("heading", { name: "OfficeDex" })).toBeTruthy();
     expect(await screen.findByText(/OfficeDex 0\.1\.0/)).toBeTruthy();
@@ -818,6 +845,7 @@ describe("SettingsScreen > About card", () => {
   it("opens About links and shows the disclaimer modal", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("About");
     await waitFor(() => expect(getAppVersionSpy).toHaveBeenCalled());
 
     fireEvent.click(await screen.findByRole("button", { name: /visit website/i }));
@@ -837,6 +865,7 @@ describe("SettingsScreen > About card", () => {
   it("Check for updates click invokes checkAppUpdate and surfaces the new version button", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("About");
     await waitFor(() => expect(getAppVersionSpy).toHaveBeenCalled());
     const checkBtn = await screen.findByText(/Check for updates/i);
     fireEvent.click(checkBtn.closest("button")!);
@@ -847,6 +876,7 @@ describe("SettingsScreen > About card", () => {
   it("clicking Update to <version> triggers download", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
+    await selectSettingsSection("About");
     await waitFor(() => expect(getAppVersionSpy).toHaveBeenCalled());
     fireEvent.click((await screen.findByText(/Check for updates/i)).closest("button")!);
     const updateBtn = await screen.findByText(/Update to 0\.2\.0/);
