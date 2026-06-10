@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.30] - 2026-06-10
+
+### Changed
+- Settings sections now show focused content for the selected menu item instead of mixing every setting in one long panel.
+- Settings navigation now keeps the selected section highlighted while leaving unrelated controls out of view.
+
 ## [0.5.29] - 2026-06-10
 
 ### Changed
