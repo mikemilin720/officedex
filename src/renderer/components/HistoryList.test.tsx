@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationListItem } from "../taskState";
 import { LocaleProvider } from "../i18n";
@@ -74,5 +75,14 @@ describe("HistoryList", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
     expect(onDelete).toHaveBeenCalledWith("conv-1");
+  });
+
+  it("keeps the delete affordance in a reserved layout slot to avoid hover jitter", () => {
+    const css = readFileSync("src/renderer/styles/shell.css", "utf8");
+
+    expect(css).toContain("grid-template-columns: 22px minmax(0, 1fr) 14px 24px");
+    expect(css).toMatch(/\.history-item-delete\s*\{[^}]*opacity:\s*0;/s);
+    expect(css).toMatch(/\.history-item-delete\s*\{[^}]*pointer-events:\s*none;/s);
+    expect(css).not.toMatch(/\.history-item-delete\s*\{[^}]*display:\s*none;/s);
   });
 });

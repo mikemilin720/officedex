@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { ComponentType } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopAPI } from "../../shared/types";
 import { LocaleProvider } from "../i18n";
@@ -81,5 +82,17 @@ describe("Shell sidebar layout", () => {
     const profile = screen.getByRole("button", { name: /profile/i });
 
     expect(meter.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps sidebar footer navigation controls vertically centered", () => {
+    const css = readFileSync("src/renderer/styles/shell.css", "utf8");
+    const settingsRule = css.match(/\.sidebar-settings\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(css).toContain("grid-template-columns: 28px minmax(0, 1fr)");
+    expect(css).toMatch(/\.nav-item > \.anticon\s*\{[^}]*place-items:\s*center;/s);
+    expect(css).toMatch(/\.nav-item > span:not\(\.anticon\)\s*\{[^}]*line-height:\s*20px;/s);
+    expect(settingsRule).not.toContain("border-top");
+    expect(settingsRule).not.toContain("padding-top");
+    expect(css).toMatch(/\.sidebar-settings::after\s*\{[^}]*background:\s*var\(--n-hairline-soft\);/s);
   });
 });
