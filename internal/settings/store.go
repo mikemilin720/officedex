@@ -163,7 +163,10 @@ func (s *Store) warn(msg string, err error) {
 // wire shape camelCase so the Wails-generated TypeScript matches the rest of
 // the renderer-facing types.
 type Patch struct {
-	Defaults              *GenerateDefaultsPatch        `json:"defaults,omitempty"`
+	Defaults     *GenerateDefaultsPatch `json:"defaults,omitempty"`
+	WorkspaceDir *string                `json:"workspaceDir,omitempty"`
+	// OutputDir is a deprecated alias for WorkspaceDir kept for older Wails
+	// bindings and persisted settings.
 	OutputDir             *string                       `json:"outputDir,omitempty"`
 	BridgeBinaryPath      *string                       `json:"bridgeBinaryPath,omitempty"`
 	LlmProvider           *types.LlmProvider            `json:"llmProvider,omitempty"`
@@ -206,8 +209,12 @@ func applyPatch(base types.UserSettings, patch Patch) types.UserSettings {
 			out.Defaults.ImageQuality = *d.ImageQuality
 		}
 	}
-	if patch.OutputDir != nil {
-		out.OutputDir = patch.OutputDir
+	if patch.WorkspaceDir != nil {
+		out.WorkspaceDir = patch.WorkspaceDir
+		out.OutputDir = nil
+	} else if patch.OutputDir != nil {
+		out.WorkspaceDir = patch.OutputDir
+		out.OutputDir = nil
 	}
 	if patch.BridgeBinaryPath != nil {
 		out.BridgeBinaryPath = patch.BridgeBinaryPath
@@ -243,6 +250,7 @@ func applyPatch(base types.UserSettings, patch Patch) types.UserSettings {
 type rawSettings struct {
 	Version               *int                       `json:"version,omitempty"`
 	Defaults              *rawGenerateDefaults       `json:"defaults,omitempty"`
+	WorkspaceDir          *string                    `json:"workspaceDir,omitempty"`
 	OutputDir             *string                    `json:"outputDir,omitempty"`
 	BridgeBinaryPath      *string                    `json:"bridgeBinaryPath,omitempty"`
 	LlmProvider           *rawLlmProvider            `json:"llmProvider,omitempty"`
@@ -301,7 +309,11 @@ func sanitizeRaw(raw rawSettings) types.UserSettings {
 			}
 		}
 	}
-	out.OutputDir = trimNullable(raw.OutputDir)
+	out.WorkspaceDir = trimNullable(raw.WorkspaceDir)
+	if out.WorkspaceDir == nil {
+		out.WorkspaceDir = trimNullable(raw.OutputDir)
+	}
+	out.OutputDir = nil
 	out.BridgeBinaryPath = trimNullable(raw.BridgeBinaryPath)
 	out.LlmProvider = sanitizeRawProvider(raw.LlmProvider)
 	out.OnboardingCompletedAt = trimNullable(raw.OnboardingCompletedAt)
@@ -333,7 +345,11 @@ func sanitizeCanonical(s types.UserSettings) types.UserSettings {
 	if v, ok := pickImageQuality(string(s.Defaults.ImageQuality)); ok {
 		out.Defaults.ImageQuality = v
 	}
-	out.OutputDir = trimNullable(s.OutputDir)
+	out.WorkspaceDir = trimNullable(s.WorkspaceDir)
+	if out.WorkspaceDir == nil {
+		out.WorkspaceDir = trimNullable(s.OutputDir)
+	}
+	out.OutputDir = nil
 	out.BridgeBinaryPath = trimNullable(s.BridgeBinaryPath)
 	out.LlmProvider = sanitizeCanonicalProvider(s.LlmProvider)
 	out.OnboardingCompletedAt = trimNullable(s.OnboardingCompletedAt)

@@ -79,7 +79,7 @@ describe("App task flow", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps New Generation on a blank composer after a previous task exists and submits another generate request", async () => {
+  it("keeps New chat on a blank composer after a previous task exists and submits another generate request", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");
 
@@ -103,9 +103,9 @@ describe("App task flow", () => {
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
 
     expect(screen.queryByText("Fluid")).toBeNull();
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Generate a new quarterly review PPT" },
     });
@@ -113,6 +113,44 @@ describe("App task flow", () => {
 
     await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
     expect(bridge.generate).toHaveBeenCalledWith(expect.objectContaining({ prompt: "Generate a new quarterly review PPT" }));
+  });
+
+  it("removes a project from the sidebar and refreshes chats", async () => {
+    installBridgeMock();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const api = window.officecli as DesktopAPI;
+    const projectConversation = {
+      conversationId: "conv-project",
+      firstTaskId: "task-project",
+      latestTaskId: "task-project",
+      status: "completed" as const,
+      title: "Project chat",
+      documentType: "pptx",
+      updatedAt: "2026-06-10T10:00:00Z",
+    };
+    api.listWorkspaces = vi.fn()
+      .mockResolvedValueOnce([{
+        id: "ws-project",
+        name: "void-oversea",
+        path: "/Users/test/void-oversea",
+        active: true,
+        conversations: [projectConversation],
+      }])
+      .mockResolvedValueOnce([]);
+    api.listChats = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([projectConversation]);
+    api.removeWorkspace = vi.fn(async () => undefined);
+    const { App } = await import("./App");
+
+    render(<App />);
+    await screen.findByRole("button", { name: "Project actions for void-oversea" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for void-oversea" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Remove$/ }));
+
+    await waitFor(() => expect(api.removeWorkspace).toHaveBeenCalledWith("ws-project"));
+    await waitFor(() => expect(api.listChats).toHaveBeenCalledTimes(2));
   });
 
   it("switches from submit spinner to the running task when task.started arrives before generate resolves", async () => {
@@ -137,9 +175,9 @@ describe("App task flow", () => {
       });
     });
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a stuck DOCX" },
     });
@@ -157,7 +195,7 @@ describe("App task flow", () => {
 
     expect(await screen.findByText("Processing your request...")).toBeTruthy();
     expect(screen.getAllByText("Create a stuck DOCX").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: "Start a New Generation" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /What should we work on/i })).toBeNull();
   });
 
   it("switches to a local pending task immediately when generate does not resolve and no bridge event arrives", async () => {
@@ -167,7 +205,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a pending DOCX" },
     });
@@ -176,7 +214,7 @@ describe("App task flow", () => {
 
     expect(await screen.findByText("Processing your request...")).toBeTruthy();
     expect(screen.getAllByText("Create a pending DOCX").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: "Start a New Generation" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /What should we work on/i })).toBeNull();
   });
 
   it("renders a failed task with its recorded error and bridge event context", async () => {
@@ -279,8 +317,8 @@ describe("App task flow", () => {
       });
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Tasks/ }));
 
@@ -292,7 +330,7 @@ describe("App task flow", () => {
     expect(await screen.findByText("Processing your request...")).toBeTruthy();
   });
 
-  it("uses the page-level New Generation button to return to a blank composer", async () => {
+  it("uses the page-level New chat button to return to a blank composer", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");
 
@@ -318,9 +356,9 @@ describe("App task flow", () => {
 
     const tasksPage = screen.getByRole("heading", { name: "Recent Tasks" }).closest(".page-stack");
     expect(tasksPage).toBeTruthy();
-    fireEvent.click(within(tasksPage as HTMLElement).getByRole("button", { name: /New Generation/ }));
+    fireEvent.click(within(tasksPage as HTMLElement).getByRole("button", { name: /New chat/ }));
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
   });
 
   it("preserves a typed new generation prompt after switching to another conversation and back", async () => {
@@ -345,14 +383,14 @@ describe("App task flow", () => {
     });
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
     const prompt = await screen.findByPlaceholderText(/Enter what you want to generate/);
     fireEvent.change(prompt, { target: { value: "Draft a quarterly board deck" } });
 
     fireEvent.click(screen.getByRole("button", { name: /previous\.pptx/ }));
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
     expect(await screen.findByDisplayValue("Draft a quarterly board deck")).toBeTruthy();
   });
 
@@ -379,8 +417,8 @@ describe("App task flow", () => {
     });
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Image"));
     fireEvent.click(await screen.findByRole("button", { name: /Attach reference images/ }));
     await waitFor(() => expect(bridge.openMultiFileDialog).toHaveBeenCalledTimes(1));
@@ -391,7 +429,7 @@ describe("App task flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /previous\.pptx/ }));
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
     expect(await screen.findByText("ref-a.png")).toBeTruthy();
     expect(screen.getByText("ref-b.jpg")).toBeTruthy();
@@ -431,8 +469,8 @@ describe("App task flow", () => {
     });
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Report"));
     fireEvent.click(await screen.findByRole("button", { name: /Attach source file/ }));
     await waitFor(() => expect(bridge.openFileDialog).toHaveBeenCalledTimes(1));
@@ -443,7 +481,7 @@ describe("App task flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /previous\.docx/ }));
     expect(await screen.findByText("Generation Complete")).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
     expect(await screen.findByText("source.xlsx")).toBeTruthy();
     expect(screen.getByDisplayValue("Analyze workbook trends")).toBeTruthy();
@@ -465,14 +503,14 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a sales deck" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
     await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
     const prompt = await screen.findByPlaceholderText(/Enter what you want to generate/) as HTMLTextAreaElement;
     expect(prompt.value).toBe("");
@@ -487,7 +525,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a fast deck" },
     });
@@ -506,14 +544,14 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Start a New Generation" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a deck that should be retried" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
 
     expect(await screen.findByText("provider unavailable")).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: /New Generation/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
     expect(await screen.findByDisplayValue("Create a deck that should be retried")).toBeTruthy();
   });
@@ -683,7 +721,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
 
     fireEvent.click(screen.getByLabelText("Image"));
 
@@ -714,7 +752,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
 
     fireEvent.click(screen.getByLabelText("Image"));
     expect(await screen.findByText("Image ratio")).toBeTruthy();
@@ -740,7 +778,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
 
     expect(screen.queryByLabelText("GIF")).toBeNull();
     expect(screen.queryByText("GIF FPS")).toBeNull();
@@ -765,7 +803,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
 
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Build a deck" },
@@ -950,7 +988,7 @@ describe("App task flow", () => {
 
     fireEvent.click(document.querySelector(".history-item-delete") as HTMLElement);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
     expect(document.querySelectorAll(".history-list .history-item")).toHaveLength(0);
     expect(screen.queryByText("generated.png")).toBeNull();
     expect(screen.queryByText("brighter.png")).toBeNull();
@@ -962,7 +1000,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
     fireEvent.click(screen.getByLabelText("Image"));
     await screen.findByRole("button", { name: /Attach reference images/ });
 
@@ -981,7 +1019,7 @@ describe("App task flow", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Start a New Generation" });
+    await screen.findByRole("heading", { name: /What should we work on/i });
 
     const textarea = screen.getByPlaceholderText(/Enter what you want to generate/) as HTMLTextAreaElement;
     const pastedFile = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "screenshot.png", { type: "image/png" });
@@ -1043,7 +1081,7 @@ describe("App auto-update flow", () => {
 
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect(screen.getByText(/Required update/i)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: /Start a New Generation/i })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /What should we work on/i })).toBeNull();
     expect(bridge.generate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("Update now"));
@@ -1337,6 +1375,7 @@ function installBridgeMock() {
         enableImages: true,
         imageQuality: "premium" as const,
       },
+      workspaceDir: null,
       outputDir: null,
       llmProvider: null,
       onboardingCompletedAt: "2026-05-22T00:00:00.000Z",
@@ -1352,6 +1391,7 @@ function installBridgeMock() {
         imageQuality: "premium" as const,
         ...(patch.defaults ?? {}),
       },
+      workspaceDir: patch.workspaceDir ?? null,
       outputDir: patch.outputDir ?? null,
       llmProvider: patch.llmProvider ?? null,
       onboardingCompletedAt: patch.onboardingCompletedAt ?? "2026-05-22T00:00:00.000Z",
@@ -1359,6 +1399,29 @@ function installBridgeMock() {
       imageWatermark: patch.imageWatermark ?? { showWatermark: true, preferenceSource: "system" as const },
     })),
     getDefaultWorkspaceDir: vi.fn(async () => "/Users/test/Library/Application Support/OfficeDex/workspace"),
+    listWorkspaces: vi.fn(async () => [{
+      id: "ws-default",
+      name: "workspace",
+      path: "/Users/test/Library/Application Support/OfficeDex/workspace",
+      active: true,
+      conversations: [],
+    }]),
+    listChats: vi.fn(async () => []),
+    addWorkspace: vi.fn(async (path: string) => ({
+      id: "ws-picked",
+      name: path.split("/").pop() || "workspace",
+      path,
+      active: true,
+      conversations: [],
+    })),
+    selectWorkspace: vi.fn(async (workspaceId: string) => ({
+      id: workspaceId,
+      name: "workspace",
+      path: "/Users/test/Library/Application Support/OfficeDex/workspace",
+      active: true,
+      conversations: [],
+    })),
+    removeWorkspace: vi.fn(async () => undefined),
     onAuthEvent: vi.fn(() => () => undefined),
     onBridgeEvent: vi.fn((callback) => {
       listener = callback;

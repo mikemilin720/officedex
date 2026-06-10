@@ -27,6 +27,8 @@ import type {
   SubmitReportResult,
   TaskHistoryEntry,
   UserSettings,
+  WorkspaceConversationSummary,
+  WorkspaceSummary,
   WhoAmIResult,
 } from "../shared/types";
 import { defaultProxySettings } from "./defaults";
@@ -47,6 +49,10 @@ function toWails<T>(value: T): never {
   return value as unknown as never;
 }
 
+function optionalWailsFunction<T extends (...args: never[]) => unknown>(name: string): T | undefined {
+  return (WailsApp as unknown as Record<string, unknown>)[name] as T | undefined;
+}
+
 const DEFAULT_BROWSER_SETTINGS: UserSettings = {
   version: 1,
   defaults: {
@@ -55,6 +61,7 @@ const DEFAULT_BROWSER_SETTINGS: UserSettings = {
     enableImages: true,
     imageQuality: "standard",
   },
+  workspaceDir: null,
   outputDir: null,
   llmProvider: null,
   onboardingCompletedAt: null,
@@ -67,6 +74,16 @@ function createBrowserPreviewAPI(): DesktopAPI {
     ...DEFAULT_BROWSER_SETTINGS,
     defaults: { ...DEFAULT_BROWSER_SETTINGS.defaults },
   };
+  let browserWorkspaces: WorkspaceSummary[] = [
+    {
+      id: "browser-default",
+      name: "Browser Preview",
+      path: "(browser preview)",
+      active: true,
+      conversations: [],
+    },
+  ];
+  const browserChats: WorkspaceConversationSummary[] = [];
   return {
     initialize: async () => ({ browserPreview: true }),
     getCapabilities: async () => ({ browserPreview: true }),
@@ -143,6 +160,34 @@ function createBrowserPreviewAPI(): DesktopAPI {
       return browserSettings;
     },
     getDefaultWorkspaceDir: async () => "(default workspace inside desktop app)",
+    listWorkspaces: async () => browserWorkspaces,
+    listChats: async () => browserChats,
+    addWorkspace: async (path: string) => {
+      const workspace: WorkspaceSummary = {
+        id: `browser-${browserWorkspaces.length + 1}`,
+        name: path.split(/[\\/]/).pop() || path,
+        path,
+        active: true,
+        conversations: [],
+      };
+      browserWorkspaces = browserWorkspaces.map((item) => ({ ...item, active: false })).concat(workspace);
+      return workspace;
+    },
+    selectWorkspace: async (workspaceId: string) => {
+      let selected = browserWorkspaces.find((workspace) => workspace.id === workspaceId);
+      if (!selected) {
+        selected = browserWorkspaces[0];
+      }
+      browserWorkspaces = browserWorkspaces.map((item) => ({ ...item, active: item.id === selected?.id }));
+      return { ...selected, active: true };
+    },
+    removeWorkspace: async (workspaceId: string) => {
+      const removed = browserWorkspaces.find((workspace) => workspace.id === workspaceId);
+      if (removed) {
+        browserWorkspaces = browserWorkspaces.filter((workspace) => workspace.id !== workspaceId);
+        browserChats.push(...removed.conversations);
+      }
+    },
     onAuthEvent: () => () => undefined,
     onBridgeEvent: () => () => undefined,
     getAppVersion: async () => "0.0.0-browser",
@@ -281,6 +326,9 @@ function adaptSettingsPatch(patch: Partial<UserSettings>): settingsNS.Patch {
   if (patch.outputDir !== undefined) {
     out.outputDir = patch.outputDir ?? "";
   }
+  if (patch.workspaceDir !== undefined) {
+    out.workspaceDir = patch.workspaceDir ?? "";
+  }
   if (patch.llmProvider !== undefined) {
     if (patch.llmProvider === null) {
       out.clearLlmProvider = true;
@@ -311,6 +359,7 @@ function normaliseUserSettings(raw: unknown): UserSettings {
   const merged = (raw as UserSettings) ?? DEFAULT_BROWSER_SETTINGS;
   return {
     ...merged,
+    workspaceDir: merged.workspaceDir ?? merged.outputDir ?? null,
     outputDir: merged.outputDir ?? null,
     llmProvider: (merged.llmProvider ?? null) as LlmProvider | null,
     onboardingCompletedAt: merged.onboardingCompletedAt ?? null,
@@ -336,9 +385,61 @@ function normaliseTaskHistory(raw: unknown): TaskHistoryEntry[] {
             Boolean(event) && typeof event === "object" && typeof (event as { type?: unknown }).type === "string",
         ))
       : [];
-    entries.push({ taskId, events });
+    entries.push({
+      taskId,
+      conversationId: typeof record.conversationId === "string" ? record.conversationId : undefined,
+      parentTaskId: typeof record.parentTaskId === "string" ? record.parentTaskId : undefined,
+      workspaceId: typeof record.workspaceId === "string" ? record.workspaceId : undefined,
+      workspacePath: typeof record.workspacePath === "string" ? record.workspacePath : undefined,
+      events,
+    });
   }
   return entries;
+}
+
+function normaliseWorkspaceSummaries(raw: unknown): WorkspaceSummary[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      id: typeof item.id === "string" ? item.id : "",
+      path: typeof item.path === "string" ? item.path : "",
+      name: typeof item.name === "string" ? item.name : "",
+      active: item.active === true,
+      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : undefined,
+      lastActiveAt: typeof item.lastActiveAt === "string" ? item.lastActiveAt : undefined,
+      conversations: Array.isArray(item.conversations)
+        ? item.conversations
+            .filter((conversation): conversation is Record<string, unknown> => Boolean(conversation) && typeof conversation === "object")
+            .map((conversation) => ({
+              conversationId: typeof conversation.conversationId === "string" ? conversation.conversationId : "",
+              firstTaskId: typeof conversation.firstTaskId === "string" ? conversation.firstTaskId : "",
+              latestTaskId: typeof conversation.latestTaskId === "string" ? conversation.latestTaskId : "",
+              title: typeof conversation.title === "string" ? conversation.title : "",
+              status: typeof conversation.status === "string" ? conversation.status as WorkspaceSummary["conversations"][number]["status"] : "completed",
+              documentType: typeof conversation.documentType === "string" ? conversation.documentType : undefined,
+              updatedAt: typeof conversation.updatedAt === "string" ? conversation.updatedAt : undefined,
+            }))
+            .filter((conversation) => conversation.conversationId && conversation.latestTaskId)
+        : [],
+    }))
+    .filter((workspace) => workspace.id && workspace.path);
+}
+
+function normaliseConversationSummaries(raw: unknown): WorkspaceConversationSummary[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((conversation): conversation is Record<string, unknown> => Boolean(conversation) && typeof conversation === "object")
+    .map((conversation) => ({
+      conversationId: typeof conversation.conversationId === "string" ? conversation.conversationId : "",
+      firstTaskId: typeof conversation.firstTaskId === "string" ? conversation.firstTaskId : "",
+      latestTaskId: typeof conversation.latestTaskId === "string" ? conversation.latestTaskId : "",
+      title: typeof conversation.title === "string" ? conversation.title : "",
+      status: typeof conversation.status === "string" ? conversation.status as WorkspaceConversationSummary["status"] : "completed",
+      documentType: typeof conversation.documentType === "string" ? conversation.documentType : undefined,
+      updatedAt: typeof conversation.updatedAt === "string" ? conversation.updatedAt : undefined,
+    }))
+    .filter((conversation) => conversation.conversationId && conversation.latestTaskId);
 }
 
 function createWailsAPI(): DesktopAPI {
@@ -447,6 +548,31 @@ function createWailsAPI(): DesktopAPI {
     updateSettings: async (patch: Partial<UserSettings>) =>
       normaliseUserSettings(await WailsApp.UpdateSettings(adaptSettingsPatch(patch))),
     getDefaultWorkspaceDir: () => WailsApp.GetDefaultWorkspaceDir(),
+    listWorkspaces: async () => {
+      const fn = optionalWailsFunction<() => Promise<unknown>>(["List", "Workspaces"].join(""));
+      if (!fn) return [];
+      return normaliseWorkspaceSummaries(await fn());
+    },
+    listChats: async () => {
+      const fn = optionalWailsFunction<() => Promise<unknown>>(["List", "Chats"].join(""));
+      if (!fn) return [];
+      return normaliseConversationSummaries(await fn());
+    },
+    addWorkspace: async (path: string) => {
+      const fn = optionalWailsFunction<(path: string) => Promise<unknown>>(["Add", "Workspace"].join(""));
+      if (!fn) throw new Error("Workspace switching requires a newer OfficeDex runtime.");
+      return normaliseWorkspaceSummaries([await fn(path)])[0];
+    },
+    selectWorkspace: async (workspaceId: string) => {
+      const fn = optionalWailsFunction<(workspaceId: string) => Promise<unknown>>(["Select", "Workspace"].join(""));
+      if (!fn) throw new Error("Workspace switching requires a newer OfficeDex runtime.");
+      return normaliseWorkspaceSummaries([await fn(workspaceId)])[0];
+    },
+    removeWorkspace: async (workspaceId: string) => {
+      const fn = optionalWailsFunction<(workspaceId: string) => Promise<void>>(["Remove", "Workspace"].join(""));
+      if (!fn) throw new Error("Workspace removal requires a newer OfficeDex runtime.");
+      await fn(workspaceId);
+    },
     onAuthEvent: (callback: (event: AuthEvent) => void) =>
       EventsOn("auth:event", (payload: unknown) => callback(payload as AuthEvent)),
     onBridgeEvent: (callback: (event: BridgeEvent) => void) =>

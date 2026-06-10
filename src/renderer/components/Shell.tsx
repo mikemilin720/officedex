@@ -37,7 +37,7 @@ import {
 } from "@ant-design/icons";
 import { notion } from "../designTokens";
 import type { NavKey } from "../defaults";
-import type { ConversationListItem } from "../taskState";
+import type { WorkspaceConversationSummary, WorkspaceSummary } from "../../shared/types";
 import { useT } from "../i18n";
 import { RuntimeChip } from "./RuntimeChip";
 import { HistoryList } from "./HistoryList";
@@ -69,10 +69,17 @@ interface ShellProps {
   inspector?: React.ReactNode;
   credit?: CreditInfo;
   hasCustomProvider?: boolean;
-  conversations: ConversationListItem[];
+  workspaces: WorkspaceSummary[];
+  chats: WorkspaceConversationSummary[];
+  activeWorkspaceId: string | undefined;
+  activeWorkspaceName: string | undefined;
   selectedConversationId: string | undefined;
   onNavChange: (key: NavKey) => void;
-  onNewGeneration: () => void;
+  onNewGeneration: (workspaceId?: string) => void;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onAddWorkspace: () => void;
+  onRevealWorkspace: (workspacePath: string) => void;
+  onRemoveWorkspace: (workspaceId: string) => void;
   onSelectTask: (taskId: string) => void;
   onDeleteConversation: (conversationId: string) => void;
 }
@@ -102,10 +109,17 @@ export function Shell({
   inspector,
   credit,
   hasCustomProvider,
-  conversations,
+  workspaces,
+  chats,
+  activeWorkspaceId,
+  activeWorkspaceName,
   selectedConversationId,
   onNavChange,
   onNewGeneration,
+  onSelectWorkspace,
+  onAddWorkspace,
+  onRevealWorkspace,
+  onRemoveWorkspace,
   onSelectTask,
   onDeleteConversation,
 }: ShellProps) {
@@ -125,16 +139,23 @@ export function Shell({
           </div>
         </div>
         <Tooltip title={collapsed ? t("shell.newGeneration") : ""} placement="right">
-          <Button type="primary" icon={<PlusOutlined />} block onClick={onNewGeneration}>
+          <Button type="primary" icon={<EditOutlined />} block onClick={() => onNewGeneration()}>
             {t("shell.newGeneration")}
           </Button>
         </Tooltip>
         <HistoryList
-          conversations={conversations}
+          workspaces={workspaces}
+          chats={chats}
+          activeWorkspaceId={activeWorkspaceId}
           selectedConversationId={selectedConversationId}
           collapsed={collapsed}
           onSelect={onSelectTask}
           onDelete={onDeleteConversation}
+          onSelectWorkspace={onSelectWorkspace}
+          onNewConversation={onNewGeneration}
+          onAddWorkspace={onAddWorkspace}
+          onRevealWorkspace={onRevealWorkspace}
+          onRemoveWorkspace={onRemoveWorkspace}
         />
         <div className="sidebar-footer">
           <CreditMeter info={credit} hasCustomProvider={hasCustomProvider} />
@@ -178,7 +199,7 @@ export function Shell({
           <Space size={12} className="breadcrumb">
             <span>{t("shell.brand")}</span>
             <span className="crumb-separator">/</span>
-            <strong>{t("shell.workspace")}</strong>
+            <strong>{activeWorkspaceName || t("shell.workspace")}</strong>
           </Space>
           <div className="topbar-right">
             <RuntimeChip onClick={() => onNavChange("settings")} />

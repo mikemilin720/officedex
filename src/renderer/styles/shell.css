@@ -175,6 +175,7 @@
 .history-list-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 12px 4px;
   min-height: 20px;
 }
@@ -188,9 +189,9 @@
 }
 
 .history-list-items {
-  display: grid;
-  grid-auto-rows: 36px;
-  gap: 1px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   overflow-y: auto;
   min-height: 0;
   flex: 1;
@@ -200,6 +201,33 @@
   overscroll-behavior: contain;
 }
 
+.history-header-action,
+.workspace-row-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--n-stone);
+  cursor: pointer;
+}
+
+.history-header-action:hover,
+.workspace-row-action:hover {
+  background: var(--n-surface);
+  color: var(--n-charcoal);
+}
+
+.workspace-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workspace-item,
 .history-item {
   position: relative;
   display: grid;
@@ -220,7 +248,57 @@
   transition: background 150ms ease, color 150ms ease;
 }
 
+.workspace-item {
+  grid-template-columns: 22px minmax(0, 1fr) 24px 24px 24px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workspace-conversations {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workspace-empty {
+  height: 32px;
+  padding: 6px 12px 6px 42px;
+  color: var(--n-stone);
+  font-size: 13px;
+}
+
+.chat-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 8px;
+}
+
+.chat-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--n-steel);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.chat-section-title:hover {
+  color: var(--n-charcoal);
+}
+
 .history-item:hover {
+  background: var(--n-surface);
+  color: var(--n-charcoal);
+}
+
+.workspace-item:hover {
   background: var(--n-surface);
   color: var(--n-charcoal);
 }
@@ -228,6 +306,11 @@
 .history-item.active {
   background: var(--n-tint-lavender);
   color: var(--n-primary);
+}
+
+.workspace-item.active {
+  background: var(--n-surface);
+  color: var(--n-charcoal);
 }
 
 .history-item-icon {
@@ -294,7 +377,8 @@
   display: none;
 }
 
-.sidebar-collapsed .history-item {
+.sidebar-collapsed .history-item,
+.sidebar-collapsed .workspace-item {
   display: flex;
   justify-content: center;
   width: 44px;

@@ -112,7 +112,31 @@ export interface BridgeEvent {
 
 export interface TaskHistoryEntry {
   taskId: string;
+  conversationId?: string;
+  parentTaskId?: string;
+  workspaceId?: string;
+  workspacePath?: string;
   events: BridgeEvent[];
+}
+
+export interface WorkspaceConversationSummary {
+  conversationId: string;
+  firstTaskId: string;
+  latestTaskId: string;
+  title: string;
+  status: DesktopTask["status"];
+  documentType?: string;
+  updatedAt?: string;
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  path: string;
+  name: string;
+  active: boolean;
+  updatedAt?: string;
+  lastActiveAt?: string;
+  conversations: WorkspaceConversationSummary[];
 }
 
 export interface Artifact {
@@ -130,6 +154,10 @@ export interface GenerateInput {
   documentType: DocumentType;
   topic: string;
   prompt: string;
+  workspaceId?: string;
+  noProject?: boolean;
+  conversationId?: string;
+  parentTaskId?: string;
   mode?: "fast" | "best";
   promptTemplateId?: string;
   sourceFile?: string;
@@ -149,6 +177,10 @@ export interface GenerateInput {
 // modified; the result is written as <base>.modified.<ext> next to it.
 export interface ModifyInput {
   documentType: DocumentType;
+  workspaceId?: string;
+  noProject?: boolean;
+  conversationId?: string;
+  parentTaskId?: string;
   sourceFile: string;
   prompt: string;
   language?: string;
@@ -238,6 +270,8 @@ export interface ImageTemplatePublishRequest {
 
 export interface DesktopTask {
   id: string;
+  workspaceId?: string;
+  workspacePath?: string;
   /** Groups related tasks into a single conversation view. First task uses its own id as conversationId. */
   conversationId: string;
   /** The task that this task is a continuation of (for conversation ordering). */
@@ -362,6 +396,8 @@ export interface ProviderTestInput {
 export interface UserSettings {
   version: number;
   defaults: GenerateDefaults;
+  workspaceDir: string | null;
+  /** Deprecated legacy alias; new code should use workspaceDir. */
   outputDir: string | null;
   llmProvider: LlmProvider | null;
   onboardingCompletedAt: string | null;
@@ -504,6 +540,11 @@ export interface DesktopAPI {
   getSettings(): Promise<UserSettings>;
   updateSettings(patch: Partial<UserSettings>): Promise<UserSettings>;
   getDefaultWorkspaceDir(): Promise<string>;
+  listWorkspaces(): Promise<WorkspaceSummary[]>;
+  listChats(): Promise<WorkspaceConversationSummary[]>;
+  addWorkspace(path: string): Promise<WorkspaceSummary>;
+  selectWorkspace(workspaceId: string): Promise<WorkspaceSummary>;
+  removeWorkspace(workspaceId: string): Promise<void>;
   onAuthEvent(callback: (event: AuthEvent) => void): () => void;
   onBridgeEvent(callback: (event: BridgeEvent) => void): () => void;
   getAppVersion(): Promise<string>;

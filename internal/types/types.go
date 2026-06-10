@@ -153,6 +153,10 @@ type GenerateInput struct {
 	DocumentType     DocumentType                   `json:"documentType"`
 	Topic            string                         `json:"topic"`
 	Prompt           string                         `json:"prompt"`
+	WorkspaceID      string                         `json:"workspaceId,omitempty"`
+	NoProject        bool                           `json:"noProject,omitempty"`
+	ConversationID   string                         `json:"conversationId,omitempty"`
+	ParentTaskID     string                         `json:"parentTaskId,omitempty"`
 	Mode             string                         `json:"mode,omitempty"`
 	RuntimeMode      string                         `json:"runtimeMode,omitempty"`
 	PromptTemplateID string                         `json:"promptTemplateId,omitempty"`
@@ -174,12 +178,16 @@ type GenerateInput struct {
 // <base>.modified.<ext> next to it (officecli derives Out from SourceFile's
 // directory when OutputDir is empty).
 type ModifyInput struct {
-	DocumentType DocumentType `json:"documentType"`
-	SourceFile   string       `json:"sourceFile"`
-	Prompt       string       `json:"prompt"`
-	Language     string       `json:"language,omitempty"`
-	Style        string       `json:"style,omitempty"`
-	OutputDir    string       `json:"outputDir,omitempty"`
+	DocumentType   DocumentType `json:"documentType"`
+	WorkspaceID    string       `json:"workspaceId,omitempty"`
+	NoProject      bool         `json:"noProject,omitempty"`
+	ConversationID string       `json:"conversationId,omitempty"`
+	ParentTaskID   string       `json:"parentTaskId,omitempty"`
+	SourceFile     string       `json:"sourceFile"`
+	Prompt         string       `json:"prompt"`
+	Language       string       `json:"language,omitempty"`
+	Style          string       `json:"style,omitempty"`
+	OutputDir      string       `json:"outputDir,omitempty"`
 }
 
 type ImagePromptSlot struct {
@@ -300,8 +308,32 @@ type PreviewGrant struct {
 // TaskHistoryEntry carries a persisted task and its bridge events back to
 // the renderer so it can replay them into TaskState on startup.
 type TaskHistoryEntry struct {
-	TaskID string        `json:"taskId"`
-	Events []BridgeEvent `json:"events"`
+	TaskID         string        `json:"taskId"`
+	ConversationID string        `json:"conversationId,omitempty"`
+	ParentTaskID   string        `json:"parentTaskId,omitempty"`
+	WorkspaceID    string        `json:"workspaceId,omitempty"`
+	WorkspacePath  string        `json:"workspacePath,omitempty"`
+	Events         []BridgeEvent `json:"events"`
+}
+
+type WorkspaceConversationSummary struct {
+	ConversationID string `json:"conversationId"`
+	FirstTaskID    string `json:"firstTaskId"`
+	LatestTaskID   string `json:"latestTaskId"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`
+	DocumentType   string `json:"documentType,omitempty"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
+}
+
+type WorkspaceSummary struct {
+	ID            string                         `json:"id"`
+	Path          string                         `json:"path"`
+	Name          string                         `json:"name"`
+	Active        bool                           `json:"active"`
+	UpdatedAt     string                         `json:"updatedAt,omitempty"`
+	LastActiveAt  string                         `json:"lastActiveAt,omitempty"`
+	Conversations []WorkspaceConversationSummary `json:"conversations"`
 }
 
 type WhoAmIMode string
@@ -451,7 +483,8 @@ type ProviderTestInput struct {
 type UserSettings struct {
 	Version               int                    `json:"version"`
 	Defaults              GenerateDefaults       `json:"defaults"`
-	OutputDir             *string                `json:"outputDir"`
+	WorkspaceDir          *string                `json:"workspaceDir"`
+	OutputDir             *string                `json:"outputDir,omitempty"`
 	BridgeBinaryPath      *string                `json:"bridgeBinaryPath"`
 	LlmProvider           *LlmProvider           `json:"llmProvider"`
 	OnboardingCompletedAt *string                `json:"onboardingCompletedAt"`

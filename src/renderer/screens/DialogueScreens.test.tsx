@@ -1,7 +1,7 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { message as antdMessage } from "antd";
-import type { DesktopAPI, DesktopTask, GenerateInput } from "../../shared/types";
+import type { DesktopAPI, DesktopTask, GenerateInput, WorkspaceSummary } from "../../shared/types";
 import { officecli } from "../bridge";
 import { LocaleProvider, type Locale } from "../i18n";
 import { DialogueScreen, assembleSlots } from "./DialogueScreens";
@@ -138,6 +138,10 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof DialogueScreen
     onOpenLogin: vi.fn(),
     onRetry: vi.fn(),
     onPreview: vi.fn(),
+    workspaces: [] as WorkspaceSummary[],
+    newChatTarget: { kind: "none" as const },
+    onNewChatTargetChange: vi.fn(),
+    onAddWorkspace: vi.fn(),
     ...overrides,
   };
 }
@@ -201,6 +205,46 @@ function deferred<T>() {
 }
 
 describe("DialogueScreen state machine", () => {
+  it("shows a project picker headline for new chats and switches to no-project", async () => {
+    const onTargetChange = vi.fn();
+    render(
+      <DialogueScreen
+        {...baseProps({
+          workspaces: [
+            { id: "ws-a", name: "void-oversea", path: "/tmp/void-oversea", active: true, conversations: [] },
+            { id: "ws-b", name: "officedex", path: "/tmp/officedex", active: false, conversations: [] },
+          ],
+          newChatTarget: { kind: "workspace", workspaceId: "ws-a" },
+          onNewChatTargetChange: onTargetChange,
+        })}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: /What should we work on in void-oversea/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /void-oversea/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Don't work in a project/ }));
+
+    expect(onTargetChange).toHaveBeenCalledWith({ kind: "none" });
+  });
+
+  it("submits no-project chats without a workspaceId", async () => {
+    const onSubmit = vi.fn<(values: GenerateInput) => Promise<void>>(async () => undefined);
+    render(<DialogueScreen {...baseProps({ onSubmit, newChatTarget: { kind: "none" } })} />);
+
+    expect(await screen.findByRole("heading", { name: /What should we work on\?/i })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
+      target: { value: "Generate a standalone memo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "Generate a standalone memo",
+      noProject: true,
+    }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("workspaceId");
+  });
+
   it("Question state with options invokes respond with the picked option id", async () => {
     const task: DesktopTask = {
       id: "task-q",

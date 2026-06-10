@@ -361,7 +361,7 @@ OfficeCLI 是底层的命令行工具（独立仓库，Go 写的），负责真�
 
 - 文档生成在你的机器上完成
 - LLM 调用直连你配置的 provider（OpenAI / Anthropic / 自部署），OfficeDex 不做中转
-- 生成的文件写到本地工作区（默认 `~/Library/Application Support/OfficeDex/workspace`）
+- 生成文件和文档上下文都放在本地工作区（默认 `~/Library/Application Support/OfficeDex/workspace`，也可以在设置中指定其他目录）
 
 如果你选用了"托管运行时"（**Hosted Runtime** = OfficeCLI 官方托管的代理服务，免去自己配置 LLM Key），则部分调用会经过官方代理，应用内会有明确提示。
 
@@ -395,7 +395,7 @@ OfficeCLI 是底层的命令行工具（独立仓库，Go 写的），负责真�
 - macOS: `~/Library/Application Support/OfficeDex/workspace`
 - Windows: `%APPDATA%/OfficeDex/workspace`
 
-可在 **设置 → 工作区** 改成任意目录。每次生成完成可点「在文件夹中显示」直接定位。
+工作区设置留空时使用默认应用数据目录，也可以在 **设置 → 工作区** 改成任意目录。每次生成完成可点「在文件夹中显示」直接定位。
 
 </details>
 

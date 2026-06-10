@@ -17,6 +17,7 @@ export interface BridgeMockOptions {
     documentType?: "pptx" | "docx" | "xlsx" | "report" | "img";
     mode?: "fast" | "best";
     runtimeMode?: "custom" | "hosted";
+    workspaceDir?: string | null;
     outputDir?: string | null;
     bridgeBinaryPath?: string | null;
     llmProvider?: unknown;
@@ -39,6 +40,7 @@ export async function installBridgeMock(page: Page, options: BridgeMockOptions =
         enableImages: true,
         imageQuality: "premium",
       },
+      workspaceDir: opts.settings?.workspaceDir ?? opts.settings?.outputDir ?? null,
       outputDir: opts.settings?.outputDir ?? null,
       bridgeBinaryPath: opts.settings?.bridgeBinaryPath ?? null,
       llmProvider: opts.settings?.llmProvider ?? null,
@@ -48,6 +50,7 @@ export async function installBridgeMock(page: Page, options: BridgeMockOptions =
     const bridgeListeners: Array<(event: unknown) => void> = [];
     const authListeners: Array<(event: unknown) => void> = [];
     const calls: Record<string, unknown[][]> = {};
+    let workspaceState: Array<{ id: string; name: string; path: string; active: boolean; conversations: unknown[] }> = [];
     const record = (name: string, args: unknown[]) => {
       calls[name] = calls[name] || [];
       calls[name].push(args);
@@ -69,6 +72,39 @@ export async function installBridgeMock(page: Page, options: BridgeMockOptions =
       generate: async (...args: unknown[]) => {
         record("generate", args);
         return { taskId: "mock-task-1", sessionId: "mock-session-1", status: "starting" };
+      },
+      listWorkspaces: async (...args: unknown[]) => {
+        record("listWorkspaces", args);
+        return workspaceState;
+      },
+      listChats: async (...args: unknown[]) => {
+        record("listChats", args);
+        return [];
+      },
+      addWorkspace: async (...args: unknown[]) => {
+        record("addWorkspace", args);
+        const path = String(args[0] ?? "");
+        const workspace = {
+          id: "ws-picked",
+          name: path.split(/[\\/]/).pop() || "workspace",
+          path,
+          active: true,
+          conversations: [] as unknown[],
+        };
+        workspaceState = workspaceState.map((item) => ({ ...item, active: false })).concat(workspace);
+        return workspace;
+      },
+      selectWorkspace: async (...args: unknown[]) => {
+        record("selectWorkspace", args);
+        const id = String(args[0] ?? "");
+        workspaceState = workspaceState.map((item) => ({ ...item, active: item.id === id }));
+        return workspaceState.find((item) => item.id === id) ?? workspaceState[0];
+      },
+      removeWorkspace: async (...args: unknown[]) => {
+        record("removeWorkspace", args);
+        const id = String(args[0] ?? "");
+        workspaceState = workspaceState.filter((item) => item.id !== id);
+        return undefined;
       },
       respond: async (...args: unknown[]) => {
         record("respond", args);

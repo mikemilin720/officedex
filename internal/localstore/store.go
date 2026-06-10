@@ -8,7 +8,9 @@ package localstore
 
 import (
 	"context"
+	"crypto/sha1"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,6 +78,34 @@ const schemaV2 = `
 ALTER TABLE task_events ADD COLUMN request_id TEXT NOT NULL DEFAULT '';
 `
 
+const schemaV3 = `
+CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_active_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE tasks ADD COLUMN conversation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN parent_task_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace_updated ON tasks(workspace_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_conversation_updated ON tasks(conversation_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_workspace_updated ON conversations(workspace_id, updated_at);
+`
+
+const schemaV4 = `
+CREATE INDEX IF NOT EXISTS idx_conversations_no_project_updated ON conversations(workspace_id, updated_at);
+`
+
 // Store wraps a SQLite database used to persist bridge events and artifacts.
 // Safe for concurrent use.
 type Store struct {
@@ -83,6 +113,20 @@ type Store struct {
 
 	mu sync.Mutex
 	db *sql.DB
+}
+
+type Workspace struct {
+	ID           string
+	Path         string
+	Name         string
+	UpdatedAt    string
+	LastActiveAt string
+}
+
+type TaskContext struct {
+	WorkspaceID    string
+	ConversationID string
+	ParentTaskID   string
 }
 
 // New creates a Store bound to dbPath. The database file is not opened until
@@ -174,6 +218,54 @@ func applyMigrations(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("v2 commit: %w", err)
 		}
 	}
+	if current < 3 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin v3: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, schemaV3); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v3 ddl: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)`,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v3 stamp: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v3 set user_version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("v3 commit: %w", err)
+		}
+	}
+	if current < 4 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin v4: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, schemaV4); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v4 ddl: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, ?)`,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v4 stamp: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v4 set user_version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("v4 commit: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -188,6 +280,166 @@ func (s *Store) Close() error {
 	s.db = nil
 	if err != nil {
 		return fmt.Errorf("localstore: close: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) EnsureWorkspace(ctx context.Context, workspacePath string) (Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return Workspace{}, fmt.Errorf("localstore: not open")
+	}
+	path := filepath.Clean(strings.TrimSpace(workspacePath))
+	if path == "." || path == "" {
+		return Workspace{}, fmt.Errorf("localstore: workspace path is empty")
+	}
+	id := workspaceID(path)
+	name := filepath.Base(path)
+	if strings.TrimSpace(name) == "" || name == string(filepath.Separator) {
+		name = "Workspace"
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO workspaces(id, path, name, created_at, updated_at, last_active_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   path=excluded.path,
+		   name=excluded.name,
+		   updated_at=excluded.updated_at`,
+		id, path, name, now, now, now,
+	); err != nil {
+		return Workspace{}, fmt.Errorf("localstore: ensure workspace: %w", err)
+	}
+	return Workspace{ID: id, Path: path, Name: name, UpdatedAt: now, LastActiveAt: now}, nil
+}
+
+func (s *Store) RemoveWorkspace(ctx context.Context, workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("localstore: not open")
+	}
+	return s.removeWorkspaceLocked(ctx, strings.TrimSpace(workspaceID), true)
+}
+
+func (s *Store) RemoveWorkspaceByPath(ctx context.Context, workspacePath string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return false, fmt.Errorf("localstore: not open")
+	}
+	path := filepath.Clean(strings.TrimSpace(workspacePath))
+	if path == "." || path == "" {
+		return false, fmt.Errorf("localstore: workspace path is empty")
+	}
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE path = ?`, path).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("localstore: query workspace by path: %w", err)
+	}
+	if err := s.removeWorkspaceLocked(ctx, id, false); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) ClearActiveWorkspace(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("localstore: not open")
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE workspaces SET last_active_at = ''`); err != nil {
+		return fmt.Errorf("localstore: clear active workspace: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ActivateWorkspace(ctx context.Context, workspaceID string) (Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return Workspace{}, fmt.Errorf("localstore: not open")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE workspaces SET last_active_at = ?, updated_at = ? WHERE id = ?`,
+		now, now, workspaceID,
+	)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("localstore: activate workspace: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return Workspace{}, fmt.Errorf("localstore: workspace not found")
+	}
+	return s.queryWorkspaceLocked(ctx, workspaceID)
+}
+
+func (s *Store) Workspace(ctx context.Context, workspaceID string) (Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return Workspace{}, fmt.Errorf("localstore: not open")
+	}
+	return s.queryWorkspaceLocked(ctx, workspaceID)
+}
+
+func (s *Store) ActiveWorkspace(ctx context.Context) (Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return Workspace{}, fmt.Errorf("localstore: not open")
+	}
+	var id string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM workspaces WHERE last_active_at != '' ORDER BY last_active_at DESC, updated_at DESC LIMIT 1`,
+	).Scan(&id)
+	if err != nil {
+		return Workspace{}, err
+	}
+	return s.queryWorkspaceLocked(ctx, id)
+}
+
+func (s *Store) EnsureConversation(ctx context.Context, workspaceID, conversationID, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ensureConversationLocked(ctx, workspaceID, conversationID, title)
+}
+
+func (s *Store) RecordTaskContext(ctx context.Context, taskID string, taskCtx TaskContext) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("localstore: not open")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	conversationID := strings.TrimSpace(taskCtx.ConversationID)
+	if conversationID == "" {
+		conversationID = taskID
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO tasks(id, status, document_type, topic, updated_at, conversation_id, parent_task_id, workspace_id)
+		 VALUES (?, 'starting', NULL, NULL, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   conversation_id = CASE WHEN excluded.conversation_id != '' THEN excluded.conversation_id ELSE tasks.conversation_id END,
+		   parent_task_id = CASE WHEN excluded.parent_task_id != '' THEN excluded.parent_task_id ELSE tasks.parent_task_id END,
+		   workspace_id = CASE WHEN excluded.workspace_id != '' THEN excluded.workspace_id ELSE tasks.workspace_id END,
+		   updated_at = excluded.updated_at`,
+		taskID, now, conversationID, strings.TrimSpace(taskCtx.ParentTaskID), strings.TrimSpace(taskCtx.WorkspaceID),
+	); err != nil {
+		return fmt.Errorf("localstore: record task context: %w", err)
+	}
+	if taskCtx.WorkspaceID != "" {
+		if err := s.ensureConversationLocked(ctx, taskCtx.WorkspaceID, conversationID, taskID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -285,6 +537,91 @@ func (s *Store) QueryRecentTaskIDs(ctx context.Context, limit int) ([]string, er
 	return ids, rows.Err()
 }
 
+func (s *Store) QueryRecentTaskHistory(ctx context.Context, limit int) ([]types.TaskHistoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, fmt.Errorf("localstore: not open")
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, COALESCE(NULLIF(conversation_id, ''), id), parent_task_id, workspace_id
+		 FROM (
+		   SELECT id, conversation_id, parent_task_id, workspace_id, updated_at FROM tasks
+		   ORDER BY updated_at DESC LIMIT ?
+		 ) ORDER BY updated_at ASC`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: query recent task history: %w", err)
+	}
+	defer rows.Close()
+	var entries []types.TaskHistoryEntry
+	for rows.Next() {
+		var entry types.TaskHistoryEntry
+		if err := rows.Scan(&entry.TaskID, &entry.ConversationID, &entry.ParentTaskID, &entry.WorkspaceID); err != nil {
+			return nil, fmt.Errorf("localstore: scan recent task history: %w", err)
+		}
+		if entry.WorkspaceID != "" {
+			_ = s.db.QueryRowContext(ctx, `SELECT path FROM workspaces WHERE id = ?`, entry.WorkspaceID).Scan(&entry.WorkspacePath)
+		}
+		events, err := s.queryEventsByTaskLocked(ctx, entry.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		entry.Events = events
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+func (s *Store) QueryWorkspaceSummaries(ctx context.Context, conversationLimit int) ([]types.WorkspaceSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, fmt.Errorf("localstore: not open")
+	}
+	if conversationLimit <= 0 {
+		conversationLimit = 20
+	}
+	activeID := ""
+	_ = s.db.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE last_active_at != '' ORDER BY last_active_at DESC, updated_at DESC LIMIT 1`).Scan(&activeID)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, path, name, updated_at, last_active_at
+		 FROM workspaces ORDER BY last_active_at DESC, updated_at DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: query workspaces: %w", err)
+	}
+	defer rows.Close()
+	var out []types.WorkspaceSummary
+	for rows.Next() {
+		var ws types.WorkspaceSummary
+		if err := rows.Scan(&ws.ID, &ws.Path, &ws.Name, &ws.UpdatedAt, &ws.LastActiveAt); err != nil {
+			return nil, fmt.Errorf("localstore: scan workspace: %w", err)
+		}
+		ws.Active = ws.ID == activeID
+		conversations, err := s.queryWorkspaceConversationsLocked(ctx, ws.ID, conversationLimit)
+		if err != nil {
+			return nil, err
+		}
+		ws.Conversations = conversations
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) QueryChatSummaries(ctx context.Context, conversationLimit int) ([]types.WorkspaceConversationSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, fmt.Errorf("localstore: not open")
+	}
+	if conversationLimit <= 0 {
+		conversationLimit = 20
+	}
+	return s.queryWorkspaceConversationsLocked(ctx, "", conversationLimit)
+}
+
 // QueryRecentEvents returns the most recent events across all tasks, ordered
 // by created_at descending, limited to the given count.
 func (s *Store) QueryRecentEvents(ctx context.Context, limit int) ([]types.BridgeEvent, error) {
@@ -327,6 +664,172 @@ func (s *Store) LatestRequestID(ctx context.Context, taskID string) (string, err
 		return "", fmt.Errorf("localstore: latest request id: %w", err)
 	}
 	return requestID, nil
+}
+
+func (s *Store) queryWorkspaceLocked(ctx context.Context, id string) (Workspace, error) {
+	var ws Workspace
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, path, name, updated_at, last_active_at FROM workspaces WHERE id = ?`, id,
+	).Scan(&ws.ID, &ws.Path, &ws.Name, &ws.UpdatedAt, &ws.LastActiveAt)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("localstore: query workspace: %w", err)
+	}
+	return ws, nil
+}
+
+func (s *Store) removeWorkspaceLocked(ctx context.Context, workspaceID string, requireExisting bool) error {
+	if workspaceID == "" {
+		return fmt.Errorf("localstore: workspace id is empty")
+	}
+	var exists string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE id = ?`, workspaceID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		if requireExisting {
+			return fmt.Errorf("localstore: workspace not found")
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("localstore: query workspace: %w", err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("localstore: begin remove workspace: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, stmt := range []string{
+		`UPDATE conversations SET workspace_id = '', updated_at = ? WHERE workspace_id = ?`,
+		`UPDATE tasks SET workspace_id = '', updated_at = ? WHERE workspace_id = ?`,
+		`DELETE FROM workspaces WHERE id = ?`,
+	} {
+		var execErr error
+		if strings.HasPrefix(stmt, "DELETE") {
+			_, execErr = tx.ExecContext(ctx, stmt, workspaceID)
+		} else {
+			_, execErr = tx.ExecContext(ctx, stmt, now, workspaceID)
+		}
+		if execErr != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("localstore: remove workspace: %w", execErr)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("localstore: commit remove workspace: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ensureConversationLocked(ctx context.Context, workspaceID, conversationID, title string) error {
+	if s.db == nil {
+		return fmt.Errorf("localstore: not open")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return nil
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = conversationID
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO conversations(id, workspace_id, title, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   workspace_id=excluded.workspace_id,
+		   title=CASE WHEN conversations.title = conversations.id OR conversations.title = '' THEN excluded.title ELSE conversations.title END,
+		   updated_at=excluded.updated_at`,
+		conversationID, workspaceID, title, now, now,
+	); err != nil {
+		return fmt.Errorf("localstore: ensure conversation: %w", err)
+	}
+	if workspaceID != "" {
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE workspaces SET updated_at = ? WHERE id = ?`, now, workspaceID,
+		); err != nil {
+			return fmt.Errorf("localstore: touch workspace: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) queryEventsByTaskLocked(ctx context.Context, taskID string) ([]types.BridgeEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT event_id, task_id, type, payload_json, created_at, request_id
+		 FROM task_events WHERE task_id = ? ORDER BY created_at ASC`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: query events by task: %w", err)
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+func (s *Store) queryWorkspaceConversationsLocked(ctx context.Context, workspaceID string, limit int) ([]types.WorkspaceConversationSummary, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, title, updated_at
+		 FROM conversations
+		 WHERE workspace_id = ?
+		 ORDER BY updated_at DESC LIMIT ?`, workspaceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: query workspace conversations: %w", err)
+	}
+	defer rows.Close()
+	var out []types.WorkspaceConversationSummary
+	for rows.Next() {
+		var conversationID, title, updatedAt string
+		if err := rows.Scan(&conversationID, &title, &updatedAt); err != nil {
+			return nil, fmt.Errorf("localstore: scan workspace conversation: %w", err)
+		}
+		summary := types.WorkspaceConversationSummary{
+			ConversationID: conversationID,
+			Title:          title,
+			UpdatedAt:      updatedAt,
+		}
+		taskRows, err := s.db.QueryContext(ctx,
+			`SELECT id, status, COALESCE(document_type, ''), COALESCE(topic, ''), updated_at
+			 FROM tasks
+			 WHERE conversation_id = ?
+			 ORDER BY updated_at ASC`, conversationID)
+		if err != nil {
+			return nil, fmt.Errorf("localstore: query conversation tasks: %w", err)
+		}
+		for taskRows.Next() {
+			var taskID, status, documentType, topic, taskUpdatedAt string
+			if err := taskRows.Scan(&taskID, &status, &documentType, &topic, &taskUpdatedAt); err != nil {
+				_ = taskRows.Close()
+				return nil, fmt.Errorf("localstore: scan conversation task: %w", err)
+			}
+			if summary.FirstTaskID == "" {
+				summary.FirstTaskID = taskID
+				if summary.Title == "" || summary.Title == conversationID {
+					summary.Title = topic
+				}
+			}
+			summary.LatestTaskID = taskID
+			summary.Status = status
+			summary.DocumentType = documentType
+			summary.UpdatedAt = taskUpdatedAt
+		}
+		if err := taskRows.Close(); err != nil {
+			return nil, err
+		}
+		if summary.FirstTaskID == "" {
+			summary.FirstTaskID = conversationID
+			summary.LatestTaskID = conversationID
+			summary.Status = "completed"
+		}
+		if strings.TrimSpace(summary.Title) == "" {
+			summary.Title = conversationID
+		}
+		out = append(out, summary)
+	}
+	return out, rows.Err()
+}
+
+func workspaceID(path string) string {
+	sum := sha1.Sum([]byte(filepath.Clean(path)))
+	return "ws_" + hex.EncodeToString(sum[:8])
 }
 
 func scanEvents(rows *sql.Rows) ([]types.BridgeEvent, error) {

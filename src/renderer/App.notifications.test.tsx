@@ -16,6 +16,7 @@ const settings: UserSettings = {
     enableImages: true,
     imageQuality: "premium",
   },
+  workspaceDir: null,
   outputDir: null,
   llmProvider: null,
   onboardingCompletedAt: "2026-05-22T00:00:00.000Z",
@@ -32,6 +33,11 @@ vi.mock("./bridge", () => ({
     initialize: vi.fn(async () => ({})),
     getCapabilities: vi.fn(async () => ({})),
     getTaskHistory: vi.fn(async () => []),
+    listWorkspaces: vi.fn(async () => []),
+    listChats: vi.fn(async () => []),
+    addWorkspace: vi.fn(),
+    selectWorkspace: vi.fn(),
+    removeWorkspace: vi.fn(),
     onBridgeEvent: vi.fn((callback: (event: BridgeEvent) => void) => {
       mocks.listener = callback;
       return () => undefined;

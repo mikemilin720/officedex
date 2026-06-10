@@ -1,15 +1,25 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConversationListItem } from "../taskState";
+import type { WorkspaceSummary, WorkspaceConversationSummary } from "../../shared/types";
 import { LocaleProvider } from "../i18n";
 import { HistoryList } from "./HistoryList";
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
-function conversation(overrides: Partial<ConversationListItem>): ConversationListItem {
+function installDomStubs() {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+}
+
+function conversation(overrides: Partial<WorkspaceConversationSummary>): WorkspaceConversationSummary {
   return {
     conversationId: "task-1",
     firstTaskId: "task-1",
@@ -17,32 +27,146 @@ function conversation(overrides: Partial<ConversationListItem>): ConversationLis
     status: "completed",
     title: "Quarterly review",
     documentType: "pptx",
+    updatedAt: "2026-06-10T10:00:00Z",
     ...overrides,
   };
 }
 
-function renderHistory(conversations: ConversationListItem[], overrides: Partial<Parameters<typeof HistoryList>[0]> = {}) {
+function workspace(overrides: Partial<WorkspaceSummary>): WorkspaceSummary {
+  return {
+    id: "ws-1",
+    name: "void-oversea",
+    path: "/Users/test/void-oversea",
+    active: false,
+    conversations: [],
+    ...overrides,
+  };
+}
+
+function renderHistory(workspaces: WorkspaceSummary[], overrides: Partial<Parameters<typeof HistoryList>[0]> = {}) {
+  installDomStubs();
+  const props = {
+    workspaces,
+    chats: [],
+    activeWorkspaceId: workspaces[0]?.id,
+    selectedConversationId: workspaces[0]?.conversations[0]?.conversationId,
+    collapsed: false,
+    onSelect: () => undefined,
+    onDelete: () => undefined,
+    onSelectWorkspace: () => undefined,
+    onNewConversation: () => undefined,
+    onAddWorkspace: () => undefined,
+    onRevealWorkspace: () => undefined,
+    onRemoveWorkspace: () => undefined,
+    ...overrides,
+  } as Parameters<typeof HistoryList>[0];
   return render(
     <LocaleProvider value="en">
-      <HistoryList
-        conversations={conversations}
-        selectedConversationId={conversations[0]?.conversationId}
-        collapsed={false}
-        onSelect={() => undefined}
-        onDelete={() => undefined}
-        {...overrides}
-      />
+      <HistoryList {...props} />
     </LocaleProvider>,
   );
 }
 
 describe("HistoryList", () => {
-  it("renders active conversations with a spinner instead of a solid status dot", () => {
+  it("separates projects from no-project chats", () => {
     renderHistory([
-      conversation({ conversationId: "conv-running", latestTaskId: "task-running", status: "running", title: "Running conversation" }),
-      conversation({ conversationId: "conv-starting", latestTaskId: "task-starting", status: "starting", title: "Starting conversation" }),
-      conversation({ conversationId: "conv-done", latestTaskId: "task-done", status: "completed", title: "Done conversation" }),
-    ]);
+      workspace({
+        id: "ws-a",
+        name: "void-oversea",
+        active: true,
+        conversations: [
+          conversation({ conversationId: "conv-a", latestTaskId: "task-a", title: "Workspace feature" }),
+        ],
+      }),
+      workspace({ id: "ws-b", name: "officecli", conversations: [] }),
+    ], {
+      chats: [
+        conversation({ conversationId: "chat-a", latestTaskId: "task-chat-a", title: "Standalone chat" }),
+      ],
+    });
+
+    expect(screen.getByText("Projects")).toBeTruthy();
+    expect(screen.getByText("Chats")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "void-oversea" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Workspace feature/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "officecli" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Standalone chat/ })).toBeTruthy();
+    expect(screen.getByText("No chats")).toBeTruthy();
+  });
+
+  it("creates a new conversation in the selected workspace", () => {
+    const onNewConversation = vi.fn();
+    renderHistory([
+      workspace({ id: "ws-a", name: "void-oversea", active: true }),
+    ], { onNewConversation });
+
+    fireEvent.click(screen.getByRole("button", { name: /New chat in void-oversea/ }));
+    expect(onNewConversation).toHaveBeenCalledWith("ws-a");
+  });
+
+  it("opens an existing-folder menu from the project add button", () => {
+    const onAddWorkspace = vi.fn();
+    renderHistory([
+      workspace({ id: "ws-a", name: "void-oversea", active: true }),
+    ], { onAddWorkspace });
+
+    fireEvent.click(screen.getByRole("button", { name: /Add project/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Use an existing folder/ }));
+
+    expect(onAddWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("collapses projects and chats independently", () => {
+    const onSelectWorkspace = vi.fn();
+    renderHistory([
+      workspace({
+        id: "ws-a",
+        name: "void-oversea",
+        conversations: [conversation({ conversationId: "conv-a", latestTaskId: "task-a", title: "Project chat" })],
+      }),
+    ], {
+      chats: [conversation({ conversationId: "chat-a", latestTaskId: "task-chat-a", title: "Standalone chat" })],
+      onSelectWorkspace,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse void-oversea" }));
+    expect(screen.queryByRole("button", { name: /Project chat/ })).toBeNull();
+    expect(onSelectWorkspace).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Chats" }));
+    expect(screen.queryByRole("button", { name: /Standalone chat/ })).toBeNull();
+  });
+
+  it("shows project overflow actions and calls enabled handlers", () => {
+    const onRevealWorkspace = vi.fn();
+    const onRemoveWorkspace = vi.fn();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    renderHistory([
+      workspace({ id: "ws-a", name: "void-oversea", path: "/Users/test/void-oversea", active: true }),
+    ], { onRevealWorkspace, onRemoveWorkspace });
+
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for void-oversea" }));
+    expect(screen.getByRole("menuitem", { name: /Pin project/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("menuitem", { name: /Create permanent worktree/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("menuitem", { name: /Rename project/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("menuitem", { name: /Archive chats/ }).getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Reveal in Finder/ }));
+    expect(onRevealWorkspace).toHaveBeenCalledWith("/Users/test/void-oversea");
+
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for void-oversea" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Remove$/ }));
+    expect(onRemoveWorkspace).toHaveBeenCalledWith("ws-a");
+  });
+
+  it("renders active conversations with a spinner instead of a solid status dot", () => {
+    renderHistory([workspace({
+      conversations: [
+        conversation({ conversationId: "conv-running", latestTaskId: "task-running", status: "running", title: "Running conversation" }),
+        conversation({ conversationId: "conv-starting", latestTaskId: "task-starting", status: "starting", title: "Starting conversation" }),
+        conversation({ conversationId: "conv-done", latestTaskId: "task-done", status: "completed", title: "Done conversation" }),
+      ],
+    })]);
 
     const runningItem = screen.getByRole("button", { name: /Running conversation/ });
     const startingItem = screen.getByRole("button", { name: /Starting conversation/ });
@@ -60,11 +184,15 @@ describe("HistoryList", () => {
     const onDelete = vi.fn();
     renderHistory(
       [
-        conversation({
-          conversationId: "conv-1",
-          firstTaskId: "task-1",
-          latestTaskId: "task-2",
-          title: "Stable title",
+        workspace({
+          conversations: [
+            conversation({
+              conversationId: "conv-1",
+              firstTaskId: "task-1",
+              latestTaskId: "task-2",
+              title: "Stable title",
+            }),
+          ],
         }),
       ],
       { onSelect, onDelete },

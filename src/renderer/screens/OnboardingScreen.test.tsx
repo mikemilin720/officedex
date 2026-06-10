@@ -13,6 +13,7 @@ const baseSettings: UserSettings = {
     enableImages: true,
     imageQuality: "premium",
   },
+  workspaceDir: null,
   outputDir: null,
   llmProvider: null,
   onboardingCompletedAt: null,
@@ -79,7 +80,10 @@ describe("OnboardingScreen", () => {
     expect(screen.getByText("Generation defaults")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
+    const workspaceField = screen.getByDisplayValue("/tmp/default-workspace") as HTMLInputElement;
+    expect(workspaceField.disabled).toBe(true);
+    expect(screen.getByText(/add or switch project workspaces from the projects sidebar/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /finish/i }));
 
     expect(await screen.findByText(/may consume credits/i)).toBeTruthy();
@@ -96,7 +100,7 @@ describe("OnboardingScreen", () => {
     const patch = updateSettingsSpy.mock.calls[0][0] as Partial<UserSettings>;
     expect(patch.defaults?.documentType).toBe("pptx");
     expect(patch.defaults?.mode).toBe("fast");
-    expect(patch.outputDir).toBeNull();
+    expect(patch).not.toHaveProperty("workspaceDir");
     expect(typeof patch.onboardingCompletedAt).toBe("string");
     expect(patch.onboardingCompletedAt && new Date(patch.onboardingCompletedAt).toString()).not.toBe("Invalid Date");
   });
@@ -117,7 +121,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
     expect(await screen.findByText("Generation defaults")).toBeTruthy();
     expect(onComplete).not.toHaveBeenCalled();
@@ -127,7 +131,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
 
     // Select Custom endpoint to reveal the input fields (Official is default)
     // Ant Design Select: find the displayed value, click to open dropdown
@@ -153,7 +157,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
     expect(await screen.findByText(/sign in to use custom endpoints/i)).toBeTruthy();
 
     const officialLabel = await screen.findByText("Official");
@@ -180,7 +184,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /finish/i }));
 
     const okButton = await waitFor(() => {
@@ -200,7 +204,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /finish/i }));
 
@@ -228,7 +232,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /finish/i }));
     expect(await screen.findByText(/may consume credits/i)).toBeTruthy();
@@ -257,7 +261,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /finish/i }));
     const okButton = await waitFor(() => {
@@ -284,7 +288,7 @@ describe("OnboardingScreen", () => {
     const onComplete = vi.fn();
     render(<OnboardingScreen settings={baseSettings} defaultWorkspaceDir="/tmp/default-workspace" onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText("Provider & workspace")).toBeTruthy();
+    expect(await screen.findByText("Provider setup")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /finish/i }));
     const okButton = await waitFor(() => {

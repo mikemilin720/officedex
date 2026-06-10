@@ -76,6 +76,7 @@ type App struct {
 	mu                     sync.Mutex
 	cachedSettings         types.UserSettings
 	bridgeClient           *bridge.Client
+	bridgeCwd              string
 	loginManager           *login.Manager
 	loginUnsub             func()
 	pendingLoginURL        string
@@ -188,6 +189,8 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if err := a.localStore.Open(ctx); err != nil {
 		wailsruntime.LogErrorf(ctx, "open local store: %v", err)
+	} else if err := a.initializeWorkspaces(ctx); err != nil {
+		wailsruntime.LogErrorf(ctx, "init workspace: %v", err)
 	}
 	if binPath := a.resolveExtrenderBinary(); binPath != "" {
 		a.extRenderer = extrender.New(binPath)
@@ -299,11 +302,15 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 	if err := a.requireLoggedInForCustomProvider(settings); err != nil {
 		return GenerateResult{}, err
 	}
-	client, err := a.ensureBridge()
+	resolved, err := a.resolveGenerateInput(input, settings)
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	resolved, err := a.resolveGenerateInput(input, settings)
+	targetCwd, err := a.effectiveWorkspaceDirForInput(input.WorkspaceID, input.NoProject, settings)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	client, err := a.ensureBridgeForCwd(targetCwd)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -312,6 +319,9 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 		return GenerateResult{}, err
 	}
 	if a.localStore != nil && result.TaskID != "" {
+		if err := a.recordTaskWorkspaceContext(result.TaskID, resolved.WorkspaceID, resolved.ConversationID, resolved.ParentTaskID, resolved.Topic, resolved.NoProject); err != nil {
+			return GenerateResult{}, err
+		}
 		payload := map[string]any{
 			"prompt": resolved.Prompt,
 		}
@@ -358,19 +368,26 @@ func (a *App) Modify(input types.ModifyInput) (GenerateResult, error) {
 	if strings.TrimSpace(input.Prompt) == "" {
 		return GenerateResult{}, errors.New("modify: prompt is required")
 	}
-	client, err := a.ensureBridge()
-	if err != nil {
-		return GenerateResult{}, err
-	}
 	resolved := input
 	if strings.TrimSpace(resolved.OutputDir) == "" {
 		resolved.OutputDir = filepath.Dir(input.SourceFile)
+	}
+	targetCwd, err := a.effectiveWorkspaceDirForInput(input.WorkspaceID, input.NoProject, settings)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	client, err := a.ensureBridgeForCwd(targetCwd)
+	if err != nil {
+		return GenerateResult{}, err
 	}
 	result, err := client.InvokeModify(a.ctx, resolved)
 	if err != nil {
 		return GenerateResult{}, err
 	}
 	if a.localStore != nil && result.TaskID != "" {
+		if err := a.recordTaskWorkspaceContext(result.TaskID, resolved.WorkspaceID, resolved.ConversationID, resolved.ParentTaskID, resolved.Prompt, resolved.NoProject); err != nil {
+			return GenerateResult{}, err
+		}
 		_ = a.localStore.RecordEvent(types.BridgeEvent{
 			TaskID: result.TaskID,
 			Type:   "task.user_input",
@@ -500,7 +517,15 @@ func (a *App) SavePastedImage(input PastedImageInput) (string, error) {
 		return "", errors.New("save pasted image: empty data")
 	}
 	ext := normalizePastedImageExt(input.Ext)
-	dir := filepath.Join(a.workspaceDir, ".pasted-images")
+	settings, err := a.settingsStore.Load()
+	if err != nil {
+		return "", fmt.Errorf("load settings: %w", err)
+	}
+	workspaceDir, err := a.effectiveWorkspaceDir(settings)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(workspaceDir, ".pasted-images")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir pasted-images dir: %w", err)
 	}
@@ -986,7 +1011,14 @@ func (a *App) UpdateSettings(patch settings.Patch) (types.UserSettings, error) {
 	}
 	a.mu.Lock()
 	a.cachedSettings = merged
+	workspaceChanged := patch.WorkspaceDir != nil || patch.OutputDir != nil
+	if workspaceChanged {
+		if _, err := a.effectiveWorkspaceDir(merged); err != nil {
+			workspaceChanged = false
+		}
+	}
 	touchesBridge := patch.BridgeBinaryPath != nil ||
+		workspaceChanged ||
 		patch.LlmProvider != nil ||
 		patch.ClearLlmProvider ||
 		proxyChanged
@@ -1006,7 +1038,7 @@ func (a *App) UpdateSettings(patch settings.Patch) (types.UserSettings, error) {
 	}
 	a.mu.Unlock()
 
-	if patch.OutputDir != nil {
+	if patch.WorkspaceDir != nil || patch.OutputDir != nil {
 		if err := a.refreshPreviewTrustedRoots(merged); err != nil {
 			return types.UserSettings{}, err
 		}
@@ -1020,6 +1052,135 @@ func (a *App) UpdateSettings(patch settings.Patch) (types.UserSettings, error) {
 // GetDefaultWorkspaceDir returns the per-user workspace folder.
 func (a *App) GetDefaultWorkspaceDir() string {
 	return a.workspaceDir
+}
+
+func (a *App) ListWorkspaces() ([]types.WorkspaceSummary, error) {
+	if a.localStore == nil {
+		return nil, nil
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := a.removeDefaultWorkspaceProject(ctx); err != nil {
+		return nil, err
+	}
+	return a.localStore.QueryWorkspaceSummaries(ctx, 20)
+}
+
+func (a *App) ListChats() ([]types.WorkspaceConversationSummary, error) {
+	if a.localStore == nil {
+		return nil, nil
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := a.removeDefaultWorkspaceProject(ctx); err != nil {
+		return nil, err
+	}
+	return a.localStore.QueryChatSummaries(ctx, 50)
+}
+
+func (a *App) AddWorkspace(workspacePath string) (types.WorkspaceSummary, error) {
+	cleaned, err := cleanExistingWorkspaceDir(workspacePath)
+	if err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	if a.localStore == nil {
+		return types.WorkspaceSummary{}, errors.New("workspace store is unavailable")
+	}
+	if sameCleanPath(cleaned, a.workspaceDir) {
+		return types.WorkspaceSummary{}, errors.New("default app workspace is reserved for chats without a project")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := a.localStore.EnsureWorkspace(ctx, cleaned)
+	if err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	if _, err := a.localStore.ActivateWorkspace(ctx, ws.ID); err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	if err := a.applyActiveWorkspace(cleaned); err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	summaries, err := a.localStore.QueryWorkspaceSummaries(ctx, 20)
+	if err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	for _, summary := range summaries {
+		if summary.ID == ws.ID {
+			return summary, nil
+		}
+	}
+	return types.WorkspaceSummary{ID: ws.ID, Path: ws.Path, Name: ws.Name, Active: true}, nil
+}
+
+func (a *App) RemoveWorkspace(workspaceID string) error {
+	if a.localStore == nil {
+		return errors.New("workspace store is unavailable")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return errors.New("workspace id is empty")
+	}
+	active := false
+	if ws, err := a.localStore.ActiveWorkspace(ctx); err == nil && ws.ID == workspaceID {
+		active = true
+	}
+	if err := a.localStore.RemoveWorkspace(ctx, workspaceID); err != nil {
+		return err
+	}
+	if active {
+		if err := a.localStore.ClearActiveWorkspace(ctx); err != nil {
+			return err
+		}
+		if err := a.applyActiveWorkspace(a.workspaceDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) SelectWorkspace(workspaceID string) (types.WorkspaceSummary, error) {
+	if a.localStore == nil {
+		return types.WorkspaceSummary{}, errors.New("workspace store is unavailable")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := a.localStore.Workspace(ctx, workspaceID)
+	if err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	cleaned, err := cleanExistingWorkspaceDir(ws.Path)
+	if err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	if _, err := a.localStore.ActivateWorkspace(ctx, workspaceID); err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	if err := a.applyActiveWorkspace(cleaned); err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	summaries, err := a.localStore.QueryWorkspaceSummaries(ctx, 20)
+	if err != nil {
+		return types.WorkspaceSummary{}, err
+	}
+	for _, summary := range summaries {
+		if summary.ID == workspaceID {
+			return summary, nil
+		}
+	}
+	return types.WorkspaceSummary{ID: ws.ID, Path: ws.Path, Name: ws.Name, Active: true}, nil
 }
 
 // GetCreditFeatureSince returns the timestamp at which per-task credit
@@ -1052,24 +1213,20 @@ func (a *App) GetTaskHistory(limit int) ([]types.TaskHistoryEntry, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ids, err := a.localStore.QueryRecentTaskIDs(ctx, limit)
+	entries, err := a.localStore.QueryRecentTaskHistory(ctx, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get task history: list tasks: %w", err)
 	}
-	entries := make([]types.TaskHistoryEntry, 0, len(ids))
-	for _, id := range ids {
-		events, err := a.localStore.QueryEventsByTask(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("get task history: events for %s: %w", id, err)
-		}
-		if len(events) == 0 {
+	out := make([]types.TaskHistoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if len(entry.Events) == 0 {
 			continue
 		}
 		// Re-register completed artifacts with the preview registry so the
 		// renderer can issue preview tokens after an app restart. Without this,
 		// `IssuePreviewToken` rejects historical artifacts with "artifact is not
 		// registered" and the preview button appears to do nothing.
-		for _, ev := range events {
+		for _, ev := range entry.Events {
 			if ev.Type != "task.completed" {
 				continue
 			}
@@ -1079,9 +1236,9 @@ func (a *App) GetTaskHistory(limit int) ([]types.TaskHistoryEntry, error) {
 				}
 			}
 		}
-		entries = append(entries, types.TaskHistoryEntry{TaskID: id, Events: events})
+		out = append(out, entry)
 	}
-	return entries, nil
+	return out, nil
 }
 
 // ─── App update bindings ────────────────────────────────────────────────────
@@ -1273,7 +1430,7 @@ func (a *App) ExportLogs(input ExportLogsInput) (ExportLogsResult, error) {
 	zipPath, manifest, err := diagnostics.BuildBundle(a.ctx, diagnostics.BundleOptions{
 		DestDir:             downloads,
 		UserDataDir:         a.userDataDir,
-		WorkspaceDir:        a.workspaceDir,
+		WorkspaceDir:        a.effectiveWorkspaceDirForRuntime(currentSettings),
 		LocalStore:          a.localStore,
 		Settings:            currentSettings,
 		CachedBridgeEnv:     a.currentBridgeEnv(),
@@ -2072,7 +2229,14 @@ func stringField(payload map[string]any, keys ...string) string {
 
 func (a *App) ensureBridge() (*bridge.Client, error) {
 	a.mu.Lock()
-	if a.bridgeClient != nil {
+	settingsValue := a.cachedSettings
+	a.mu.Unlock()
+	return a.ensureBridgeForCwd(a.effectiveWorkspaceDirForRuntime(settingsValue))
+}
+
+func (a *App) ensureBridgeForCwd(cwd string) (*bridge.Client, error) {
+	a.mu.Lock()
+	if a.bridgeClient != nil && a.bridgeCwd == cwd {
 		client := a.bridgeClient
 		a.mu.Unlock()
 		if !client.Connected() {
@@ -2081,6 +2245,14 @@ func (a *App) ensureBridge() (*bridge.Client, error) {
 			}
 		}
 		return client, nil
+	}
+	if a.bridgeClient != nil {
+		client := a.bridgeClient
+		a.bridgeClient = nil
+		a.bridgeCwd = ""
+		a.mu.Unlock()
+		client.Close()
+		a.mu.Lock()
 	}
 
 	settingsValue := a.cachedSettings
@@ -2109,7 +2281,7 @@ func (a *App) ensureBridge() (*bridge.Client, error) {
 	client := bridge.New(bridge.Options{
 		BinaryPath:     resolved.Path,
 		Env:            env,
-		Cwd:            a.workspaceDir,
+		Cwd:            cwd,
 		LogDir:         filepath.Join(a.userDataDir, "logs"),
 		RequestTimeout: 30 * time.Second,
 	})
@@ -2183,6 +2355,7 @@ func (a *App) ensureBridge() (*bridge.Client, error) {
 
 	a.mu.Lock()
 	a.bridgeClient = client
+	a.bridgeCwd = cwd
 	a.mu.Unlock()
 	return client, nil
 }
@@ -2227,6 +2400,7 @@ func (a *App) resetBridgeRuntime() {
 	a.mu.Lock()
 	client := a.bridgeClient
 	a.bridgeClient = nil
+	a.bridgeCwd = ""
 	a.resolvedBinaryPath = ""
 	a.resolvedBinaryEnv = nil
 	a.binaryResolvedAt = time.Time{}
@@ -2385,13 +2559,9 @@ func (a *App) resolveGenerateInput(input types.GenerateInput, s types.UserSettin
 		out.OutputDir = outputDir
 		return out, nil
 	}
-	base := a.workspaceDir
-	if s.OutputDir != nil && strings.TrimSpace(*s.OutputDir) != "" {
-		outputDir, err := cleanGenerateOutputDir(*s.OutputDir)
-		if err != nil {
-			return types.GenerateInput{}, err
-		}
-		base = outputDir
+	base, err := a.effectiveWorkspaceDirForInput(input.WorkspaceID, input.NoProject, s)
+	if err != nil {
+		return types.GenerateInput{}, err
 	}
 	taskDir := filepath.Join(base, buildTaskDirName(input.Topic, string(input.DocumentType)))
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
@@ -2413,11 +2583,197 @@ func cleanGenerateOutputDir(outputDir string) (string, error) {
 	return cleaned, nil
 }
 
+func cleanWorkspaceDir(workspaceDir string) (string, error) {
+	cleaned := strings.TrimSpace(workspaceDir)
+	if strings.ContainsRune(cleaned, 0) {
+		return "", errors.New("workspace dir is invalid")
+	}
+	if !filepath.IsAbs(cleaned) {
+		return "", errors.New("workspace dir must be absolute")
+	}
+	return cleaned, nil
+}
+
+func cleanExistingWorkspaceDir(workspaceDir string) (string, error) {
+	cleaned, err := cleanWorkspaceDir(workspaceDir)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("workspace dir is unavailable: %w", err)
+	}
+	if !info.IsDir() {
+		return "", errors.New("workspace dir must be a directory")
+	}
+	return cleaned, nil
+}
+
+func (a *App) effectiveWorkspaceDirForInput(workspaceID string, noProject bool, s types.UserSettings) (string, error) {
+	if noProject {
+		return a.workspaceDir, nil
+	}
+	if a.localStore != nil {
+		ctx := a.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if strings.TrimSpace(workspaceID) != "" {
+			ws, err := a.localStore.Workspace(ctx, strings.TrimSpace(workspaceID))
+			if err != nil {
+				return "", err
+			}
+			cleaned, err := cleanExistingWorkspaceDir(ws.Path)
+			if err != nil {
+				return "", err
+			}
+			if _, err := a.localStore.ActivateWorkspace(ctx, ws.ID); err != nil {
+				return "", err
+			}
+			return cleaned, nil
+		}
+		if ws, err := a.localStore.ActiveWorkspace(ctx); err == nil {
+			return cleanExistingWorkspaceDir(ws.Path)
+		}
+	}
+	return a.effectiveWorkspaceDir(s)
+}
+
+func (a *App) effectiveWorkspaceDir(s types.UserSettings) (string, error) {
+	if a.localStore != nil {
+		ctx := a.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if ws, err := a.localStore.ActiveWorkspace(ctx); err == nil {
+			return cleanExistingWorkspaceDir(ws.Path)
+		}
+	}
+	if s.WorkspaceDir != nil && strings.TrimSpace(*s.WorkspaceDir) != "" {
+		return cleanWorkspaceDir(*s.WorkspaceDir)
+	}
+	if s.OutputDir != nil && strings.TrimSpace(*s.OutputDir) != "" {
+		return cleanWorkspaceDir(*s.OutputDir)
+	}
+	return a.workspaceDir, nil
+}
+
+func (a *App) effectiveWorkspaceDirForRuntime(s types.UserSettings) string {
+	workspaceDir, err := a.effectiveWorkspaceDir(s)
+	if err != nil {
+		return a.workspaceDir
+	}
+	return workspaceDir
+}
+
+func (a *App) initializeWorkspaces(ctx context.Context) error {
+	if a.localStore == nil {
+		return nil
+	}
+	if err := a.removeDefaultWorkspaceProject(ctx); err != nil {
+		return err
+	}
+	activePath := a.workspaceDir
+	if legacy, ok := validSettingsWorkspaceDir(a.cachedSettings); ok {
+		if cleaned, err := cleanExistingWorkspaceDir(legacy); err == nil {
+			if sameCleanPath(cleaned, a.workspaceDir) {
+				activePath = a.workspaceDir
+			} else if ws, err := a.localStore.EnsureWorkspace(ctx, cleaned); err == nil {
+				if _, activeErr := a.localStore.ActiveWorkspace(ctx); activeErr != nil {
+					_, _ = a.localStore.ActivateWorkspace(ctx, ws.ID)
+				}
+				activePath = ws.Path
+			}
+		}
+	}
+	if ws, err := a.localStore.ActiveWorkspace(ctx); err == nil && ws.Path != "" {
+		activePath = ws.Path
+	}
+	return a.applyActiveWorkspace(activePath)
+}
+
+func (a *App) removeDefaultWorkspaceProject(ctx context.Context) error {
+	if a.localStore == nil {
+		return nil
+	}
+	if _, err := a.localStore.RemoveWorkspaceByPath(ctx, a.workspaceDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sameCleanPath(aPath, bPath string) bool {
+	if strings.TrimSpace(aPath) == "" || strings.TrimSpace(bPath) == "" {
+		return false
+	}
+	return filepath.Clean(aPath) == filepath.Clean(bPath)
+}
+
+func (a *App) applyActiveWorkspace(workspacePath string) error {
+	workspacePath, err := cleanExistingWorkspaceDir(workspacePath)
+	if err != nil {
+		return err
+	}
+	if a.previewReg != nil {
+		if err := a.previewReg.SetTrustedRoots(previewTrustedRoots(workspacePath, types.UserSettings{})); err != nil {
+			return err
+		}
+	}
+	a.resetBridgeRuntime()
+	return nil
+}
+
+func (a *App) recordTaskWorkspaceContext(taskID, workspaceID, conversationID, parentTaskID, title string, noProject bool) error {
+	if a.localStore == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.TrimSpace(workspaceID) != "" && !noProject {
+		ws, err := a.localStore.Workspace(ctx, strings.TrimSpace(workspaceID))
+		if err != nil {
+			return err
+		}
+		if _, err := cleanExistingWorkspaceDir(ws.Path); err != nil {
+			return err
+		}
+		if _, err := a.localStore.ActivateWorkspace(ctx, ws.ID); err != nil {
+			return err
+		}
+	}
+	resolvedWorkspaceID := ""
+	if !noProject {
+		ws, err := a.localStore.ActiveWorkspace(ctx)
+		if err != nil {
+			return err
+		}
+		resolvedWorkspaceID = ws.ID
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		conversationID = taskID
+	}
+	if err := a.localStore.EnsureConversation(ctx, resolvedWorkspaceID, conversationID, title); err != nil {
+		return err
+	}
+	return a.localStore.RecordTaskContext(ctx, taskID, localstore.TaskContext{
+		WorkspaceID:    resolvedWorkspaceID,
+		ConversationID: conversationID,
+		ParentTaskID:   parentTaskID,
+	})
+}
+
 func (a *App) refreshPreviewTrustedRoots(s types.UserSettings) error {
 	if a.previewReg == nil {
 		return nil
 	}
-	if err := a.previewReg.SetTrustedRoots(previewTrustedRoots(a.workspaceDir, s)); err != nil {
+	roots, ok := previewTrustedRootsForUpdate(a.workspaceDir, s)
+	if !ok {
+		return nil
+	}
+	if err := a.previewReg.SetTrustedRoots(roots); err != nil {
 		return fmt.Errorf("refresh preview trusted roots: %w", err)
 	}
 	return nil
@@ -2425,14 +2781,41 @@ func (a *App) refreshPreviewTrustedRoots(s types.UserSettings) error {
 
 func previewTrustedRoots(workspaceDir string, s types.UserSettings) []string {
 	roots := []string{workspaceDir}
-	if s.OutputDir == nil {
-		return roots
+	if custom, ok := validSettingsWorkspaceDir(s); ok {
+		return append(roots, custom)
 	}
-	outputDir := strings.TrimSpace(*s.OutputDir)
-	if outputDir == "" || strings.ContainsRune(outputDir, 0) || !filepath.IsAbs(outputDir) {
-		return roots
+	return roots
+}
+
+func previewTrustedRootsForUpdate(workspaceDir string, s types.UserSettings) ([]string, bool) {
+	if hasInvalidWorkspaceDir(s) {
+		return nil, false
 	}
-	return append(roots, outputDir)
+	return previewTrustedRoots(workspaceDir, s), true
+}
+
+func validSettingsWorkspaceDir(s types.UserSettings) (string, bool) {
+	if s.WorkspaceDir != nil && strings.TrimSpace(*s.WorkspaceDir) != "" {
+		workspaceDir, err := cleanWorkspaceDir(*s.WorkspaceDir)
+		return workspaceDir, err == nil
+	}
+	if s.OutputDir != nil && strings.TrimSpace(*s.OutputDir) != "" {
+		workspaceDir, err := cleanWorkspaceDir(*s.OutputDir)
+		return workspaceDir, err == nil
+	}
+	return "", false
+}
+
+func hasInvalidWorkspaceDir(s types.UserSettings) bool {
+	if s.WorkspaceDir != nil && strings.TrimSpace(*s.WorkspaceDir) != "" {
+		_, err := cleanWorkspaceDir(*s.WorkspaceDir)
+		return err != nil
+	}
+	if s.OutputDir != nil && strings.TrimSpace(*s.OutputDir) != "" {
+		_, err := cleanWorkspaceDir(*s.OutputDir)
+		return err != nil
+	}
+	return false
 }
 
 // buildTaskDirName returns a unique, filesystem-safe folder name for a single

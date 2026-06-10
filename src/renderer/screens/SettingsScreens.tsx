@@ -106,13 +106,6 @@ export function SettingsScreen({
       : false
     : true;
 
-  const pickOutputDir = useCallback(async () => {
-    const picked = await officecli.openDirectoryDialog();
-    if (picked) {
-      await update({ outputDir: picked }).catch(() => undefined);
-    }
-  }, [update]);
-
   const rerunOnboarding = useCallback(() => {
     Modal.confirm({
       title: t("settings.row.onboarding.confirmTitle"),
@@ -146,6 +139,7 @@ export function SettingsScreen({
             enableImages: true,
             imageQuality: "premium",
           },
+          workspaceDir: null,
           outputDir: null,
           llmProvider: null,
           onboardingCompletedAt: null,
@@ -212,8 +206,6 @@ export function SettingsScreen({
 
   const settingsSections = [
     { key: "generation", label: t("settings.group.generation"), icon: "auto_awesome" },
-    { key: "imageWatermark", label: t("settings.group.imageWatermark"), icon: "image" },
-    { key: "localImageTemplates", label: t("settings.group.localImageTemplates"), icon: "widgets" },
     { key: "appearance", label: t("settings.group.appearance"), icon: "palette" },
     { key: "workspace", label: t("settings.group.workspace"), icon: "folder_open" },
     { key: "connection", label: t("settings.group.connection"), icon: "tune" },
@@ -303,11 +295,6 @@ export function SettingsScreen({
                   onChange={updateNotificationsEnabled}
                 />
               </SettingRow>
-            </div>
-            ) : null}
-            {activeSettingsSection === "imageWatermark" ? (
-            <div className="setting-group" id={settingsSectionId("imageWatermark")}>
-              <h2>{t("settings.group.imageWatermark")}</h2>
               <SettingRow title={t("settings.row.imageWatermark.title")} desc={t("settings.row.imageWatermark.desc")}>
                 <div className="settings-stack">
                   <Switch
@@ -328,11 +315,6 @@ export function SettingsScreen({
                   </div>
                 </div>
               </SettingRow>
-            </div>
-            ) : null}
-            {activeSettingsSection === "localImageTemplates" ? (
-            <div className="setting-group" id={settingsSectionId("localImageTemplates")}>
-              <h2>{t("settings.group.localImageTemplates")}</h2>
               <SettingRow title={t("settings.localImageTemplates.title")} desc={t("settings.localImageTemplates.desc")}>
                 <div className="local-image-template-tools">
                   <div className="settings-note">{formatLocalTemplateCount(localTemplates.length, t)}</div>
@@ -385,22 +367,10 @@ export function SettingsScreen({
             <div className="setting-group" id={settingsSectionId("workspace")}>
               <h2>{t("settings.group.workspace")}</h2>
               <SettingRow title={t("settings.row.outputDir.title")} desc={t("settings.row.outputDir.desc")}>
-                <Space.Compact style={{ width: "100%" }}>
-                  <Input
-                    placeholder={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")}
-                    value={settings.outputDir ?? ""}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      update({ outputDir: value.trim() ? value : null }).catch(() => undefined);
-                    }}
-                  />
-                  <Button icon={<FolderOpenOutlined />} onClick={pickOutputDir}>{t("settings.row.outputDir.browse")}</Button>
-                </Space.Compact>
-                {settings.outputDir ? (
-                  <Button type="link" size="small" onClick={() => update({ outputDir: null }).catch(() => undefined)}>
-                    {t("settings.row.outputDir.reset")}
-                  </Button>
-                ) : null}
+                <Input
+                  disabled
+                  value={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")}
+                />
               </SettingRow>
             </div>
             ) : null}

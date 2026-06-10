@@ -346,7 +346,7 @@ By default, fully local:
 
 - Document generation runs on your machine
 - LLM calls go directly to the provider you configured (OpenAI / Anthropic / self-hosted) — OfficeDex never proxies them
-- Generated files are written to a local workspace (default: `~/Library/Application Support/OfficeDex/workspace`)
+- Generated files and document context live in a local workspace (default: `~/Library/Application Support/OfficeDex/workspace`; optionally choose another folder in Settings)
 
 If you opt into "Hosted Runtime" (**Hosted Runtime** = OfficeCLI's official hosted proxy, so you don't have to configure your own LLM key), some calls route through the official proxy — the app displays a clear notice in that case.
 
@@ -380,7 +380,7 @@ Default workspace:
 - macOS: `~/Library/Application Support/OfficeDex/workspace`
 - Windows: `%APPDATA%/OfficeDex/workspace`
 
-Change it via **Settings → Workspace**. After each generation, click "Show in Folder" to jump straight there.
+Leave the workspace setting empty to use the default app-data workspace, or choose another folder via **Settings → Workspace**. After each generation, click "Show in Folder" to jump straight there.
 
 </details>
 

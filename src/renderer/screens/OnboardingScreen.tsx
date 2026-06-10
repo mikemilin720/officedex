@@ -1,5 +1,4 @@
 import { Alert, Button, Input, Modal, message, Radio, Select, Space, Switch, Tag } from "antd";
-import { FolderOpenOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { officecli } from "../bridge";
 import { useT } from "../i18n";
@@ -16,7 +15,6 @@ interface OnboardingScreenProps {
 
 interface DraftSettings {
   defaults: GenerateDefaults;
-  outputDir: string | null;
   llmProvider: LlmProvider;
   proxy: ProxySettings | null;
 }
@@ -51,7 +49,6 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
   const t = useT();
   const [draft, setDraft] = useState<DraftSettings>(() => ({
     defaults: { ...settings.defaults },
-    outputDir: settings.outputDir,
     llmProvider: settings.llmProvider ?? { ...EMPTY_PROVIDER },
     proxy: settings.proxy,
   }));
@@ -81,13 +78,6 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
     setProviderTestResult(null);
   }, []);
 
-  const pickOutputDir = useCallback(async () => {
-    const picked = await officecli.openDirectoryDialog();
-    if (picked) {
-      setDraft((current) => ({ ...current, outputDir: picked }));
-    }
-  }, []);
-
   const finish = useCallback(async (proxyOverride?: ProxySettings | null) => {
     setBusy(true);
     try {
@@ -97,7 +87,6 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
         : null;
       const patch: Partial<UserSettings> = {
         defaults: draft.defaults,
-        outputDir: draft.outputDir,
         onboardingCompletedAt: new Date().toISOString(),
       };
       if (provider === null || customProviderEnabled) {
@@ -289,31 +278,23 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
           </Space>
         ) : null}
 
-	        {step === 1 ? (
-	          <Space direction="vertical" size={20} style={{ width: "100%" }}>
-	            <Field label={t("onboarding.field.provider")}>
-	              <ProviderForm provider={draft.llmProvider} onChange={updateProvider} customProviderEnabled={customProviderEnabled} />
-	              {!customProviderEnabled ? (
-	                <span className="provider-hint">{t("settings.row.provider.loginRequired")}</span>
-	              ) : null}
-	              {draft.llmProvider.type === "official" ? (
-	                <span className="provider-hint">{t("onboarding.provider.officialTestHint")}</span>
-	              ) : null}
-	              {providerTestTag ? (
-	                <Tag color={providerTestTag.tone === "green" ? "success" : providerTestTag.tone === "red" ? "error" : "warning"}>
-	                  {providerTestTag.text}
-	                </Tag>
-	              ) : null}
-	            </Field>
-            <Field label={t("onboarding.field.outputDir")}>
-              <Space.Compact style={{ width: "100%" }}>
-                <Input
-                  placeholder={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")}
-                  value={draft.outputDir ?? ""}
-                  onChange={(event) => setDraft((current) => ({ ...current, outputDir: event.target.value.trim() ? event.target.value : null }))}
-                />
-                <Button icon={<FolderOpenOutlined />} onClick={pickOutputDir}>{t("settings.row.outputDir.browse")}</Button>
-              </Space.Compact>
+        {step === 1 ? (
+          <Space direction="vertical" size={20} style={{ width: "100%" }}>
+            <Field label={t("onboarding.field.provider")}>
+              <ProviderForm provider={draft.llmProvider} onChange={updateProvider} customProviderEnabled={customProviderEnabled} />
+              {!customProviderEnabled ? <span className="provider-hint">{t("settings.row.provider.loginRequired")}</span> : null}
+              {draft.llmProvider.type === "official" ? (
+                <span className="provider-hint">{t("onboarding.provider.officialTestHint")}</span>
+              ) : null}
+              {providerTestTag ? (
+                <Tag color={providerTestTag.tone === "green" ? "success" : providerTestTag.tone === "red" ? "error" : "warning"}>
+                  {providerTestTag.text}
+                </Tag>
+              ) : null}
+            </Field>
+            <Field label={t("onboarding.field.workspace")}>
+              <Input disabled value={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")} />
+              <span className="provider-hint">{t("onboarding.field.workspaceHint")}</span>
             </Field>
           </Space>
         ) : null}

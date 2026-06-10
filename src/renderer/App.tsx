@@ -2,8 +2,8 @@ import { ConfigProvider, message } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Artifact, BridgeEvent, DesktopTask, GenerateInput, ModifyInput, PreviewGrant } from "../shared/types";
-import { applyTaskEvent, attachUserInput, createInitialTaskState, deleteConversation, deleteTask, getConversationList, getConversationTasks, type TaskState } from "./taskState";
+import type { Artifact, BridgeEvent, DesktopTask, GenerateInput, ModifyInput, PreviewGrant, WorkspaceConversationSummary, WorkspaceSummary } from "../shared/types";
+import { applyTaskEvent, attachTaskContext, attachUserInput, createInitialTaskState, deleteConversation, deleteTask, getConversationList, getConversationTasks, type TaskContextPatch, type TaskState } from "./taskState";
 import { officecli } from "./bridge";
 import { theme } from "./designTokens";
 import { defaultGenerateInput, type NavKey } from "./defaults";
@@ -11,7 +11,7 @@ import { Shell } from "./components/Shell";
 import { PreviewPanel } from "./components/PreviewPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ForceUpdateOverlay } from "./components/ForceUpdateOverlay";
-import { DialogueScreen, type FailureKind, type NewGenerationDraft } from "./screens/DialogueScreens";
+import { DialogueScreen, type FailureKind, type NewChatTarget, type NewGenerationDraft } from "./screens/DialogueScreens";
 import { TasksScreen } from "./screens/DataScreens";
 import { LoginScreen, SettingsScreen } from "./screens/SettingsScreens";
 import { OnboardingScreen } from "./screens/OnboardingScreen";
@@ -28,6 +28,7 @@ type SelectedTask =
 
 type PendingGenerate = {
   localTaskId: string;
+  context?: TaskContextPatch;
   input: {
     prompt: string;
     sourceFile?: string;
@@ -40,6 +41,8 @@ type PendingGenerate = {
 
 export function App() {
   const [state, setState] = useState<TaskState>(() => createInitialTaskState());
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [chats, setChats] = useState<WorkspaceConversationSummary[]>([]);
   const [selectedTaskID, setSelectedTaskID] = useState<SelectedTask>({ kind: "auto" });
   const [activeNav, setActiveNav] = useState<NavKey>("dialogue");
   const [busy, setBusy] = useState(false);
@@ -52,6 +55,7 @@ export function App() {
   const pendingGenerateRef = useRef<PendingGenerate | null>(null);
   const { settings: persistedSettings, defaultWorkspaceDir, loading: settingsLoading } = useSettings();
   const [newGenerationDraft, setNewGenerationDraft] = useState<NewGenerationDraft>(() => createNewGenerationDraft());
+  const [newChatTarget, setNewChatTarget] = useState<NewChatTarget>({ kind: "none" });
   const [newGenerationDraftDirty, setNewGenerationDraftDirty] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const appUpdate = useAppUpdate();
@@ -73,6 +77,20 @@ export function App() {
   }, []);
 
   const showOnboarding = !settingsLoading && !onboardingDismissed && persistedSettings.onboardingCompletedAt === null;
+  const activeWorkspace = useMemo(() => workspaces.find((workspace) => workspace.active), [workspaces]);
+
+  const refreshProjectLists = useCallback(() => {
+    Promise.all([officecli.listWorkspaces(), officecli.listChats()])
+      .then(([workspaceItems, chatItems]) => {
+        setWorkspaces(workspaceItems);
+        setChats(chatItems);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refreshProjectLists();
+  }, [refreshProjectLists]);
 
   useEffect(() => {
     if (settingsLoading || newGenerationDraftDirty) return;
@@ -138,7 +156,7 @@ export function App() {
         let next = applyTaskEvent(current, event);
         if (event.task_id && pending && shouldReplaceLocalTask) {
           next = deleteTask(next, pending.localTaskId);
-          next = attachUserInput(next, event.task_id, pending.input, pending.parentTaskId);
+          next = attachUserInput(next, event.task_id, pending.input, pending.parentTaskId, pending.context);
         }
         return next;
       });
@@ -147,6 +165,7 @@ export function App() {
           pendingGenerateRef.current = null;
           setSelectedTaskID({ kind: "task", id: event.task_id });
           setBusy(false);
+          refreshProjectLists();
         } else {
           setSelectedTaskID((current) => current.kind === "none" ? { kind: "task", id: event.task_id! } : current);
         }
@@ -178,7 +197,7 @@ export function App() {
         setCapabilityStatus(text);
       });
     return off;
-  }, [connectAttempt, clearError, recordError, settingsLoading, showOnboarding, forceUpdate, nudgeForTaskTransition, t]);
+  }, [connectAttempt, clearError, recordError, settingsLoading, showOnboarding, forceUpdate, nudgeForTaskTransition, refreshProjectLists, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,6 +212,12 @@ export function App() {
             for (const event of entry.events) {
               next = applyTaskEvent(next, event);
             }
+            next = attachTaskContext(next, entry.taskId, {
+              conversationId: entry.conversationId,
+              parentTaskId: entry.parentTaskId,
+              workspaceId: entry.workspaceId,
+              workspacePath: entry.workspacePath,
+            });
             // After replaying persisted events, if the task is still
             // running or starting, it means the task was interrupted
             // (e.g. force-quit while generating). Mark it cancelled so
@@ -258,6 +283,11 @@ export function App() {
     return undefined;
   }, [selectedTaskID, state.tasks, firstTaskID]);
 
+  useEffect(() => {
+    if (selectedTaskID.kind !== "auto" || conversationId || !activeWorkspace || newChatTarget.kind !== "none") return;
+    setNewChatTarget({ kind: "workspace", workspaceId: activeWorkspace.id });
+  }, [activeWorkspace, conversationId, newChatTarget.kind, selectedTaskID.kind]);
+
   const conversationTasks = useMemo(() => {
     if (!conversationId) return [];
     return getConversationTasks(state, conversationId);
@@ -265,6 +295,46 @@ export function App() {
   const artifacts = useMemo(() => state.artifacts, [state.artifacts]);
   const tasks = useMemo(() => state.taskOrder.map((taskID) => state.tasks[taskID]).filter(Boolean), [state]);
   const conversations = useMemo(() => getConversationList(state), [state]);
+  const sidebarWorkspaces = useMemo(() => {
+    return workspaces.map((workspace) => {
+      const liveConversations: WorkspaceConversationSummary[] = conversations
+        .filter((conversation) => {
+          const task = state.tasks[conversation.latestTaskId];
+          return task?.workspaceId === workspace.id;
+        })
+        .map((conversation) => ({
+          conversationId: conversation.conversationId,
+          firstTaskId: conversation.firstTaskId,
+          latestTaskId: conversation.latestTaskId,
+          title: conversation.title,
+          status: conversation.status,
+          ...(conversation.documentType ? { documentType: conversation.documentType } : {}),
+        }));
+      const seen = new Set(liveConversations.map((conversation) => conversation.conversationId));
+      return {
+        ...workspace,
+        conversations: liveConversations.concat(workspace.conversations.filter((conversation) => !seen.has(conversation.conversationId))),
+      };
+    });
+  }, [workspaces, conversations, state.tasks]);
+
+  const sidebarChats = useMemo(() => {
+    const liveChats: WorkspaceConversationSummary[] = conversations
+      .filter((conversation) => {
+        const task = state.tasks[conversation.latestTaskId];
+        return task && !task.workspaceId;
+      })
+      .map((conversation) => ({
+        conversationId: conversation.conversationId,
+        firstTaskId: conversation.firstTaskId,
+        latestTaskId: conversation.latestTaskId,
+        title: conversation.title,
+        status: conversation.status,
+        ...(conversation.documentType ? { documentType: conversation.documentType } : {}),
+      }));
+    const seen = new Set(liveChats.map((conversation) => conversation.conversationId));
+    return liveChats.concat(chats.filter((conversation) => !seen.has(conversation.conversationId)));
+  }, [chats, conversations, state.tasks]);
 
   async function submit(values: GenerateInput) {
     if (forceUpdate) {
@@ -275,8 +345,15 @@ export function App() {
     const topic = values.topic || summarizePrompt(values.prompt);
     const localTaskId = createLocalTaskId();
     const submittedDraft = createNewGenerationDraft(values);
+    const noProject = values.noProject === true || !values.workspaceId;
+    const targetWorkspace = noProject ? undefined : workspaces.find((workspace) => workspace.id === values.workspaceId);
+    const context: TaskContextPatch = {
+      conversationId: localTaskId,
+      ...(targetWorkspace ? { workspaceId: targetWorkspace.id, workspacePath: targetWorkspace.path } : {}),
+    };
     pendingGenerateRef.current = {
       localTaskId,
+      context,
       input: {
         prompt: values.prompt,
         sourceFile: values.sourceFile,
@@ -295,19 +372,24 @@ export function App() {
         topic,
         message: "Task submitted",
       },
-    }), localTaskId, pendingInput));
+    }), localTaskId, pendingInput, undefined, context));
     setSelectedTaskID({ kind: "task", id: localTaskId });
     setActiveNav("dialogue");
     resetNewGenerationDraft();
     setBusy(false);
     try {
-      const result = await officecli.generate({ ...values, topic });
+      const generateInput: GenerateInput = noProject
+        ? { ...values, topic, noProject: true, workspaceId: undefined }
+        : { ...values, topic, workspaceId: targetWorkspace?.id };
+      const result = await officecli.generate(generateInput);
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
+        const actualContext = { ...pending.context, conversationId: result.taskId };
         pendingGenerateRef.current = null;
-        setState((current) => attachUserInput(deleteTask(current, localTaskId), result.taskId, pending.input));
+        setState((current) => attachUserInput(deleteTask(current, localTaskId), result.taskId, pending.input, undefined, actualContext));
         setSelectedTaskID({ kind: "task", id: result.taskId });
         setActiveNav("dialogue");
+        refreshProjectLists();
       }
     } catch (error) {
       if (pendingGenerateRef.current?.localTaskId !== localTaskId) return;
@@ -344,20 +426,89 @@ export function App() {
       values.referenceImages = input.referenceImages;
       values.fps = input.fps;
     }
+    if (task.workspaceId) {
+      values.workspaceId = task.workspaceId;
+    } else {
+      values.noProject = true;
+    }
     void submit(values);
   }
 
-  const newGeneration = useCallback(() => {
+  const selectWorkspace = useCallback(async (workspaceId: string) => {
+    try {
+      const selected = await officecli.selectWorkspace(workspaceId);
+      setWorkspaces((current) => current.map((workspace) => ({ ...workspace, active: workspace.id === selected.id })));
+      setNewChatTarget({ kind: "workspace", workspaceId: selected.id });
+      clearError();
+    } catch (error) {
+      const text = errorMessage(error);
+      recordError(text, classifyError(text), extractStderr(text));
+    }
+  }, [clearError, recordError]);
+
+  const newGeneration = useCallback((workspaceId?: string) => {
+    if (workspaceId) {
+      setNewChatTarget({ kind: "workspace", workspaceId });
+      if (workspaceId !== activeWorkspace?.id) {
+        void selectWorkspace(workspaceId);
+      }
+    } else {
+      const selectedTask = selectedTaskID.kind === "task" ? state.tasks[selectedTaskID.id] : undefined;
+      if (selectedTask?.workspaceId) {
+        setNewChatTarget({ kind: "workspace", workspaceId: selectedTask.workspaceId });
+      } else if (selectedTask) {
+        setNewChatTarget({ kind: "none" });
+      } else if (activeWorkspace) {
+        setNewChatTarget({ kind: "workspace", workspaceId: activeWorkspace.id });
+      } else {
+        setNewChatTarget({ kind: "none" });
+      }
+    }
     setSelectedTaskID({ kind: "none" });
     clearError();
     setActiveNav("dialogue");
-  }, [clearError]);
+  }, [activeWorkspace, clearError, selectWorkspace, selectedTaskID, state.tasks]);
 
   const selectTask = useCallback((taskId: string) => {
+    const taskWorkspaceId = state.tasks[taskId]?.workspaceId;
+    if (taskWorkspaceId && taskWorkspaceId !== activeWorkspace?.id) {
+      void selectWorkspace(taskWorkspaceId);
+    }
+    setNewChatTarget(taskWorkspaceId ? { kind: "workspace", workspaceId: taskWorkspaceId } : { kind: "none" });
     setSelectedTaskID({ kind: "task", id: taskId });
     setLastError(undefined);
     setActiveNav("dialogue");
+  }, [state.tasks, activeWorkspace?.id, selectWorkspace]);
+
+  const addWorkspace = useCallback(async () => {
+    try {
+      const picked = await officecli.openDirectoryDialog();
+      if (!picked) return;
+      const workspace = await officecli.addWorkspace(picked);
+      setNewChatTarget({ kind: "workspace", workspaceId: workspace.id });
+      refreshProjectLists();
+    } catch (error) {
+      const text = errorMessage(error);
+      recordError(text, classifyError(text), extractStderr(text));
+    }
+  }, [refreshProjectLists, recordError]);
+
+  const revealWorkspace = useCallback((workspacePath: string) => {
+    void officecli.showItemInFolder(workspacePath).catch(() => officecli.openPath(workspacePath));
   }, []);
+
+  const removeWorkspace = useCallback(async (workspaceId: string) => {
+    try {
+      await officecli.removeWorkspace(workspaceId);
+      setWorkspaces((current) => current.filter((workspace) => workspace.id !== workspaceId));
+      setNewChatTarget({ kind: "none" });
+      await refreshProjectLists();
+      clearError();
+    } catch (error) {
+      const text = errorMessage(error);
+      recordError(text, classifyError(text), extractStderr(text));
+    }
+  }, [clearError, refreshProjectLists, recordError]);
 
   const continueGeneration = useCallback(async (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: GenerateInput["imageRatio"], fps?: number) => {
     if (forceUpdate) {
@@ -365,11 +516,22 @@ export function App() {
       return;
     }
     const parentTaskId = conversationTasks.at(-1)?.id;
+    const parentTask = parentTaskId ? state.tasks[parentTaskId] : undefined;
+    const targetWorkspace = parentTask?.workspaceId
+      ? workspaces.find((workspace) => workspace.id === parentTask.workspaceId)
+      : (!parentTask ? activeWorkspace : undefined);
+    const noProject = Boolean(parentTask && !parentTask.workspaceId);
     clearError();
     const topic = summarizePrompt(prompt);
     const localTaskId = createLocalTaskId();
+    const context: TaskContextPatch = {
+      conversationId,
+      parentTaskId,
+      ...(targetWorkspace ? { workspaceId: targetWorkspace.id, workspacePath: targetWorkspace.path } : {}),
+    };
     pendingGenerateRef.current = {
       localTaskId,
+      context,
       input: {
         prompt,
         referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
@@ -388,13 +550,17 @@ export function App() {
         topic,
         message: "Task submitted",
       },
-    }), localTaskId, pendingInput, parentTaskId));
+    }), localTaskId, pendingInput, parentTaskId, context));
     setSelectedTaskID({ kind: "task", id: localTaskId });
     setActiveNav("dialogue");
     setBusy(false);
     try {
       const result = await officecli.generate({
         documentType: documentType as GenerateInput["documentType"],
+        workspaceId: targetWorkspace?.id,
+        noProject,
+        conversationId,
+        parentTaskId,
         topic,
         prompt,
         mode: persistedSettings.defaults.mode,
@@ -407,9 +573,10 @@ export function App() {
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
         pendingGenerateRef.current = null;
-        setState((current) => attachUserInput(deleteTask(current, localTaskId), result.taskId, pending.input, parentTaskId));
+        setState((current) => attachUserInput(deleteTask(current, localTaskId), result.taskId, pending.input, parentTaskId, pending.context));
         setSelectedTaskID({ kind: "task", id: result.taskId });
         setActiveNav("dialogue");
+        refreshProjectLists();
       }
     } catch (error) {
       if (pendingGenerateRef.current?.localTaskId !== localTaskId) return;
@@ -421,7 +588,7 @@ export function App() {
       setBusy(false);
       nudgeForTaskTransition();
     }
-  }, [forceUpdate, recordError, clearError, persistedSettings.defaults, nudgeForTaskTransition, conversationTasks]);
+  }, [forceUpdate, recordError, clearError, persistedSettings.defaults, nudgeForTaskTransition, conversationTasks, conversationId, state.tasks, workspaces, activeWorkspace, refreshProjectLists]);
 
   const continueModify = useCallback(async (documentType: string, prompt: string) => {
     if (forceUpdate) {
@@ -435,11 +602,21 @@ export function App() {
       return;
     }
     const parentTaskId = parent?.id;
+    const targetWorkspace = parent?.workspaceId
+      ? workspaces.find((workspace) => workspace.id === parent.workspaceId)
+      : (!parent ? activeWorkspace : undefined);
+    const noProject = Boolean(parent && !parent.workspaceId);
     clearError();
     const topic = summarizePrompt(prompt);
     const localTaskId = createLocalTaskId();
+    const context: TaskContextPatch = {
+      conversationId,
+      parentTaskId,
+      ...(targetWorkspace ? { workspaceId: targetWorkspace.id, workspacePath: targetWorkspace.path } : {}),
+    };
     pendingGenerateRef.current = {
       localTaskId,
+      context,
       input: { prompt, sourceFile },
       parentTaskId,
     };
@@ -453,22 +630,27 @@ export function App() {
         topic,
         message: "Task submitted",
       },
-    }), localTaskId, pendingInput, parentTaskId));
+    }), localTaskId, pendingInput, parentTaskId, context));
     setSelectedTaskID({ kind: "task", id: localTaskId });
     setActiveNav("dialogue");
     setBusy(false);
     try {
       const result = await officecli.modify({
         documentType: documentType as ModifyInput["documentType"],
+        workspaceId: targetWorkspace?.id,
+        noProject,
+        conversationId,
+        parentTaskId,
         sourceFile,
         prompt,
       });
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
         pendingGenerateRef.current = null;
-        setState((current) => attachUserInput(deleteTask(current, localTaskId), result.taskId, pending.input, parentTaskId));
+        setState((current) => attachUserInput(deleteTask(current, localTaskId), result.taskId, pending.input, parentTaskId, pending.context));
         setSelectedTaskID({ kind: "task", id: result.taskId });
         setActiveNav("dialogue");
+        refreshProjectLists();
       }
     } catch (error) {
       if (pendingGenerateRef.current?.localTaskId !== localTaskId) return;
@@ -480,7 +662,7 @@ export function App() {
       setBusy(false);
       nudgeForTaskTransition();
     }
-  }, [forceUpdate, recordError, clearError, nudgeForTaskTransition, conversationTasks]);
+  }, [forceUpdate, recordError, clearError, nudgeForTaskTransition, conversationTasks, conversationId, workspaces, activeWorkspace, refreshProjectLists]);
 
   const retry = useCallback(() => {
     clearError();
@@ -569,10 +751,17 @@ export function App() {
         inspector={sidePanel}
         credit={credit}
         hasCustomProvider={persistedSettings.llmProvider !== null}
-        conversations={conversations}
+        workspaces={sidebarWorkspaces}
+        chats={sidebarChats}
+        activeWorkspaceId={activeWorkspace?.id}
+        activeWorkspaceName={activeWorkspace?.name}
         selectedConversationId={conversationId}
         onNavChange={setActiveNav}
         onNewGeneration={newGeneration}
+        onSelectWorkspace={selectWorkspace}
+        onAddWorkspace={addWorkspace}
+        onRevealWorkspace={revealWorkspace}
+        onRemoveWorkspace={removeWorkspace}
         onSelectTask={selectTask}
         onDeleteConversation={handleDeleteConversation}
       >
@@ -582,6 +771,8 @@ export function App() {
             conversationId={conversationId}
             artifacts={artifacts}
             newGenerationDraft={newGenerationDraft}
+            workspaces={workspaces}
+            newChatTarget={newChatTarget}
             busy={busy}
             lastError={lastError}
             errorKind={errorKind}
@@ -593,6 +784,8 @@ export function App() {
             onRetry={retry}
             onPreview={openInlinePreview}
             onNewGenerationDraftChange={updateNewGenerationDraft}
+            onNewChatTargetChange={setNewChatTarget}
+            onAddWorkspace={addWorkspace}
             onContinueGeneration={continueGeneration}
             onContinueModify={continueModify}
             onRetryTask={retryTaskGeneration}

@@ -40,7 +40,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if got.Defaults != want.Defaults {
 		t.Errorf("Defaults = %+v, want %+v", got.Defaults, want.Defaults)
 	}
-	if got.OutputDir != nil || got.BridgeBinaryPath != nil || got.LlmProvider != nil || got.OnboardingCompletedAt != nil {
+	if got.WorkspaceDir != nil || got.OutputDir != nil || got.BridgeBinaryPath != nil || got.LlmProvider != nil || got.OnboardingCompletedAt != nil {
 		t.Errorf("expected nil pointer fields, got %+v", got)
 	}
 	if got.Proxy == nil || got.Proxy.Enabled || got.Proxy.URL != "http://127.0.0.1:7890" {
@@ -104,6 +104,29 @@ func TestLoadUnknownEnumFallsBack(t *testing.T) {
 	}
 }
 
+func TestLoadLegacyOutputDirMigratesToWorkspaceDir(t *testing.T) {
+	store, path, _ := newTempStore(t)
+	raw := map[string]any{
+		"version":   1,
+		"outputDir": "  /Users/lu/Legacy Workspace  ",
+	}
+	body, _ := json.Marshal(raw)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.WorkspaceDir == nil || *got.WorkspaceDir != "/Users/lu/Legacy Workspace" {
+		t.Fatalf("WorkspaceDir = %v, want migrated legacy outputDir", got.WorkspaceDir)
+	}
+	if got.OutputDir != nil {
+		t.Fatalf("OutputDir = %v, want nil canonical legacy alias", got.OutputDir)
+	}
+}
+
 func TestUpdatePersistsAndSanitizes(t *testing.T) {
 	store, path, _ := newTempStore(t)
 	got, err := store.Update(Patch{
@@ -112,7 +135,7 @@ func TestUpdatePersistsAndSanitizes(t *testing.T) {
 			Mode:         ptr(types.ModeBest),
 			EnableImages: ptr(false),
 		},
-		OutputDir: ptr("  /Users/lu/Documents  "),
+		WorkspaceDir: ptr("  /Users/lu/Documents  "),
 		LlmProvider: &types.LlmProvider{
 			Type:    types.LlmAnthropic,
 			BaseURL: "https://api.anthropic.com",
@@ -132,8 +155,11 @@ func TestUpdatePersistsAndSanitizes(t *testing.T) {
 	if got.Defaults.EnableImages {
 		t.Errorf("EnableImages should be false")
 	}
-	if got.OutputDir == nil || *got.OutputDir != "/Users/lu/Documents" {
-		t.Errorf("OutputDir = %v, want trimmed path", got.OutputDir)
+	if got.WorkspaceDir == nil || *got.WorkspaceDir != "/Users/lu/Documents" {
+		t.Errorf("WorkspaceDir = %v, want trimmed path", got.WorkspaceDir)
+	}
+	if got.OutputDir != nil {
+		t.Errorf("OutputDir = %v, want nil deprecated alias", got.OutputDir)
 	}
 	if got.LlmProvider == nil || got.LlmProvider.Type != types.LlmAnthropic {
 		t.Errorf("LlmProvider = %+v", got.LlmProvider)
@@ -311,7 +337,7 @@ func TestReloadDiscardsCache(t *testing.T) {
 
 func TestAtomicWriteCleansUpTmp(t *testing.T) {
 	store, path, _ := newTempStore(t)
-	if _, err := store.Update(Patch{OutputDir: ptr("/tmp")}); err != nil {
+	if _, err := store.Update(Patch{WorkspaceDir: ptr("/tmp")}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {

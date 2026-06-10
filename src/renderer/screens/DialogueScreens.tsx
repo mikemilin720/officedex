@@ -25,7 +25,7 @@ import {
 } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode } from "react";
 import { getAttachmentSpec } from "../../shared/types";
-import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState } from "../../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
@@ -55,6 +55,10 @@ export interface NewGenerationDraft {
   fps?: number;
 }
 
+export type NewChatTarget =
+  | { kind: "workspace"; workspaceId: string }
+  | { kind: "none" };
+
 interface DialogueProps {
   tasks: DesktopTask[];
   conversationId?: string;
@@ -75,6 +79,10 @@ interface DialogueProps {
   onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio, fps?: number) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onRetryTask?: (task: DesktopTask) => void;
+  workspaces?: WorkspaceSummary[];
+  newChatTarget?: NewChatTarget;
+  onNewChatTargetChange?: (target: NewChatTarget) => void;
+  onAddWorkspace?: () => void;
 }
 
 const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
@@ -173,23 +181,38 @@ function MessageCopyButton({ text, ariaLabel }: { text: string; ariaLabel: strin
   );
 }
 
-export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask }: DialogueProps) {
+export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, workspaces = [], newChatTarget = { kind: "none" }, onNewChatTargetChange, onAddWorkspace }: DialogueProps) {
   if (lastError) {
     return <ConnectionFailure kind={errorKind} status={bridgeStatus} error={lastError} details={errorDetails} onOpenSettings={onOpenSettings} onOpenLogin={onOpenLogin} onRetry={onRetry} />;
   }
   // No tasks = fresh new generation prompt
   if (tasks.length === 0) {
-    return <FluidNewGeneration draft={newGenerationDraft ?? EMPTY_NEW_GENERATION_DRAFT} busy={busy} onSubmit={onSubmit} onDraftChange={onNewGenerationDraftChange ?? (() => undefined)} />;
+    return (
+      <FluidNewGeneration
+        draft={newGenerationDraft ?? EMPTY_NEW_GENERATION_DRAFT}
+        busy={busy}
+        workspaces={workspaces}
+        newChatTarget={newChatTarget}
+        onSubmit={onSubmit}
+        onDraftChange={onNewGenerationDraftChange ?? (() => undefined)}
+        onNewChatTargetChange={onNewChatTargetChange ?? (() => undefined)}
+        onAddWorkspace={onAddWorkspace ?? (() => undefined)}
+      />
+    );
   }
   // Conversation view with all rounds
   return <ConversationView tasks={tasks} busy={busy} onPreview={onPreview} onForceCancel={onForceCancel} onContinueGeneration={onContinueGeneration} onContinueModify={onContinueModify} onRetryTask={onRetryTask} onOpenLogin={onOpenLogin} />;
 }
 
-function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
+function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, onDraftChange, onNewChatTargetChange, onAddWorkspace }: {
   draft: NewGenerationDraft;
   busy: boolean;
+  workspaces: WorkspaceSummary[];
+  newChatTarget: NewChatTarget;
   onSubmit: (values: GenerateInput) => Promise<void>;
   onDraftChange: (patch: Partial<NewGenerationDraft>) => void;
+  onNewChatTargetChange: (target: NewChatTarget) => void;
+  onAddWorkspace: () => void;
 }) {
   const [form] = Form.useForm<GenerateInput>();
   const { settings } = useSettings();
@@ -215,6 +238,34 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
     () => imageTemplates.find((tpl) => String(tpl.id) === selectedTemplateId),
     [imageTemplates, selectedTemplateId],
   );
+  const targetWorkspace = newChatTarget.kind === "workspace"
+    ? workspaces.find((workspace) => workspace.id === newChatTarget.workspaceId)
+    : undefined;
+  const projectMenu: MenuProps = {
+    items: [
+      ...workspaces.map((workspace) => ({
+        key: `workspace:${workspace.id}`,
+        label: workspace.name,
+        icon: <FolderOpenOutlined />,
+      })),
+      { type: "divider" as const },
+      { key: "add", label: t("dialogue.projectPicker.addProject"), icon: <FolderOpenOutlined /> },
+      { key: "none", label: t("dialogue.projectPicker.noProject"), icon: <GlobalOutlined /> },
+    ],
+    onClick: ({ key }) => {
+      if (key === "add") {
+        onAddWorkspace();
+        return;
+      }
+      if (key === "none") {
+        onNewChatTargetChange({ kind: "none" });
+        return;
+      }
+      if (typeof key === "string" && key.startsWith("workspace:")) {
+        onNewChatTargetChange({ kind: "workspace", workspaceId: key.slice("workspace:".length) });
+      }
+    },
+  };
   const slots = useMemo(() => selectedTemplate?.slots ?? [], [selectedTemplate]);
   const hasSlots = slots.length > 0;
   const assembledPreview = hasSlots && selectedTemplate
@@ -411,7 +462,28 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
         <div className="fluid-spark">
           <MaterialSymbol name="auto_awesome" />
         </div>
-        <h1>{t("dialogue.startTitle")}</h1>
+        {targetWorkspace ? (
+          <h1 className="fluid-start-title">
+            <span>{t("dialogue.startTitleInProjectPrefix")}</span>
+            <Dropdown menu={projectMenu} trigger={["click"]}>
+              <button type="button" className="project-picker-button" aria-label={targetWorkspace.name}>
+                {targetWorkspace.name}
+                <DownOutlined />
+              </button>
+            </Dropdown>
+          </h1>
+        ) : (
+          <>
+            <h1>{t("dialogue.startTitleNoProject")}</h1>
+            <Dropdown menu={projectMenu} trigger={["click"]}>
+              <button type="button" className="project-picker-button project-picker-secondary" aria-label={t("dialogue.projectPicker.noProject")}>
+                <GlobalOutlined />
+                {t("dialogue.projectPicker.noProject")}
+                <DownOutlined />
+              </button>
+            </Dropdown>
+          </>
+        )}
         <p>{t("dialogue.startSubtitle")}</p>
         <div className="fluid-prompt-grid">
           <button onClick={() => applyDraftPatch({ documentType: "report", topic: t("dialogue.preset.report.title"), prompt: t("dialogue.preset.report.desc") })}>
@@ -458,6 +530,13 @@ function FluidNewGeneration({ draft, busy, onSubmit, onDraftChange }: {
           ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
           : submitValues.prompt;
         const nextInput: GenerateInput = { ...submitValues, documentType, prompt, ...attachments.collect() };
+        if (targetWorkspace) {
+          nextInput.workspaceId = targetWorkspace.id;
+          delete nextInput.noProject;
+        } else {
+          delete nextInput.workspaceId;
+          nextInput.noProject = true;
+        }
         if (documentType === "img") {
           nextInput.imageRatio = normalizeImageRatio(rawImageRatio);
         } else if (documentType === "gif") {

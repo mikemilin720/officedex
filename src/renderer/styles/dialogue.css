@@ -78,6 +78,40 @@
   letter-spacing: -0.5px;
 }
 
+.fluid-start-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.project-picker-button {
+  display: inline-flex;
+  max-width: min(420px, 100%);
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--n-surface);
+  color: var(--n-primary);
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.project-picker-button span:first-child,
+.project-picker-button .anticon:first-child + * {
+  min-width: 0;
+}
+
+.project-picker-secondary {
+  margin-top: -6px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .fluid-start-card p {
   max-width: 560px;
   margin: 0;

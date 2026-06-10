@@ -11,6 +11,7 @@ const FALLBACK: UserSettings = {
     enableImages: true,
     imageQuality: "premium",
   },
+  workspaceDir: null,
   outputDir: null,
   llmProvider: null,
   onboardingCompletedAt: null,

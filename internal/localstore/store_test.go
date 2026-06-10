@@ -76,7 +76,205 @@ func TestRequestIDPersistsThroughRecordAndQuery(t *testing.T) {
 	}
 }
 
-func TestSchemaV2MigrationFromV1DB(t *testing.T) {
+func TestWorkspaceConversationMetadataPersists(t *testing.T) {
+	store := newTempStore(t)
+	ctx := context.Background()
+	workspacePath := filepath.Join(t.TempDir(), "client-a")
+
+	workspace, err := store.EnsureWorkspace(ctx, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if workspace.ID == "" {
+		t.Fatalf("workspace ID is empty")
+	}
+	if workspace.Name != "client-a" {
+		t.Fatalf("workspace name = %q, want client-a", workspace.Name)
+	}
+	if err := store.EnsureConversation(ctx, workspace.ID, "conv-1", "Quarterly plan"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-1", TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conv-1",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext root: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-2", TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conv-1",
+		ParentTaskID:   "task-1",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext child: %v", err)
+	}
+	for _, ev := range []types.BridgeEvent{
+		{EventID: "e1", TaskID: "task-1", Type: "task.started", Payload: map[string]any{"document_type": "pptx", "topic": "Quarterly plan"}},
+		{EventID: "e2", TaskID: "task-2", Type: "task.started", Payload: map[string]any{"document_type": "pptx", "topic": "Follow-up"}},
+	} {
+		if err := store.RecordEvent(ev); err != nil {
+			t.Fatalf("RecordEvent(%s): %v", ev.EventID, err)
+		}
+	}
+
+	entries, err := store.QueryRecentTaskHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryRecentTaskHistory: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("history entries = %d, want 2", len(entries))
+	}
+	if entries[0].ConversationID != "conv-1" || entries[1].ConversationID != "conv-1" {
+		t.Fatalf("conversation ids = %q,%q; want conv-1", entries[0].ConversationID, entries[1].ConversationID)
+	}
+	if entries[1].ParentTaskID != "task-1" {
+		t.Fatalf("child parent = %q, want task-1", entries[1].ParentTaskID)
+	}
+	if entries[0].WorkspaceID != workspace.ID || entries[0].WorkspacePath != workspacePath {
+		t.Fatalf("workspace metadata = %q %q, want %q %q", entries[0].WorkspaceID, entries[0].WorkspacePath, workspace.ID, workspacePath)
+	}
+
+	summaries, err := store.QueryWorkspaceSummaries(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryWorkspaceSummaries: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("workspace summaries = %d, want 1", len(summaries))
+	}
+	if len(summaries[0].Conversations) != 1 {
+		t.Fatalf("conversation summaries = %d, want 1", len(summaries[0].Conversations))
+	}
+	if summaries[0].Conversations[0].LatestTaskID != "task-2" {
+		t.Fatalf("latest task = %q, want task-2", summaries[0].Conversations[0].LatestTaskID)
+	}
+}
+
+func TestNoProjectConversationMetadataPersistsOutsideWorkspaces(t *testing.T) {
+	store := newTempStore(t)
+	ctx := context.Background()
+	workspacePath := filepath.Join(t.TempDir(), "client-a")
+
+	workspace, err := store.EnsureWorkspace(ctx, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.EnsureConversation(ctx, "", "chat-1", "Standalone chat"); err != nil {
+		t.Fatalf("EnsureConversation no-project: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-chat-1", TaskContext{
+		ConversationID: "chat-1",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext no-project root: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-chat-2", TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "project-conv",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext project root: %v", err)
+	}
+	for _, ev := range []types.BridgeEvent{
+		{EventID: "e-chat", TaskID: "task-chat-1", Type: "task.started", Payload: map[string]any{"document_type": "pptx", "topic": "Standalone chat"}},
+		{EventID: "e-project", TaskID: "task-chat-2", Type: "task.started", Payload: map[string]any{"document_type": "docx", "topic": "Project chat"}},
+	} {
+		if err := store.RecordEvent(ev); err != nil {
+			t.Fatalf("RecordEvent(%s): %v", ev.EventID, err)
+		}
+	}
+
+	entries, err := store.QueryRecentTaskHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryRecentTaskHistory: %v", err)
+	}
+	var standalone *types.TaskHistoryEntry
+	for i := range entries {
+		if entries[i].TaskID == "task-chat-1" {
+			standalone = &entries[i]
+		}
+	}
+	if standalone == nil {
+		t.Fatalf("no-project task missing from history")
+	}
+	if standalone.WorkspaceID != "" || standalone.WorkspacePath != "" {
+		t.Fatalf("no-project workspace metadata = %q %q, want empty", standalone.WorkspaceID, standalone.WorkspacePath)
+	}
+
+	chats, err := store.QueryChatSummaries(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryChatSummaries: %v", err)
+	}
+	if len(chats) != 1 {
+		t.Fatalf("chat summaries = %d, want 1", len(chats))
+	}
+	if chats[0].ConversationID != "chat-1" || chats[0].LatestTaskID != "task-chat-1" {
+		t.Fatalf("chat summary = %#v, want chat-1/task-chat-1", chats[0])
+	}
+
+	workspaces, err := store.QueryWorkspaceSummaries(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryWorkspaceSummaries: %v", err)
+	}
+	if len(workspaces) != 1 {
+		t.Fatalf("workspace summaries = %d, want 1", len(workspaces))
+	}
+	if len(workspaces[0].Conversations) != 1 || workspaces[0].Conversations[0].ConversationID != "project-conv" {
+		t.Fatalf("workspace conversations = %#v, want only project-conv", workspaces[0].Conversations)
+	}
+}
+
+func TestRemoveWorkspaceMovesConversationsToChats(t *testing.T) {
+	store := newTempStore(t)
+	ctx := context.Background()
+	workspacePath := filepath.Join(t.TempDir(), "client-a")
+
+	workspace, err := store.EnsureWorkspace(ctx, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.EnsureConversation(ctx, workspace.ID, "conv-1", "Project chat"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-1", TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conv-1",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-1",
+		TaskID:  "task-1",
+		Type:    "task.started",
+		Payload: map[string]any{"document_type": "pptx", "topic": "Project chat"},
+	}); err != nil {
+		t.Fatalf("RecordEvent: %v", err)
+	}
+
+	if err := store.RemoveWorkspace(ctx, workspace.ID); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+
+	workspaces, err := store.QueryWorkspaceSummaries(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryWorkspaceSummaries: %v", err)
+	}
+	if len(workspaces) != 0 {
+		t.Fatalf("workspace summaries = %#v, want empty", workspaces)
+	}
+	chats, err := store.QueryChatSummaries(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryChatSummaries: %v", err)
+	}
+	if len(chats) != 1 || chats[0].ConversationID != "conv-1" {
+		t.Fatalf("chat summaries = %#v, want conv-1", chats)
+	}
+	entries, err := store.QueryRecentTaskHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryRecentTaskHistory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].WorkspaceID != "" || entries[0].WorkspacePath != "" {
+		t.Fatalf("history entries = %#v, want task detached from workspace", entries)
+	}
+}
+
+func TestSchemaMigrationFromV1DB(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "officedex.db")
 	ctx := context.Background()
@@ -114,8 +312,8 @@ func TestSchemaV2MigrationFromV1DB(t *testing.T) {
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Errorf("user_version = %d, want 2", version)
+	if version != 4 {
+		t.Errorf("user_version = %d, want 4", version)
 	}
 
 	events, err := store.QueryEventsByTask(ctx, "legacy-task")
@@ -516,8 +714,8 @@ func TestSchemaV1MigrationFromLegacyDB(t *testing.T) {
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Errorf("user_version = %d, want 2", version)
+	if version != 4 {
+		t.Errorf("user_version = %d, want 4", version)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)

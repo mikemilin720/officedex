@@ -15,6 +15,13 @@ export interface ConversationListItem {
   documentType?: string;
 }
 
+export interface TaskContextPatch {
+  conversationId?: string;
+  parentTaskId?: string;
+  workspaceId?: string;
+  workspacePath?: string;
+}
+
 export function createInitialTaskState(): TaskState {
   return { tasks: {}, taskOrder: [], artifacts: [] };
 }
@@ -44,13 +51,18 @@ export function attachUserInput(
   taskID: string,
   input: TaskUserInput,
   parentTaskId?: string,
+  context?: TaskContextPatch,
 ): TaskState {
   const parentTask = parentTaskId ? state.tasks[parentTaskId] : undefined;
   const previous = state.tasks[taskID];
-  const conversationId = parentTask ? parentTask.conversationId : previous?.conversationId || taskID;
+  const conversationId = context?.conversationId || (parentTask ? parentTask.conversationId : previous?.conversationId || taskID);
+  const workspaceId = context?.workspaceId || parentTask?.workspaceId || previous?.workspaceId;
+  const workspacePath = context?.workspacePath || parentTask?.workspacePath || previous?.workspacePath;
   const existing = previous || {
     id: taskID,
     conversationId,
+    workspaceId,
+    workspacePath,
     status: "starting" as const,
     events: [],
   };
@@ -59,12 +71,30 @@ export function attachUserInput(
     [taskID]: {
       ...existing,
       conversationId,
-      parentTaskId: parentTaskId || previous?.parentTaskId,
+      workspaceId,
+      workspacePath,
+      parentTaskId: parentTaskId || context?.parentTaskId || previous?.parentTaskId,
       userInput: input,
     },
   };
   const taskOrder = state.taskOrder.includes(taskID) ? state.taskOrder : [taskID, ...state.taskOrder];
   return { ...state, tasks, taskOrder };
+}
+
+export function attachTaskContext(state: TaskState, taskID: string, context: TaskContextPatch): TaskState {
+  const previous = state.tasks[taskID];
+  if (!previous) return state;
+  const tasks = {
+    ...state.tasks,
+    [taskID]: {
+      ...previous,
+      conversationId: context.conversationId || previous.conversationId,
+      parentTaskId: context.parentTaskId || previous.parentTaskId,
+      workspaceId: context.workspaceId || previous.workspaceId,
+      workspacePath: context.workspacePath || previous.workspacePath,
+    },
+  };
+  return { ...state, tasks };
 }
 
 /** Group tasks by conversationId and return them in taskOrder sequence per conversation. */
@@ -118,6 +148,10 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
   const nextTask: DesktopTask = {
     ...previous,
     status: statusFromEvent(event.type, previous.status),
+    workspaceId: stringPayload(event, "workspace_id") || previous.workspaceId,
+    workspacePath: stringPayload(event, "workspace_path") || previous.workspacePath,
+    conversationId: stringPayload(event, "conversation_id") || previous.conversationId,
+    parentTaskId: stringPayload(event, "parent_task_id") || previous.parentTaskId,
     documentType: stringPayload(event, "document_type") || previous.documentType,
     topic: stringPayload(event, "topic") || previous.topic,
     events,
