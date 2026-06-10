@@ -239,6 +239,7 @@ export const en: Record<string, string> = {
   "settings.tag.autoSaved": "Auto-saved",
   "settings.toast.autoSaved": "Settings saved and applied",
   "settings.loading": "Loading settings…",
+  "settings.secondaryMenu.label": "Settings sections",
   "settings.group.generation": "Generation Defaults",
   "settings.row.documentType.title": "Default Document Type",
   "settings.row.documentType.desc": "Set the preferred output format for quick generation.",

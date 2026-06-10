@@ -259,6 +259,7 @@ export const zh: Record<string, string> = {
   "settings.tag.autoSaved": "已自动保存",
   "settings.toast.autoSaved": "配置已自动保存生效",
   "settings.loading": "正在加载设置……",
+  "settings.secondaryMenu.label": "设置分区",
   "settings.group.generation": "生成默认值",
   "settings.row.documentType.title": "默认文档类型",
   "settings.row.documentType.desc": "设置快速生成的首选输出格式。",

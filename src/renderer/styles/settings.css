@@ -1,47 +1,116 @@
 /* ─── Settings ─── */
 
 .settings-layout {
-  display: block;
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 36px 44px;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-height: 100%;
+  background: var(--n-canvas);
+}
+
+.settings-secondary-menu {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  min-height: 100%;
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  border-right: 1px solid var(--n-hairline);
+  background: var(--n-canvas);
+  padding: 12px 8px;
+}
+
+.settings-secondary-menu h2 {
+  margin: 0 8px 8px;
+  color: var(--n-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-secondary-menu nav {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-secondary-menu button {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--n-slate);
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.settings-secondary-menu button:hover {
+  background: var(--n-surface);
+  color: var(--n-charcoal);
+}
+
+.settings-secondary-menu button.active {
+  background: var(--n-tint-lavender);
+  color: var(--n-primary);
+  font-weight: 600;
+}
+
+.settings-secondary-menu .material-symbol {
+  display: grid;
+  place-items: center;
+  color: currentColor;
+}
+
+.settings-secondary-menu button span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-panel {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  border: 1px solid var(--n-hairline);
-  border-radius: var(--radius-lg);
+  gap: 0;
+  min-width: 0;
   background: var(--n-canvas);
-  padding: 24px;
+  padding: 0;
+}
+
+.settings-panel > .page-header {
+  border-bottom: 1px solid var(--n-hairline);
+  padding: 12px 16px;
 }
 
 .setting-group {
   display: grid;
-  gap: 16px;
-  padding: 20px;
-  border: 1px solid var(--n-hairline);
-  border-radius: var(--radius-lg);
+  scroll-margin-top: 8px;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--n-hairline);
   background: var(--n-canvas);
 }
 
 .setting-group h2 {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: 22px;
-  font-weight: 400;
+  font-size: 17px;
+  font-weight: 600;
 }
 
 .setting-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
-  gap: 24px;
+  gap: 14px;
   align-items: center;
   border-top: 1px solid var(--n-hairline-soft);
-  padding-top: 16px;
+  padding-top: 10px;
 }
 
+.setting-group h2 + .setting-row,
 .setting-row:first-child {
   border-top: 0;
   padding-top: 0;
@@ -458,7 +527,23 @@
 
 @media (max-width: 760px) {
   .settings-layout {
-    padding: 24px 16px;
+    grid-template-columns: 1fr;
+  }
+  .settings-secondary-menu {
+    position: static;
+    min-height: auto;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--n-hairline);
+  }
+  .settings-secondary-menu nav {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .settings-secondary-menu button {
+    width: auto;
+    min-width: max-content;
   }
   .setting-row {
     grid-template-columns: 1fr;

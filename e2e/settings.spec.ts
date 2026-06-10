@@ -33,13 +33,15 @@ test.describe("Settings screen", () => {
     }).toBe(true);
   });
 
-  test("switching to Custom runtime reveals the LLM provider form", async ({ page }) => {
-    await installBridgeMock(page);
+  test("switching to Custom provider from Connection reveals the LLM provider form", async ({ page }) => {
+    await installBridgeMock(page, { whoami: { mode: "logged_in", userId: "settings-e2e" } });
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { name: /generation defaults/i })).toBeVisible();
 
-    await page.getByRole("radio", { name: /custom/i }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Connection" }).click();
+    await page.locator(".setting-row").filter({ hasText: "LLM Provider" }).getByTitle("Official").click();
+    await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").getByText("Custom endpoint", { exact: true }).click();
 
     await expect(page.getByPlaceholder(/api key/i)).toBeVisible();
     await page.getByPlaceholder(/api key/i).fill("sk-e2e-key");

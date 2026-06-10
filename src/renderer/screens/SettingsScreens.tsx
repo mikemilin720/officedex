@@ -45,6 +45,7 @@ export function SettingsScreen({
   const [localTemplates, setLocalTemplates] = useState<ImagePromptTemplate[]>(() => loadLocalImageTemplates());
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [pasteTemplateJSON, setPasteTemplateJSON] = useState("");
+  const [activeSettingsSection, setActiveSettingsSection] = useState("generation");
   const localTemplateFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -205,8 +206,46 @@ export function SettingsScreen({
     }
   }, [pasteTemplateJSON, replaceLocalTemplates]);
 
+  const scrollToSettingsSection = useCallback((section: string) => {
+    setActiveSettingsSection(section);
+    document
+      .getElementById(settingsSectionId(section))
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const settingsSections = [
+    { key: "generation", label: t("settings.group.generation"), icon: "auto_awesome" },
+    { key: "imageWatermark", label: t("settings.group.imageWatermark"), icon: "image" },
+    { key: "localImageTemplates", label: t("settings.group.localImageTemplates"), icon: "widgets" },
+    { key: "appearance", label: t("settings.group.appearance"), icon: "palette" },
+    { key: "workspace", label: t("settings.group.workspace"), icon: "folder_open" },
+    { key: "connection", label: t("settings.group.connection"), icon: "tune" },
+    { key: "subscription", label: t("settings.group.subscription"), icon: "shield_lock" },
+    { key: "diagnostics", label: t("diagnostics.title"), icon: "query_stats" },
+    { key: "reset", label: t("settings.group.reset"), icon: "history_edu" },
+    { key: "about", label: t("settings.group.about"), icon: "grid_view" },
+  ];
+
   return (
     <div className="settings-layout">
+      <aside className="settings-secondary-menu">
+        <h2>{t("settings.page.title")}</h2>
+        <nav aria-label={t("settings.secondaryMenu.label")}>
+          {settingsSections.map((section) => (
+            <button
+              key={section.key}
+              type="button"
+              className={activeSettingsSection === section.key ? "active" : ""}
+              aria-label={section.label}
+              aria-current={activeSettingsSection === section.key ? "true" : undefined}
+              onClick={() => scrollToSettingsSection(section.key)}
+            >
+              <MaterialSymbol name={section.icon} />
+              <span>{section.label}</span>
+            </button>
+          ))}
+        </nav>
+      </aside>
       <section className="settings-panel">
         <div className="page-header">
           <div>
@@ -224,7 +263,7 @@ export function SettingsScreen({
           <div className="settings-loading"><Spin /> <span>{t("settings.loading")}</span></div>
         ) : (
           <>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("generation")}>
               <h2>{t("settings.group.generation")}</h2>
               <SettingRow title={t("settings.row.documentType.title")} desc={t("settings.row.documentType.desc")}>
                 <Select
@@ -259,8 +298,15 @@ export function SettingsScreen({
                   onChange={(checked) => updateDefaults({ enableImages: checked })}
                 />
               </SettingRow>
+              <SettingRow title={t("settings.notifications.label")} desc={t("settings.notifications.desc")}>
+                <Switch
+                  aria-label={t("settings.notifications.label")}
+                  checked={notificationsEnabled}
+                  onChange={updateNotificationsEnabled}
+                />
+              </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("imageWatermark")}>
               <h2>{t("settings.group.imageWatermark")}</h2>
               <SettingRow title={t("settings.row.imageWatermark.title")} desc={t("settings.row.imageWatermark.desc")}>
                 <div className="settings-stack">
@@ -283,7 +329,7 @@ export function SettingsScreen({
                 </div>
               </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("localImageTemplates")}>
               <h2>{t("settings.group.localImageTemplates")}</h2>
               <SettingRow title={t("settings.localImageTemplates.title")} desc={t("settings.localImageTemplates.desc")}>
                 <div className="local-image-template-tools">
@@ -316,7 +362,7 @@ export function SettingsScreen({
                 </div>
               </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("appearance")}>
               <h2>{t("settings.group.appearance")}</h2>
               <SettingRow title={t("settings.row.language.title")} desc={t("settings.row.language.desc")}>
                 <Select
@@ -329,15 +375,8 @@ export function SettingsScreen({
                   style={{ minWidth: 220 }}
                 />
               </SettingRow>
-              <SettingRow title={t("settings.notifications.label")} desc={t("settings.notifications.desc")}>
-                <Switch
-                  aria-label={t("settings.notifications.label")}
-                  checked={notificationsEnabled}
-                  onChange={updateNotificationsEnabled}
-                />
-              </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("workspace")}>
               <h2>{t("settings.group.workspace")}</h2>
               <SettingRow title={t("settings.row.outputDir.title")} desc={t("settings.row.outputDir.desc")}>
                 <Space.Compact style={{ width: "100%" }}>
@@ -358,7 +397,7 @@ export function SettingsScreen({
                 ) : null}
               </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("connection")}>
               <h2>{t("settings.group.connection")}</h2>
               <SettingRow title={t("settings.row.provider.title")} desc={t("settings.row.provider.desc")}>
                 <ProviderFormControl
@@ -376,17 +415,17 @@ export function SettingsScreen({
                 />
               </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("subscription")}>
               <h2>{t("settings.group.subscription")}</h2>
               <SettingRow title={t("settings.row.redeem.title")} desc={t("settings.row.redeem.desc")}>
                 <RedeemCodeCard onCreditRefresh={onCreditRefresh} />
               </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("diagnostics")}>
               <h2>{t("diagnostics.title")}</h2>
               <DiagnosticsPanel />
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("reset")}>
               <h2>{t("settings.group.reset")}</h2>
               <SettingRow title={t("settings.row.onboarding.title")} desc={t("settings.row.onboarding.desc")}>
                 <Button onClick={rerunOnboarding}>{t("settings.row.onboarding.button")}</Button>
@@ -395,7 +434,7 @@ export function SettingsScreen({
                 <Button danger onClick={resetAll}>{t("settings.row.reset.button")}</Button>
               </SettingRow>
             </div>
-            <div className="setting-group">
+            <div className="setting-group" id={settingsSectionId("about")}>
               <h2>{t("settings.group.about")}</h2>
               <AboutCard />
             </div>
@@ -441,6 +480,10 @@ function readFileText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read file."));
     reader.readAsText(file);
   });
+}
+
+function settingsSectionId(section: string): string {
+  return `settings-section-${section}`;
 }
 
 type LoginPhase = "loading" | "anonymous" | "awaiting" | "success" | "failure";

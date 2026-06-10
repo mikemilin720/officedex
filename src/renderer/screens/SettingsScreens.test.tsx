@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Modal, message as antdMessage } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CreditStatus, DesktopAPI, UserSettings, WhoAmIResult } from "../../shared/types";
@@ -187,6 +187,24 @@ describe("SettingsScreen", () => {
     expect(screen.getAllByText("Connection").length).toBeGreaterThan(0);
   });
 
+  it("renders a secondary menu inside Settings and jumps to clicked sections", async () => {
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    const menu = await screen.findByRole("navigation", { name: "Settings sections" });
+    expect(within(menu).getByRole("button", { name: "Generation Defaults" })).toBeTruthy();
+    expect(within(menu).getByRole("button", { name: "Connection" })).toBeTruthy();
+
+    fireEvent.click(within(menu).getByRole("button", { name: "Connection" }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(within(menu).getByRole("button", { name: "Connection" }).getAttribute("aria-current")).toBe("true");
+  });
+
   it("places About after the other Settings sections", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
@@ -240,6 +258,18 @@ describe("SettingsScreen", () => {
     await waitFor(() => expect(updateSettingsSpy).toHaveBeenCalled());
     const last = updateSettingsSpy.mock.calls.at(-1)![0] as Partial<UserSettings>;
     expect(last.defaults?.enableImages).toBe(false);
+  });
+
+  it("shows desktop notifications with generation defaults", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    const generationHeading = await screen.findByRole("heading", { level: 2, name: "Generation Defaults" });
+    const generationGroup = generationHeading.closest(".setting-group");
+
+    expect(generationGroup).not.toBeNull();
+    expect(within(generationGroup as HTMLElement).getByRole("switch", { name: /desktop notifications/i })).toBeTruthy();
   });
 
   it("toggles desktop notifications in localStorage without writing Go settings", async () => {

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.27] - 2026-06-10
+
+### Changed
+- Sidebar history and footer controls now stay visually stable while moving the pointer across rows and actions.
+- Image template cards are easier to scan, with cleaner thumbnails and lighter picker controls.
+- Update banner actions now stay aligned when progress or error details wrap onto multiple lines.
+- Settings now has a compact left-side section menu for faster navigation.
+- Settings content now uses the available workspace width with less empty space.
+
 ## [0.5.26] - 2026-06-09
 
 ### Added
@@ -175,7 +184,9 @@ Initial open-source release of OfficeDex — the desktop client for OfficeCLI.
 - GNU General Public License v3.0 LICENSE + NOTICE.
 - CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, issue/PR templates, Dependabot.
 
-[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.17...HEAD
+[Unreleased]: https://github.com/officecli/officedex/compare/v0.5.27...HEAD
+[0.5.27]: https://github.com/officecli/officedex/compare/v0.5.26...v0.5.27
+[0.5.26]: https://github.com/officecli/officedex/compare/v0.5.25...v0.5.26
 [0.5.17]: https://github.com/officecli/officedex/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/officecli/officedex/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/officecli/officedex/compare/v0.5.14...v0.5.15
