@@ -15,9 +15,10 @@
   width: min(640px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
-  background: var(--surface, #fbfaf5);
-  border-radius: 12px;
-  padding: 32px 36px;
+  background: var(--n-canvas, #ffffff);
+  border: 1px solid var(--n-hairline, #e5e3df);
+  border-radius: 8px;
+  padding: 28px 32px;
   box-shadow: 0 24px 60px rgba(28, 26, 38, 0.28);
 }
 
@@ -30,15 +31,16 @@
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #5645d4;
+  color: var(--n-primary, #3f57c4);
   margin-bottom: 8px;
 }
 
 .onboarding-title {
-  font-family: 'DM Serif Display', serif;
-  font-size: 28px;
+  font-family: var(--font-body, 'Plus Jakarta Sans', system-ui, sans-serif);
+  font-size: 24px;
+  font-weight: 700;
   margin: 0 0 8px;
-  color: #1c1a26;
+  color: var(--n-ink, #1a1a1a);
 }
 
 .onboarding-title-row {
@@ -93,16 +95,17 @@
 }
 
 .onboarding-summary {
-  border: 1px solid rgba(86, 69, 212, 0.16);
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--n-primary, #3f57c4) 16%, var(--n-hairline, #e5e3df));
+  border-radius: 8px;
   padding: 16px 20px;
-  background: rgba(86, 69, 212, 0.04);
+  background: var(--n-primary-soft, #eef2ff);
 }
 
 .onboarding-summary h3 {
   margin: 0 0 8px;
-  font-family: 'DM Serif Display', serif;
+  font-family: var(--font-body, 'Plus Jakarta Sans', system-ui, sans-serif);
   font-size: 18px;
+  font-weight: 700;
 }
 
 .onboarding-summary ul {
@@ -153,7 +156,7 @@
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #5645d4;
+  color: var(--n-primary, #3f57c4);
   margin-bottom: 8px;
   font-weight: 600;
 }
@@ -212,7 +215,7 @@
   align-items: center;
   gap: 16px;
   padding: 12px 20px;
-  background: linear-gradient(135deg, #5645d4 0%, #4534b3 100%);
+  background: linear-gradient(135deg, var(--n-primary, #3f57c4) 0%, var(--n-primary-pressed, #3048a5) 100%);
   color: #ffffff;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -242,8 +245,9 @@
 }
 
 .update-banner-title {
-  font-family: 'DM Serif Display', Georgia, serif;
+  font-family: var(--font-body, 'Plus Jakarta Sans', system-ui, sans-serif);
   font-size: 16px;
+  font-weight: 700;
   line-height: 1.2;
   margin-bottom: 2px;
 }
@@ -286,13 +290,13 @@
 
 .update-banner-actions .ant-btn-primary {
   background: #ffffff;
-  color: #4534b3;
+  color: var(--n-primary-pressed, #3048a5);
   border-color: #ffffff;
 }
 
 .update-banner-actions .ant-btn-primary:hover {
   background: rgba(255, 255, 255, 0.92);
-  color: #3a2a99;
+  color: var(--n-primary-deep, #263a84);
   border-color: rgba(255, 255, 255, 0.92);
 }
 
@@ -343,16 +347,17 @@
   justify-content: center;
   width: 56px;
   height: 56px;
-  border-radius: 16px;
-  background: #e6e0f5;
-  color: #5645d4;
+  border-radius: 8px;
+  background: var(--n-primary-soft, #eef2ff);
+  color: var(--n-primary, #3f57c4);
   font-size: 24px;
   margin-bottom: 16px;
 }
 
 .force-update-title {
-  font-family: 'DM Serif Display', Georgia, serif;
-  font-size: 28px;
+  font-family: var(--font-body, 'Plus Jakarta Sans', system-ui, sans-serif);
+  font-size: 24px;
+  font-weight: 700;
   line-height: 1.15;
   margin: 0 0 8px;
   color: #1a1a1a;

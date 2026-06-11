@@ -58,11 +58,11 @@
 }
 
 .brand {
-  font-family: var(--font-heading);
+  font-family: var(--font-body);
   font-size: 17px;
-  font-weight: 400;
+  font-weight: 700;
   color: var(--n-ink);
-  letter-spacing: -0.3px;
+  letter-spacing: 0;
 }
 
 .bridge-pill {
@@ -125,7 +125,7 @@
 }
 
 .nav-item.active {
-  background: var(--n-tint-lavender);
+  background: var(--n-primary-soft);
   color: var(--n-primary);
   font-weight: 600;
 }
@@ -307,7 +307,7 @@
 }
 
 .history-item.active {
-  background: var(--n-tint-lavender);
+  background: var(--n-primary-soft);
   color: var(--n-primary);
 }
 
@@ -663,8 +663,8 @@
 .fluid-shell h2,
 .fluid-shell h3,
 .fluid-shell .page-header .ant-typography {
-  font-family: var(--font-heading);
-  font-weight: 400;
+  font-family: var(--font-body);
+  font-weight: 650;
 }
 
 /* ─── Sidebar collapse toggle ─── */
@@ -740,6 +740,40 @@
     grid-template-columns: 78px minmax(0, 1fr);
   }
 
+  .sidebar {
+    width: 78px;
+    padding: 20px 12px;
+  }
+
+  .brand-block {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .nav-item,
+  .workspace-item,
+  .history-item {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    column-gap: 0;
+    padding: 0;
+  }
+
+  .nav-item > .anticon,
+  .history-item-icon {
+    width: 100%;
+  }
+
+  .sidebar .ant-btn {
+    width: 100%;
+    padding-inline: 0;
+  }
+
   .app-shell.sidebar-collapsed,
   .fluid-shell.sidebar-collapsed {
     grid-template-columns: 0 minmax(0, 1fr);
@@ -748,9 +782,22 @@
   .brand-block .brand,
   .brand-block .bridge-pill,
   .nav-item span,
+  .workspace-item span,
+  .history-item-title,
+  .history-list-title,
+  .chat-section-title span,
+  .workspace-empty,
+  .workspace-row-action,
+  .history-item-delete,
   .profile-link span,
-  .sidebar .ant-btn span {
+  .sidebar .ant-btn > span:not(.anticon):not(.ant-btn-icon) {
     display: none;
+  }
+
+  .history-list-header,
+  .chat-section-title {
+    justify-content: center;
+    padding-inline: 0;
   }
 
   .content-grid.with-preview {

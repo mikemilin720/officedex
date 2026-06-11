@@ -16,7 +16,7 @@
   overflow: auto;
   border-right: 1px solid var(--n-hairline);
   background: var(--n-canvas);
-  padding: 12px 8px;
+  padding: 10px 8px;
 }
 
 .settings-secondary-menu h2 {
@@ -36,7 +36,7 @@
   grid-template-columns: 22px minmax(0, 1fr);
   align-items: center;
   width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
@@ -53,9 +53,10 @@
 }
 
 .settings-secondary-menu button.active {
-  background: var(--n-tint-lavender);
+  background: var(--n-primary-soft);
   color: var(--n-primary);
   font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--n-primary);
 }
 
 .settings-secondary-menu .material-symbol {
@@ -82,32 +83,33 @@
 
 .settings-panel > .page-header {
   border-bottom: 1px solid var(--n-hairline);
-  padding: 12px 16px;
+  margin-bottom: 0;
+  padding: 12px 18px;
 }
 
 .setting-group {
   display: grid;
   scroll-margin-top: 8px;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 8px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--n-hairline);
   background: var(--n-canvas);
 }
 
 .setting-group h2 {
   margin: 0;
-  font-family: var(--font-heading);
-  font-size: 17px;
-  font-weight: 600;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .setting-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
-  gap: 14px;
+  gap: 16px;
   align-items: center;
   border-top: 1px solid var(--n-hairline-soft);
-  padding-top: 10px;
+  padding-top: 9px;
 }
 
 .setting-group h2 + .setting-row,
@@ -118,7 +120,7 @@
 
 .setting-row h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--n-charcoal);
 }
@@ -175,7 +177,7 @@
 
 .runtime-choice.active {
   border-color: var(--n-primary);
-  background: var(--n-tint-lavender);
+  background: var(--n-primary-soft);
 }
 
 .runtime-choice span:last-child {
@@ -254,7 +256,7 @@
 
 .login-status.loading,
 .login-status.awaiting {
-  background: var(--n-tint-lavender);
+  background: var(--n-primary-soft);
   color: var(--n-primary-deep);
 }
 
@@ -321,13 +323,13 @@
   width: 56px;
   height: 56px;
   place-items: center;
-  border: 1px solid rgba(86, 69, 212, 0.32);
+  border: 1px solid rgba(63, 87, 196, 0.32);
   border-radius: 14px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0)),
     var(--n-primary);
   color: var(--n-on-primary);
-  box-shadow: 0 12px 28px rgba(86, 69, 212, 0.22);
+  box-shadow: 0 12px 28px rgba(63, 87, 196, 0.22);
   font-size: 24px;
 }
 

@@ -1,16 +1,19 @@
 /* ─── Notion-inspired Design System for OfficeDex ─── */
 
 :root {
-  --n-primary: #5645d4;
-  --n-primary-pressed: #4534b3;
-  --n-primary-deep: #3a2a99;
+  --n-primary: #3f57c4;
+  --n-primary-pressed: #3048a5;
+  --n-primary-deep: #263a84;
+  --n-primary-soft: #eef2ff;
   --n-on-primary: #ffffff;
   --n-navy: #0a1530;
   --n-link: #0075de;
 
   --n-canvas: #ffffff;
-  --n-surface: #f6f5f4;
-  --n-surface-soft: #fafaf9;
+  --n-surface: #f5f5f3;
+  --n-surface-soft: #fafafa;
+  --n-paper: #ffffff;
+  --n-white: #ffffff;
   --n-hairline: #e5e3df;
   --n-hairline-soft: #ede9e4;
   --n-hairline-strong: #c8c4be;
@@ -36,7 +39,7 @@
   --n-tint-gray: #f0eeec;
 
   --font-body: 'Plus Jakarta Sans', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif;
-  --font-heading: 'DM Serif Display', Georgia, 'Times New Roman', serif;
+  --font-heading: var(--font-body);
 
   --radius-xs: 4px;
   --radius-sm: 6px;
@@ -115,7 +118,7 @@ select {
   width: 12px;
   height: 12px;
   flex: 0 0 auto;
-  border: 2px solid rgba(86, 69, 212, 0.22);
+  border: 2px solid rgba(63, 87, 196, 0.22);
   border-top-color: var(--n-primary);
   border-radius: var(--radius-full);
   animation: status-spin 900ms linear infinite;

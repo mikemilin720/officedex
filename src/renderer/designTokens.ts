@@ -1,15 +1,18 @@
 import type { ThemeConfig } from "antd";
 
 export const notion = {
-  primary: "#5645d4",
-  primaryPressed: "#4534b3",
-  primaryDeep: "#3a2a99",
+  primary: "#3f57c4",
+  primaryPressed: "#3048a5",
+  primaryDeep: "#263a84",
+  primarySoft: "#eef2ff",
   onPrimary: "#ffffff",
   brandNavy: "#0a1530",
   linkBlue: "#0075de",
   canvas: "#ffffff",
-  surface: "#f6f5f4",
-  surfaceSoft: "#fafaf9",
+  surface: "#f5f5f3",
+  surfaceSoft: "#fafafa",
+  paper: "#ffffff",
+  white: "#ffffff",
   hairline: "#e5e3df",
   hairlineSoft: "#ede9e4",
   hairlineStrong: "#c8c4be",
@@ -33,7 +36,7 @@ export const notion = {
 } as const;
 
 const fontFamily = "'Plus Jakarta Sans', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif";
-const fontFamilyHeading = "'DM Serif Display', Georgia, 'Times New Roman', serif";
+const fontFamilyHeading = fontFamily;
 
 export const theme: ThemeConfig = {
   token: {
@@ -62,7 +65,7 @@ export const theme: ThemeConfig = {
     Input: {
       borderRadius: 8,
       controlHeight: 44,
-      activeShadow: `0 0 0 2px rgba(86, 69, 212, 0.12)`,
+      activeShadow: `0 0 0 2px rgba(63, 87, 196, 0.12)`,
     },
     Select: {
       borderRadius: 8,
