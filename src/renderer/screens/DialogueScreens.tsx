@@ -17,7 +17,6 @@ import {
   MoreOutlined,
   PaperClipOutlined,
   PlayCircleOutlined,
-  RightOutlined,
   SendOutlined,
   StopOutlined,
   UserOutlined,
@@ -484,24 +483,42 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
             </Dropdown>
           </>
         )}
-        <p>{t("dialogue.startSubtitle")}</p>
-        <div className="fluid-prompt-grid">
-          <button onClick={() => applyDraftPatch({ documentType: "report", topic: t("dialogue.preset.report.title"), prompt: t("dialogue.preset.report.desc") })}>
-            <MaterialSymbol name="analytics" />
-            <strong>{t("dialogue.preset.report.title")}</strong>
-            <span>{t("dialogue.preset.report.desc")}</span>
-          </button>
-          <button onClick={() => applyDraftPatch({ documentType: "pptx", topic: t("dialogue.preset.pptx.title"), prompt: t("dialogue.preset.pptx.desc") })}>
-            <MaterialSymbol name="present_to_all" />
-            <strong>{t("dialogue.preset.pptx.title")}</strong>
-            <span>{t("dialogue.preset.pptx.desc")}</span>
-          </button>
-          <button onClick={() => applyDraftPatch({ documentType: "xlsx", topic: t("dialogue.preset.xlsx.title"), prompt: t("dialogue.preset.xlsx.desc") })}>
-            <MaterialSymbol name="table_chart" />
-            <strong>{t("dialogue.preset.xlsx.title")}</strong>
-            <span>{t("dialogue.preset.xlsx.desc")}</span>
-          </button>
-        </div>
+        {docType === "img" ? (
+          <div className="fluid-start-template-list">
+            <ImageTemplatePicker
+              templates={imageTemplates}
+              selectedId={selectedTemplateId}
+              loading={templatesLoading}
+              error={templatesError}
+              onSelect={applyImageTemplate}
+              onDeleteLocal={deleteLocalImageTemplate}
+              onClear={() => setSelectedTemplateId(undefined)}
+              onRefresh={loadImageTemplates}
+              t={t}
+            />
+          </div>
+        ) : (
+          <>
+            <p>{t("dialogue.startSubtitle")}</p>
+            <div className="fluid-prompt-grid">
+              <button onClick={() => applyDraftPatch({ documentType: "report", topic: t("dialogue.preset.report.title"), prompt: t("dialogue.preset.report.desc") })}>
+                <MaterialSymbol name="analytics" />
+                <strong>{t("dialogue.preset.report.title")}</strong>
+                <span>{t("dialogue.preset.report.desc")}</span>
+              </button>
+              <button onClick={() => applyDraftPatch({ documentType: "pptx", topic: t("dialogue.preset.pptx.title"), prompt: t("dialogue.preset.pptx.desc") })}>
+                <MaterialSymbol name="present_to_all" />
+                <strong>{t("dialogue.preset.pptx.title")}</strong>
+                <span>{t("dialogue.preset.pptx.desc")}</span>
+              </button>
+              <button onClick={() => applyDraftPatch({ documentType: "xlsx", topic: t("dialogue.preset.xlsx.title"), prompt: t("dialogue.preset.xlsx.desc") })}>
+                <MaterialSymbol name="table_chart" />
+                <strong>{t("dialogue.preset.xlsx.title")}</strong>
+                <span>{t("dialogue.preset.xlsx.desc")}</span>
+              </button>
+            </div>
+          </>
+        )}
       </section>
       <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
         onDraftChange({
@@ -575,19 +592,6 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
         <Form.Item name="promptTemplateId" hidden>
           <Input />
         </Form.Item>
-        {docType === "img" ? (
-          <ImageTemplatePicker
-            templates={imageTemplates}
-            selectedId={selectedTemplateId}
-            loading={templatesLoading}
-            error={templatesError}
-            onSelect={applyImageTemplate}
-            onDeleteLocal={deleteLocalImageTemplate}
-            onClear={() => setSelectedTemplateId(undefined)}
-            onRefresh={loadImageTemplates}
-            t={t}
-          />
-        ) : null}
         {docType === "img" && hasSlots && !rawDecoupled ? (
           <TemplateSlotForm
             slots={slots}
@@ -797,48 +801,84 @@ function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, 
   onChange: (key: string, value: string) => void;
   t: Translator;
 }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"form" | "preview">("form");
+
+  useEffect(() => {
+    if (Object.keys(errors).length > 0) setActiveTab("form");
+  }, [errors]);
 
   return (
     <div className="template-slot-form">
-      <div className="template-slot-form-title">{t("dialogue.imageTemplates.slotFormTitle")}</div>
-      {slots.map((slot) => (
-        <Form.Item
-          key={slot.key}
-          label={localizedSlotLabel(slot, slug, t)}
-          extra={slot.helpText}
-          required={slot.required}
-          validateStatus={errors[slot.key] ? "error" : undefined}
-          help={errors[slot.key]}
-        >
-          {slot.multiline ? (
-            <Input.TextArea
-              autoSize={{ minRows: 2, maxRows: 6 }}
-              value={values[slot.key] ?? ""}
-              placeholder={slot.defaultValue}
-              onChange={(e) => onChange(slot.key, e.target.value)}
-            />
-          ) : (
-            <Input
-              value={values[slot.key] ?? ""}
-              placeholder={slot.defaultValue}
-              onChange={(e) => onChange(slot.key, e.target.value)}
-            />
-          )}
-        </Form.Item>
-      ))}
-      <div className="template-slot-preview">
-        <button
-          type="button"
-          className="template-slot-preview-toggle"
-          aria-expanded={previewOpen}
-          onClick={() => setPreviewOpen((open) => !open)}
-        >
-          {previewOpen ? <DownOutlined /> : <RightOutlined />}
-          <span>{t("dialogue.imageTemplates.previewLabel")}</span>
-        </button>
-        {previewOpen ? <div className="template-slot-preview-body">{previewText}</div> : null}
+      <div className="template-slot-form-header">
+        <div className="template-slot-form-title">{t("dialogue.imageTemplates.slotFormTitle")}</div>
+        <div className="template-slot-tabs" role="tablist" aria-label={t("dialogue.imageTemplates.slotFormTitle")}>
+          <button
+            type="button"
+            role="tab"
+            id="template-slot-tab-form"
+            aria-selected={activeTab === "form"}
+            aria-controls="template-slot-panel-form"
+            className={activeTab === "form" ? "template-slot-tab template-slot-tab-active" : "template-slot-tab"}
+            onClick={() => setActiveTab("form")}
+          >
+            {t("dialogue.imageTemplates.formTab")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="template-slot-tab-preview"
+            aria-selected={activeTab === "preview"}
+            aria-controls="template-slot-panel-preview"
+            className={activeTab === "preview" ? "template-slot-tab template-slot-tab-active" : "template-slot-tab"}
+            onClick={() => setActiveTab("preview")}
+          >
+            {t("dialogue.imageTemplates.previewTab")}
+          </button>
+        </div>
       </div>
+      {activeTab === "form" ? (
+        <div
+          id="template-slot-panel-form"
+          className="template-slot-form-fields"
+          role="tabpanel"
+          aria-labelledby="template-slot-tab-form"
+        >
+          {slots.map((slot) => (
+            <Form.Item
+              key={slot.key}
+              label={localizedSlotLabel(slot, slug, t)}
+              extra={slot.helpText}
+              required={slot.required}
+              validateStatus={errors[slot.key] ? "error" : undefined}
+              help={errors[slot.key]}
+            >
+              {slot.multiline ? (
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  value={values[slot.key] ?? ""}
+                  placeholder={slot.defaultValue}
+                  onChange={(e) => onChange(slot.key, e.target.value)}
+                />
+              ) : (
+                <Input
+                  value={values[slot.key] ?? ""}
+                  placeholder={slot.defaultValue}
+                  onChange={(e) => onChange(slot.key, e.target.value)}
+                />
+              )}
+            </Form.Item>
+          ))}
+        </div>
+      ) : (
+        <div
+          id="template-slot-panel-preview"
+          className="template-slot-preview-panel"
+          role="tabpanel"
+          aria-labelledby="template-slot-tab-preview"
+        >
+          <div className="template-slot-preview-body">{previewText}</div>
+        </div>
+      )}
     </div>
   );
 }

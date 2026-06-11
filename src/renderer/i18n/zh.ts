@@ -82,6 +82,8 @@ export const zh: Record<string, string> = {
   "dialogue.imageTemplates.slotRequired": "请填写{label}。",
   "dialogue.imageTemplates.slotBraceForbidden": "填写内容不能包含双花括号标记。",
   "dialogue.imageTemplates.previewLabel": "实时预览",
+  "dialogue.imageTemplates.formTab": "表单",
+  "dialogue.imageTemplates.previewTab": "预览",
   "dialogue.imageTemplates.editRawToggle": "编辑原始提示词",
   "dialogue.imageTemplates.resetToTemplate": "重置为模板",
   "dialogue.imageTemplates.rawDecoupledHint": "你正在编辑原始提示词，引导式字段将不再覆盖它。",

@@ -796,6 +796,23 @@ describe("DialogueScreen state machine", () => {
     expect(await screen.findByText(/No image templates are configured yet/i)).toBeTruthy();
   });
 
+  it("replaces the start presets with the image template list when Image is selected", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },
+    ]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "pptx", topic: "", prompt: "", mode: "fast" }} />);
+
+    expect(screen.getByText("Quarterly Analysis Report")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Image"));
+
+    expect(await screen.findByText("Poster")).toBeTruthy();
+    expect(screen.queryByText("Quarterly Analysis Report")).toBeNull();
+    expect(screen.queryByText(/Choose a preset scenario/i)).toBeNull();
+    expect(document.querySelectorAll(".image-template-picker")).toHaveLength(1);
+    expect(document.querySelector(".fluid-start-card .image-template-picker")).toBeTruthy();
+    expect(document.querySelector(".fluid-command-bar .image-template-picker")).toBeNull();
+  });
+
   it("shows an antd spinner and loading text while image templates are pending", async () => {
     const pending = deferred<Awaited<ReturnType<DesktopAPI["listImageTemplates"]>>>();
     listImageTemplatesSpy.mockReturnValueOnce(pending.promise);
@@ -914,11 +931,15 @@ describe("assembleSlots (pure assembly)", () => {
 });
 
 describe("Image template slots (guided fill-in)", () => {
-  it("renders the slot form with default values prefilled and keeps the live preview collapsed by default", async () => {
+  it("renders the slot form tab by default and switches to the prompt preview tab", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     await selectSlottedTemplate();
 
     expect(screen.getByText("Fill in the template")).toBeTruthy();
+    const formTab = screen.getByRole("tab", { name: "Form" });
+    const previewTab = screen.getByRole("tab", { name: "Preview" });
+    expect(formTab.getAttribute("aria-selected")).toBe("true");
+    expect(previewTab.getAttribute("aria-selected")).toBe("false");
     // multiline slot renders a <textarea>, single-line slots render <input>
     expect((screen.getByPlaceholderText("PRODUCT_HINT") as HTMLElement).tagName).toBe("INPUT");
     expect((screen.getByPlaceholderText("NOTES_HINT") as HTMLElement).tagName).toBe("TEXTAREA");
@@ -926,13 +947,12 @@ describe("Image template slots (guided fill-in)", () => {
     expect((screen.getByPlaceholderText("NOTES_HINT") as HTMLTextAreaElement).value).toBe("NOTES_HINT");
 
     expect(document.querySelector(".template-slot-preview-body")).toBeNull();
-    const previewToggle = screen.getByRole("button", { name: /Live preview/i });
-    expect(previewToggle.getAttribute("aria-expanded")).toBe("false");
 
-    fireEvent.click(previewToggle);
+    fireEvent.click(previewTab);
 
     const preview = document.querySelector(".template-slot-preview-body")!;
-    expect(previewToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(formTab.getAttribute("aria-selected")).toBe("false");
+    expect(previewTab.getAttribute("aria-selected")).toBe("true");
     expect(preview.textContent).toBe("Poster for PRODUCT_HINT, minimalist style. Notes: NOTES_HINT");
     expect(preview.textContent).not.toContain("{{");
   });
@@ -941,7 +961,7 @@ describe("Image template slots (guided fill-in)", () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     const productInput = await selectSlottedTemplate();
     fireEvent.change(productInput, { target: { value: "sneakers" } });
-    fireEvent.click(screen.getByRole("button", { name: /Live preview/i }));
+    fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
 
     const preview = document.querySelector(".template-slot-preview-body")!;
     expect(preview.textContent).toBe("Poster for sneakers, minimalist style. Notes: NOTES_HINT");

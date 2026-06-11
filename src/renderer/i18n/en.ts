@@ -82,6 +82,8 @@ export const en: Record<string, string> = {
   "dialogue.imageTemplates.slotRequired": "Please fill in {label}.",
   "dialogue.imageTemplates.slotBraceForbidden": "Values can't contain double-brace markers.",
   "dialogue.imageTemplates.previewLabel": "Live preview",
+  "dialogue.imageTemplates.formTab": "Form",
+  "dialogue.imageTemplates.previewTab": "Preview",
   "dialogue.imageTemplates.editRawToggle": "Edit raw prompt",
   "dialogue.imageTemplates.resetToTemplate": "Reset to template",
   "dialogue.imageTemplates.rawDecoupledHint": "You're editing the raw prompt. The guided fields no longer update it.",
