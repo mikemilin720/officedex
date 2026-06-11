@@ -63,6 +63,7 @@ export function App() {
   const { settings: persistedSettings, defaultWorkspaceDir, loading: settingsLoading } = useSettings();
   const [newGenerationDraft, setNewGenerationDraft] = useState<NewGenerationDraft>(() => createNewGenerationDraft());
   const [newChatTarget, setNewChatTarget] = useState<NewChatTarget>({ kind: "none" });
+  const [newChatNudgeKey, setNewChatNudgeKey] = useState(0);
   const [newGenerationDraftDirty, setNewGenerationDraftDirty] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const appUpdate = useAppUpdate();
@@ -454,6 +455,16 @@ export function App() {
   }, [clearError, recordError]);
 
   const newGeneration = useCallback((workspaceId?: string) => {
+    const alreadyOnBlankNewChat =
+      !workspaceId &&
+      activeNav === "dialogue" &&
+      selectedTaskID.kind !== "task" &&
+      !conversationId &&
+      !lastError;
+    if (alreadyOnBlankNewChat) {
+      setNewChatNudgeKey((current) => current + 1);
+      return;
+    }
     if (workspaceId) {
       setNewChatTarget({ kind: "workspace", workspaceId });
       if (workspaceId !== activeWorkspace?.id) {
@@ -474,7 +485,7 @@ export function App() {
     setSelectedTaskID({ kind: "none" });
     clearError();
     setActiveNav("dialogue");
-  }, [activeWorkspace, clearError, selectWorkspace, selectedTaskID, state.tasks]);
+  }, [activeNav, activeWorkspace, clearError, conversationId, lastError, selectWorkspace, selectedTaskID, state.tasks]);
 
   const selectTask = useCallback((taskId: string) => {
     const taskWorkspaceId = state.tasks[taskId]?.workspaceId;
@@ -791,6 +802,7 @@ export function App() {
             conversationId={conversationId}
             artifacts={artifacts}
             newGenerationDraft={newGenerationDraft}
+            newChatNudgeKey={newChatNudgeKey}
             workspaces={workspaces}
             newChatTarget={newChatTarget}
             busy={busy}

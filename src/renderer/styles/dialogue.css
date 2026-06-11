@@ -779,6 +779,27 @@
   margin-bottom: 10px;
 }
 
+.new-chat-nudge-input.is-new-chat-nudging {
+  animation: new-chat-input-nudge 900ms ease-out;
+}
+
+@keyframes new-chat-input-nudge {
+  0% {
+    border-color: var(--n-primary);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--n-primary) 22%, transparent);
+  }
+
+  35% {
+    border-color: var(--n-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--n-primary) 18%, transparent);
+  }
+
+  100% {
+    border-color: var(--n-hairline-strong);
+    box-shadow: none;
+  }
+}
+
 .composer-row {
   display: flex;
   align-items: flex-start;

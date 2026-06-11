@@ -63,6 +63,7 @@ interface DialogueProps {
   conversationId?: string;
   artifacts: Artifact[];
   newGenerationDraft?: NewGenerationDraft;
+  newChatNudgeKey?: number;
   busy: boolean;
   lastError?: string;
   errorKind: FailureKind;
@@ -179,7 +180,7 @@ function MessageCopyButton({ text, ariaLabel }: { text: string; ariaLabel: strin
   );
 }
 
-export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, workspaces = [], newChatTarget = { kind: "none" }, onNewChatTargetChange, onAddWorkspace }: DialogueProps) {
+export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, newChatNudgeKey = 0, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, workspaces = [], newChatTarget = { kind: "none" }, onNewChatTargetChange, onAddWorkspace }: DialogueProps) {
   if (lastError) {
     return <ConnectionFailure kind={errorKind} status={bridgeStatus} error={lastError} details={errorDetails} onOpenSettings={onOpenSettings} onOpenLogin={onOpenLogin} onRetry={onRetry} />;
   }
@@ -188,6 +189,7 @@ export function DialogueScreen({ tasks, conversationId, artifacts, newGeneration
     return (
       <FluidNewGeneration
         draft={newGenerationDraft ?? EMPTY_NEW_GENERATION_DRAFT}
+        newChatNudgeKey={newChatNudgeKey}
         busy={busy}
         workspaces={workspaces}
         newChatTarget={newChatTarget}
@@ -202,8 +204,9 @@ export function DialogueScreen({ tasks, conversationId, artifacts, newGeneration
   return <ConversationView tasks={tasks} busy={busy} onPreview={onPreview} onForceCancel={onForceCancel} onContinueGeneration={onContinueGeneration} onContinueModify={onContinueModify} onRetryTask={onRetryTask} onOpenLogin={onOpenLogin} />;
 }
 
-function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, onDraftChange, onNewChatTargetChange, onAddWorkspace }: {
+function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatTarget, onSubmit, onDraftChange, onNewChatTargetChange, onAddWorkspace }: {
   draft: NewGenerationDraft;
+  newChatNudgeKey: number;
   busy: boolean;
   workspaces: WorkspaceSummary[];
   newChatTarget: NewChatTarget;
@@ -226,6 +229,7 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
   const [slotErrors, setSlotErrors] = useState<Record<string, string>>({});
   const [rawDecoupled, setRawDecoupled] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  const [promptNudgeActive, setPromptNudgeActive] = useState(false);
   const imageTemplateRequestId = useRef(0);
   const dropTargetRef = useRef<HTMLDivElement | null>(null);
   const attachmentDropHandlersRef = useRef({
@@ -331,6 +335,17 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
       fps: normalizeGIFFPS(draft.fps),
     });
   }, [form, draft.documentType, draft.topic, draft.prompt, draft.imageRatio, draft.fps]);
+
+  useEffect(() => {
+    if (newChatNudgeKey === 0) return;
+    setPromptNudgeActive(false);
+    const start = window.setTimeout(() => setPromptNudgeActive(true), 0);
+    const end = window.setTimeout(() => setPromptNudgeActive(false), 900);
+    return () => {
+      window.clearTimeout(start);
+      window.clearTimeout(end);
+    };
+  }, [newChatNudgeKey]);
 
   const loadImageTemplates = useCallback(() => {
     const requestId = imageTemplateRequestId.current + 1;
@@ -684,7 +699,7 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
             <div className="image-template-replace-hint">{t("dialogue.imageTemplates.replaceHint")}</div>
           ) : null}
           <Form.Item name="prompt" rules={[{ required: true, message: t("dialogue.prompt.required") }]} hidden={hasSlots && !rawDecoupled && !rawOpen}>
-            <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
+            <Input.TextArea className={`new-chat-nudge-input ${promptNudgeActive ? "is-new-chat-nudging" : ""}`} autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
           </Form.Item>
           {attachments.sourceWorkbookSpec && attachments.sourceFile ? (
             <div className="attached-file">

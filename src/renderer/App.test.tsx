@@ -1,4 +1,5 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeEvent, DesktopAPI } from "../shared/types";
 import { applyTaskEvent, createInitialTaskState, reduceStages } from "./taskState";
@@ -113,6 +114,26 @@ describe("App task flow", () => {
 
     await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
     expect(bridge.generate).toHaveBeenCalledWith(expect.objectContaining({ prompt: "Generate a new quarterly review PPT" }));
+  });
+
+  it("nudges the prompt input instead of resetting when New chat is clicked on an existing blank composer", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Keep this draft" } });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
+
+    expect(bridge.generate).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("Keep this draft");
+    await waitFor(() => expect(textarea.classList.contains("is-new-chat-nudging")).toBe(true));
+
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    expect(css).toMatch(/@keyframes\s+new-chat-input-nudge/);
+    expect(css).toMatch(/\.new-chat-nudge-input\.is-new-chat-nudging/s);
   });
 
   it("removes a project from the sidebar and refreshes chats", async () => {
