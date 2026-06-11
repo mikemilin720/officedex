@@ -93,9 +93,6 @@ func TestLoadUnknownEnumFallsBack(t *testing.T) {
 	if got.Defaults.DocumentType != types.DocPPTX {
 		t.Errorf("DocumentType = %v, want pptx", got.Defaults.DocumentType)
 	}
-	if got.Defaults.Mode != types.ModeFast {
-		t.Errorf("Mode = %v, want fast", got.Defaults.Mode)
-	}
 	if got.Defaults.EnableImages {
 		t.Errorf("EnableImages should preserve explicit false")
 	}
@@ -132,7 +129,6 @@ func TestUpdatePersistsAndSanitizes(t *testing.T) {
 	got, err := store.Update(Patch{
 		Defaults: &GenerateDefaultsPatch{
 			DocumentType: ptr(types.DocDOCX),
-			Mode:         ptr(types.ModeBest),
 			EnableImages: ptr(false),
 		},
 		WorkspaceDir: ptr("  /Users/lu/Documents  "),
@@ -148,9 +144,6 @@ func TestUpdatePersistsAndSanitizes(t *testing.T) {
 	}
 	if got.Defaults.DocumentType != types.DocDOCX {
 		t.Errorf("DocumentType = %v, want docx", got.Defaults.DocumentType)
-	}
-	if got.Defaults.Mode != types.ModeBest {
-		t.Errorf("Mode = %v, want best", got.Defaults.Mode)
 	}
 	if got.Defaults.EnableImages {
 		t.Errorf("EnableImages should be false")
@@ -230,7 +223,7 @@ func TestUpdateLeavesUnsetFieldsUnchanged(t *testing.T) {
 		t.Fatalf("first update: %v", err)
 	}
 	got, err := store.Update(Patch{
-		Defaults: &GenerateDefaultsPatch{Mode: ptr(types.ModeBest)},
+		Defaults: &GenerateDefaultsPatch{ImageQuality: ptr(types.ImageStandard)},
 	})
 	if err != nil {
 		t.Fatalf("second update: %v", err)
@@ -238,8 +231,43 @@ func TestUpdateLeavesUnsetFieldsUnchanged(t *testing.T) {
 	if got.Defaults.DocumentType != types.DocXLSX {
 		t.Errorf("DocumentType lost, got %v", got.Defaults.DocumentType)
 	}
-	if got.Defaults.Mode != types.ModeBest {
-		t.Errorf("Mode = %v, want best", got.Defaults.Mode)
+}
+
+func TestUpdateDropsLegacyDefaultMode(t *testing.T) {
+	store, path, _ := newTempStore(t)
+	raw := map[string]any{
+		"version": 1,
+		"defaults": map[string]any{
+			"documentType": "docx",
+			"mode":         "fast",
+			"enableImages": true,
+		},
+	}
+	body, _ := json.Marshal(raw)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.Update(Patch{
+		Defaults: &GenerateDefaultsPatch{ImageQuality: ptr(types.ImageStandard)},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got.Defaults.DocumentType != types.DocDOCX {
+		t.Fatalf("DocumentType = %v, want legacy docx preserved", got.Defaults.DocumentType)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("decode persisted settings: %v", err)
+	}
+	defaults, _ := persisted["defaults"].(map[string]any)
+	if _, ok := defaults["mode"]; ok {
+		t.Fatalf("legacy defaults.mode was written back: %s", data)
 	}
 }
 

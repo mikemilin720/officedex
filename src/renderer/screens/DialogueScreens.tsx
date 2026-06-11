@@ -88,7 +88,6 @@ const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
   documentType: "pptx",
   topic: "",
   prompt: "",
-  mode: "fast",
   imageRatio: "square",
   fps: 16,
 };
@@ -306,11 +305,10 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
       documentType: normalizeNewGenerationDocumentType(draft.documentType),
       topic: draft.topic,
       prompt: draft.prompt,
-      mode: draft.mode,
       imageRatio: normalizeImageRatio(draft.imageRatio),
       fps: normalizeGIFFPS(draft.fps),
     });
-  }, [form, draft.documentType, draft.topic, draft.prompt, draft.mode, draft.imageRatio, draft.fps]);
+  }, [form, draft.documentType, draft.topic, draft.prompt, draft.imageRatio, draft.fps]);
 
   const loadImageTemplates = useCallback(() => {
     const requestId = imageTemplateRequestId.current + 1;
@@ -520,156 +518,157 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
           </>
         )}
       </section>
-      <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
-        onDraftChange({
-          documentType: normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType),
-          topic: values.topic ?? "",
-          prompt: values.prompt ?? "",
-          mode: values.mode,
-          imageRatio: normalizeImageRatio(values.imageRatio),
-          fps: normalizeGIFFPS(values.fps),
-        });
-      }} onFinish={(values) => {
-        const validation = attachments.validateForSubmit();
-        if (!validation.ok) {
-          message.warning(validation.reason);
-          return;
-        }
-        const slotCheck = validateSlots();
-        if (!slotCheck.ok) {
-          if (slotCheck.firstError) message.warning(slotCheck.firstError);
-          return;
-        }
-        const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, fps: rawFPS, ...submitValues } = values;
-        void _promptTemplateId;
-        const documentType = normalizeNewGenerationDocumentType(submitValues.documentType);
-        const prompt = hasSlots && !rawDecoupled && selectedTemplate
-          ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
-          : submitValues.prompt;
-        const nextInput: GenerateInput = { ...submitValues, documentType, prompt, ...attachments.collect() };
-        if (targetWorkspace) {
-          nextInput.workspaceId = targetWorkspace.id;
-          delete nextInput.noProject;
-        } else {
-          delete nextInput.workspaceId;
-          nextInput.noProject = true;
-        }
-        if (documentType === "img") {
-          nextInput.imageRatio = normalizeImageRatio(rawImageRatio);
-        } else if (documentType === "gif") {
-          nextInput.fps = normalizeGIFFPS(rawFPS);
-        }
-        onSubmit(nextInput);
-      }} className="fluid-command-bar">
-        <div className="format-row">
-          <span>{t("dialogue.format.label")}</span>
-          <Form.Item name="documentType" noStyle>
-            <Radio.Group
-              optionType="button"
-              options={documentTypeOptions.map((option) => ({ value: option.value, label: option.label }))}
-            />
+      <div className="fluid-command-footer">
+        <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
+          onDraftChange({
+            documentType: normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType),
+            topic: values.topic ?? "",
+            prompt: values.prompt ?? "",
+            imageRatio: normalizeImageRatio(values.imageRatio),
+            fps: normalizeGIFFPS(values.fps),
+          });
+        }} onFinish={(values) => {
+          const validation = attachments.validateForSubmit();
+          if (!validation.ok) {
+            message.warning(validation.reason);
+            return;
+          }
+          const slotCheck = validateSlots();
+          if (!slotCheck.ok) {
+            if (slotCheck.firstError) message.warning(slotCheck.firstError);
+            return;
+          }
+          const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, fps: rawFPS, mode: _mode, ...submitValues } = values;
+          void _promptTemplateId;
+          const documentType = normalizeNewGenerationDocumentType(submitValues.documentType);
+          const prompt = hasSlots && !rawDecoupled && selectedTemplate
+            ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
+            : submitValues.prompt;
+          const nextInput: GenerateInput = { ...submitValues, documentType, prompt, ...attachments.collect() };
+          if (targetWorkspace) {
+            nextInput.workspaceId = targetWorkspace.id;
+            delete nextInput.noProject;
+          } else {
+            delete nextInput.workspaceId;
+            nextInput.noProject = true;
+          }
+          if (documentType === "img") {
+            nextInput.imageRatio = normalizeImageRatio(rawImageRatio);
+          } else if (documentType === "gif") {
+            nextInput.fps = normalizeGIFFPS(rawFPS);
+          }
+          onSubmit(nextInput);
+        }} className="fluid-command-bar">
+          <div className="format-row">
+            <span>{t("dialogue.format.label")}</span>
+            <Form.Item name="documentType" noStyle>
+              <Radio.Group
+                optionType="button"
+                options={documentTypeOptions.map((option) => ({ value: option.value, label: option.label }))}
+              />
+            </Form.Item>
+          </div>
+          {docType === "img" ? (
+            <div className="image-ratio-row">
+              <span>{t("dialogue.imageRatio.label")}</span>
+              <Form.Item name="imageRatio" noStyle>
+                <Radio.Group optionType="button" options={imageRatioOptions(t)} />
+              </Form.Item>
+            </div>
+          ) : null}
+          {docType === "gif" ? (
+            <div className="image-ratio-row">
+              <span>{t("dialogue.gifFps.label")}</span>
+              <Form.Item name="fps" noStyle>
+                <InputNumber min={GIF_FPS_MIN} max={GIF_FPS_MAX} precision={0} aria-label={t("dialogue.gifFps.label")} />
+              </Form.Item>
+            </div>
+          ) : null}
+          <Form.Item name="topic" hidden>
+            <Input />
           </Form.Item>
-        </div>
-        {docType === "img" ? (
-          <div className="image-ratio-row">
-            <span>{t("dialogue.imageRatio.label")}</span>
-            <Form.Item name="imageRatio" noStyle>
-              <Radio.Group optionType="button" options={imageRatioOptions(t)} />
-            </Form.Item>
-          </div>
-        ) : null}
-        {docType === "gif" ? (
-          <div className="image-ratio-row">
-            <span>{t("dialogue.gifFps.label")}</span>
-            <Form.Item name="fps" noStyle>
-              <InputNumber min={GIF_FPS_MIN} max={GIF_FPS_MAX} precision={0} aria-label={t("dialogue.gifFps.label")} />
-            </Form.Item>
-          </div>
-        ) : null}
-        <Form.Item name="topic" hidden>
-          <Input />
-        </Form.Item>
-        <Form.Item name="promptTemplateId" hidden>
-          <Input />
-        </Form.Item>
-        {docType === "img" && hasSlots && !rawDecoupled ? (
-          <TemplateSlotForm
-            slots={slots}
-            slug={selectedTemplate?.slug ?? ""}
-            values={slotValues}
-            errors={slotErrors}
-            previewText={assembledPreview}
-            onChange={handleSlotChange}
-            t={t}
-          />
-        ) : null}
-        {docType === "img" && hasSlots && rawDecoupled ? (
-          <div className="slot-raw-decoupled">
-            <span>{t("dialogue.imageTemplates.rawDecoupledHint")}</span>
-            <Button size="small" onClick={resetToTemplate}>{t("dialogue.imageTemplates.resetToTemplate")}</Button>
-          </div>
-        ) : null}
-        {docType === "img" && hasSlots && !rawDecoupled ? (
-          <Button type="link" size="small" className="slot-edit-raw-toggle" onClick={() => setRawOpen((open) => !open)}>
-            {t("dialogue.imageTemplates.editRawToggle")}
-          </Button>
-        ) : null}
-        {docType === "img" && selectedTemplateId && !hasSlots ? (
-          <div className="image-template-replace-hint">{t("dialogue.imageTemplates.replaceHint")}</div>
-        ) : null}
-        <Form.Item name="prompt" rules={[{ required: true, message: t("dialogue.prompt.required") }]} hidden={hasSlots && !rawDecoupled && !rawOpen}>
-          <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
-        </Form.Item>
-        {attachments.sourceWorkbookSpec && attachments.sourceFile ? (
-          <div className="attached-file">
-            <PaperClipOutlined />
-            <span title={attachments.sourceFile}>{attachments.sourceFile.split(/[/\\]/).pop()}</span>
-            <Button type="text" size="small" icon={<DeleteOutlined />} onClick={attachments.clearSourceFile} />
-          </div>
-        ) : null}
-        {attachments.referenceImagesSpec && attachments.referenceImages.length > 0 ? (
-          <ReferenceImageStrip
-            items={attachments.referenceImages}
-            maxCount={attachments.referenceImagesSpec.maxCount}
-            onRemove={attachments.removeReferenceImage}
-            onAdd={attachments.pickReferenceImages}
-          />
-        ) : null}
-        <div className="composer-actions">
-          <Space>
-            {attachments.sourceWorkbookSpec ? (
-              <Tooltip
-                title={
-                  attachments.sourceWorkbookSpec.required
-                    ? t("dialogue.attach.sourceFile.required", { label: attachments.sourceWorkbookSpec.label, ext: attachments.sourceWorkbookSpec.extensions[0] })
-                    : attachments.sourceWorkbookSpec.label
-                }
-              >
-                <Button icon={<PaperClipOutlined />} onClick={attachments.pickSourceFile} aria-label={t("dialogue.attach.sourceFile.aria")} />
-              </Tooltip>
-            ) : null}
-            {attachments.referenceImagesSpec ? (
-              <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
-                <Button
-                  className="reference-image-upload-button"
-                  icon={<MaterialSymbol name="image" />}
-                  onClick={attachments.pickReferenceImages}
-                  disabled={attachments.isReferenceLimitReached}
-                  aria-label={t("dialogue.attach.referenceImages.attach")}
+          <Form.Item name="promptTemplateId" hidden>
+            <Input />
+          </Form.Item>
+          {docType === "img" && hasSlots && !rawDecoupled ? (
+            <TemplateSlotForm
+              slots={slots}
+              slug={selectedTemplate?.slug ?? ""}
+              values={slotValues}
+              errors={slotErrors}
+              previewText={assembledPreview}
+              onChange={handleSlotChange}
+              t={t}
+            />
+          ) : null}
+          {docType === "img" && hasSlots && rawDecoupled ? (
+            <div className="slot-raw-decoupled">
+              <span>{t("dialogue.imageTemplates.rawDecoupledHint")}</span>
+              <Button size="small" onClick={resetToTemplate}>{t("dialogue.imageTemplates.resetToTemplate")}</Button>
+            </div>
+          ) : null}
+          {docType === "img" && hasSlots && !rawDecoupled ? (
+            <Button type="link" size="small" className="slot-edit-raw-toggle" onClick={() => setRawOpen((open) => !open)}>
+              {t("dialogue.imageTemplates.editRawToggle")}
+            </Button>
+          ) : null}
+          {docType === "img" && selectedTemplateId && !hasSlots ? (
+            <div className="image-template-replace-hint">{t("dialogue.imageTemplates.replaceHint")}</div>
+          ) : null}
+          <Form.Item name="prompt" rules={[{ required: true, message: t("dialogue.prompt.required") }]} hidden={hasSlots && !rawDecoupled && !rawOpen}>
+            <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
+          </Form.Item>
+          {attachments.sourceWorkbookSpec && attachments.sourceFile ? (
+            <div className="attached-file">
+              <PaperClipOutlined />
+              <span title={attachments.sourceFile}>{attachments.sourceFile.split(/[/\\]/).pop()}</span>
+              <Button type="text" size="small" icon={<DeleteOutlined />} onClick={attachments.clearSourceFile} />
+            </div>
+          ) : null}
+          {attachments.referenceImagesSpec && attachments.referenceImages.length > 0 ? (
+            <ReferenceImageStrip
+              items={attachments.referenceImages}
+              maxCount={attachments.referenceImagesSpec.maxCount}
+              onRemove={attachments.removeReferenceImage}
+              onAdd={attachments.pickReferenceImages}
+            />
+          ) : null}
+          <div className="composer-actions">
+            <Space>
+              {attachments.sourceWorkbookSpec ? (
+                <Tooltip
+                  title={
+                    attachments.sourceWorkbookSpec.required
+                      ? t("dialogue.attach.sourceFile.required", { label: attachments.sourceWorkbookSpec.label, ext: attachments.sourceWorkbookSpec.extensions[0] })
+                      : attachments.sourceWorkbookSpec.label
+                  }
                 >
-                  {t("dialogue.attach.referenceImages.uploadCta")}
-                </Button>
+                  <Button icon={<PaperClipOutlined />} onClick={attachments.pickSourceFile} aria-label={t("dialogue.attach.sourceFile.aria")} />
+                </Tooltip>
+              ) : null}
+              {attachments.referenceImagesSpec ? (
+                <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
+                  <Button
+                    className="reference-image-upload-button"
+                    icon={<MaterialSymbol name="image" />}
+                    onClick={attachments.pickReferenceImages}
+                    disabled={attachments.isReferenceLimitReached}
+                    aria-label={t("dialogue.attach.referenceImages.attach")}
+                  >
+                    {t("dialogue.attach.referenceImages.uploadCta")}
+                  </Button>
+                </Tooltip>
+              ) : null}
+              <Tooltip title={t("dialogue.attach.advancedOptions")}>
+                <Button icon={<MaterialSymbol name="tune" />} disabled />
               </Tooltip>
-            ) : null}
-            <Tooltip title={t("dialogue.attach.advancedOptions")}>
-              <Button icon={<MaterialSymbol name="tune" />} disabled />
-            </Tooltip>
-          </Space>
-          <Button type="primary" htmlType="submit" icon={<SendOutlined />} loading={busy}>
-            {t("dialogue.generate")}
-          </Button>
-        </div>
-      </Form>
+            </Space>
+            <Button type="primary" htmlType="submit" icon={<SendOutlined />} loading={busy}>
+              {t("dialogue.generate")}
+            </Button>
+          </div>
+        </Form>
+      </div>
     </div>
   );
 }
@@ -946,7 +945,7 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
     setReferenceImages((current) => mergeUniquePaths(current, [path], referenceImageMaxCount));
   }
 
-  const isActive = ["running", "starting", "question"].includes(latestTask.status);
+  const isActive = ["running", "starting", "question", "plan_review"].includes(latestTask.status);
 
   return (
     <div className="conversation-layout" ref={layoutRef}>
@@ -960,18 +959,20 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
           // Latest + active: show as active round
           return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} />;
         })}
+        <div ref={bottomRef} />
       </div>
-      <ConversationFooter
-        latestTask={latestTask}
-        busy={busy}
-        onContinueGeneration={onContinueGeneration}
-        onContinueModify={onContinueModify}
-        onForceCancel={onForceCancel}
-        onOpenLogin={onOpenLogin}
-        referenceImages={referenceImages}
-        onReferenceImagesChange={setReferenceImages}
-      />
-      <div ref={bottomRef} />
+      <div className="conversation-footer">
+        <ConversationFooter
+          latestTask={latestTask}
+          busy={busy}
+          onContinueGeneration={onContinueGeneration}
+          onContinueModify={onContinueModify}
+          onForceCancel={onForceCancel}
+          onOpenLogin={onOpenLogin}
+          referenceImages={referenceImages}
+          onReferenceImagesChange={setReferenceImages}
+        />
+      </div>
     </div>
   );
 }
@@ -1042,13 +1043,14 @@ function ActiveTaskRound({ task, onForceCancel }: {
           <li>
             <CheckCircleFilled /> {t("dialogue.history.targetType", { type: documentType.toUpperCase() })}
           </li>
-          <li className={isRunning || task.status === "question" ? "active" : ""}>
+          <li className={isRunning || task.status === "question" || task.status === "plan_review" ? "active" : ""}>
             {isRunning ? <LoadingOutlined /> : <CheckCircleFilled />}{" "}
             {latestText ? <span>{latestText}</span> : t("dialogue.history.waitingEvents")}
           </li>
           <li className="muted">{t("dialogue.history.taskId", { id: task.id })}</li>
         </ul>
       </div>
+      {task.status === "plan_review" && task.plan ? <PlanReviewMessage task={task} /> : null}
       <TaskRuntimePanel task={task} />
       <FluidProgressPanel task={task} />
       {task.stalledSince ? (
@@ -1077,6 +1079,21 @@ function ActiveTaskRound({ task, onForceCancel }: {
       ) : null}
       <ReportIssueDialog open={reportOpen} taskId={task.id} onClose={() => setReportOpen(false)} />
     </>
+  );
+}
+
+function PlanReviewMessage({ task }: { task: DesktopTask }) {
+  const t = useT();
+  if (!task.plan) return null;
+  return (
+    <div className="message ai-message plan-review-message">
+      <div className="message-author">
+        <FileTextOutlined />
+        <strong>{t("dialogue.planReview.title")}</strong>
+        {task.plan.revision ? <Tag color="processing">{t("dialogue.planReview.revision", { revision: task.plan.revision })}</Tag> : null}
+      </div>
+      <pre>{task.plan.markdown}</pre>
+    </div>
   );
 }
 
@@ -1357,6 +1374,7 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
   const [gifFPS, setGIFFPS] = useState<number>(() => normalizeGIFFPS(latestTask.userInput?.fps));
   const [continuationPrompt, setContinuationPrompt] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [planReviewForm] = Form.useForm<{ revision: string }>();
   const referenceImagesSpec = getAttachmentSpec(isGIFGeneration ? "gif" : "img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
 
@@ -1367,6 +1385,43 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
   useEffect(() => {
     setGIFFPS(normalizeGIFFPS(latestTask.userInput?.fps));
   }, [latestTask.id, latestTask.userInput?.fps]);
+
+  if (status === "plan_review" && latestTask.plan) {
+    async function approve() {
+      await officecli.respond({ taskId: latestTask.id, questionId: latestTask.plan?.id, optionId: "approve" });
+    }
+    async function revise(values: { revision: string }) {
+      const answer = values.revision.trim();
+      if (!answer) return;
+      await officecli.respond({ taskId: latestTask.id, questionId: latestTask.plan?.id, answer });
+      planReviewForm.resetFields();
+    }
+    return (
+      <div className="docked-composer plan-review-composer">
+        <Button type="primary" icon={<CheckCircleFilled />} onClick={approve}>
+          {t("dialogue.planReview.approve")}
+        </Button>
+        <Form form={planReviewForm} className="inline-answer" onFinish={revise}>
+          <Form.Item name="revision" noStyle>
+            <Input placeholder={t("dialogue.planReview.revisePlaceholder")} />
+          </Form.Item>
+          <Button htmlType="submit" icon={<SendOutlined />}>
+            {t("dialogue.planReview.revise")}
+          </Button>
+        </Form>
+        <Button danger icon={<StopOutlined />} loading={cancelling} onClick={async () => {
+          setCancelling(true);
+          try {
+            await officecli.cancel(latestTask.id);
+          } finally {
+            setCancelling(false);
+          }
+        }}>
+          {t("dialogue.running.cancel")}
+        </Button>
+      </div>
+    );
+  }
 
   // Running / Starting / Question: readonly composer with cancel
   if (status === "running" || status === "starting") {
@@ -1653,7 +1708,7 @@ function FluidProgressPanel({ task }: { task: DesktopTask }) {
   const failedCount = stages.filter((s) => s.status === "failed").length;
   const hasActive = stages.some((s) => s.status === "active");
   const status = task.status;
-  const isRunning = status === "running" || status === "starting" || status === "question";
+  const isRunning = status === "running" || status === "starting" || status === "question" || status === "plan_review";
   const percent = !isRunning
     ? 100
     : stages.length === 0
@@ -1704,6 +1759,8 @@ function headerForStatus(status: DesktopTask["status"], t: Translator) {
       return { icon: <StopOutlined />, title: t("dialogue.progress.header.cancelled.title"), tagColor: "default", tagText: t("dialogue.progress.header.cancelled.tag") };
     case "question":
       return { icon: <LoadingOutlined />, title: t("dialogue.progress.header.question.title"), tagColor: "processing", tagText: t("dialogue.progress.header.question.tag") };
+    case "plan_review":
+      return { icon: <FileTextOutlined />, title: t("dialogue.progress.header.planReview.title"), tagColor: "processing", tagText: t("dialogue.progress.header.planReview.tag") };
     default:
       return { icon: <LoadingOutlined />, title: t("dialogue.progress.header.running.title"), tagColor: "processing", tagText: t("dialogue.progress.header.running.tag") };
   }

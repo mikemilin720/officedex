@@ -15,7 +15,6 @@ export interface BridgeMockOptions {
   settings?: {
     onboardingCompletedAt?: string | null;
     documentType?: "pptx" | "docx" | "xlsx" | "report" | "img";
-    mode?: "fast" | "best";
     runtimeMode?: "custom" | "hosted";
     workspaceDir?: string | null;
     outputDir?: string | null;
@@ -35,7 +34,6 @@ export async function installBridgeMock(page: Page, options: BridgeMockOptions =
       version: 1,
       defaults: {
         documentType: opts.settings?.documentType ?? "pptx",
-        mode: opts.settings?.mode ?? "fast",
         runtimeMode: opts.settings?.runtimeMode ?? "hosted",
         enableImages: true,
         imageQuality: "premium",

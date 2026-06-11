@@ -1371,7 +1371,6 @@ function installBridgeMock() {
       version: 1,
       defaults: {
         documentType: "pptx" as const,
-        mode: "fast" as const,
         enableImages: true,
         imageQuality: "premium" as const,
       },
@@ -1386,7 +1385,6 @@ function installBridgeMock() {
       version: 1,
       defaults: {
         documentType: "pptx" as const,
-        mode: "fast" as const,
         enableImages: true,
         imageQuality: "premium" as const,
         ...(patch.defaults ?? {}),

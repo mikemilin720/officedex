@@ -381,7 +381,7 @@ export function App() {
       const generateInput: GenerateInput = noProject
         ? { ...values, topic, noProject: true, workspaceId: undefined }
         : { ...values, topic, workspaceId: targetWorkspace?.id };
-      const result = await officecli.generate(generateInput);
+      const result = await officecli.generate(withSmartMode(generateInput));
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
         const actualContext = { ...pending.context, conversationId: result.taskId };
@@ -414,7 +414,6 @@ export function App() {
       documentType,
       topic: task.topic || summarizePrompt(input.prompt),
       prompt: input.prompt,
-      mode: persistedSettings.defaults.mode,
       enableImages: persistedSettings.defaults.enableImages,
       imageQuality: persistedSettings.defaults.imageQuality,
       sourceFile: input.sourceFile,
@@ -431,6 +430,7 @@ export function App() {
     } else {
       values.noProject = true;
     }
+    Object.assign(values, withSmartMode(values));
     void submit(values);
   }
 
@@ -563,7 +563,7 @@ export function App() {
         parentTaskId,
         topic,
         prompt,
-        mode: persistedSettings.defaults.mode,
+        mode: generationModeForDocumentType(documentType),
         enableImages: persistedSettings.defaults.enableImages,
         imageQuality: persistedSettings.defaults.imageQuality,
         referenceImages,
@@ -825,7 +825,7 @@ function createNewGenerationDraft(input: Partial<GenerateInput> = {}): NewGenera
     documentType: input.documentType ?? defaultGenerateInput.documentType ?? "pptx",
     topic: input.topic ?? "",
     prompt: input.prompt ?? "",
-    mode: input.mode ?? defaultGenerateInput.mode,
+    mode: input.mode,
     sourceFile: input.sourceFile,
     referenceImages: input.referenceImages,
     imageRatio: input.imageRatio ?? defaultGenerateInput.imageRatio,
@@ -844,6 +844,21 @@ function documentTypeFromTask(task: DesktopTask): GenerateInput["documentType"] 
 
 function isGenerateDocumentType(value: unknown): value is GenerateInput["documentType"] {
   return value === "pptx" || value === "docx" || value === "xlsx" || value === "report" || value === "img" || value === "gif";
+}
+
+function generationModeForDocumentType(documentType: string | undefined): GenerateInput["mode"] | undefined {
+  return documentType === "pptx" || documentType === "docx" || documentType === "xlsx" || documentType === "report"
+    ? "best"
+    : undefined;
+}
+
+function withSmartMode(input: GenerateInput): GenerateInput {
+  const mode = generationModeForDocumentType(input.documentType);
+  if (mode) {
+    return { ...input, mode };
+  }
+  const { mode: _mode, ...rest } = input;
+  return rest;
 }
 
 function errorMessage(error: unknown): string {

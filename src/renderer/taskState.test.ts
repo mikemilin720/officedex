@@ -85,6 +85,27 @@ describe("taskState", () => {
     });
   });
 
+  it("tracks plan review events before generation continues", () => {
+    const state = applyTaskEvent(createInitialTaskState(), {
+      event_id: "event-plan",
+      task_id: "task-1",
+      type: "task.plan",
+      payload: {
+        id: "plan-1",
+        plan_id: "plan-1",
+        markdown: "# Proposed Plan\n\n- Confirm before generating.",
+        revision: 2,
+      },
+    });
+
+    expect(state.tasks["task-1"].status).toBe("plan_review");
+    expect(state.tasks["task-1"].plan).toEqual({
+      id: "plan-1",
+      markdown: "# Proposed Plan\n\n- Confirm before generating.",
+      revision: 2,
+    });
+  });
+
   it("captures credits_charged and credit_mode from task.completed payload", () => {
     const state = applyTaskEvent(createInitialTaskState(), {
       event_id: "event-1",

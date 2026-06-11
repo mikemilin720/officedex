@@ -951,6 +951,8 @@ func statusFromEvent(eventType string) string {
 		return "cancelled"
 	case "task.question":
 		return "question"
+	case "task.plan":
+		return "plan_review"
 	default:
 		return "running"
 	}

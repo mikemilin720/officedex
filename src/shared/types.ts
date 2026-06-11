@@ -276,11 +276,12 @@ export interface DesktopTask {
   conversationId: string;
   /** The task that this task is a continuation of (for conversation ordering). */
   parentTaskId?: string;
-  status: "starting" | "running" | "question" | "completed" | "failed" | "cancelled";
+  status: "starting" | "running" | "question" | "plan_review" | "completed" | "failed" | "cancelled";
   documentType?: string;
   topic?: string;
   events: BridgeEvent[];
   question?: TaskQuestion;
+  plan?: TaskPlan;
   artifact?: Artifact;
   error?: string;
   stages?: StageState[];
@@ -292,6 +293,12 @@ export interface DesktopTask {
   lastProgressAt?: number;
   stalledSince?: number;
   runtimeSnapshot?: TaskRuntimeSnapshot;
+}
+
+export interface TaskPlan {
+  id: string;
+  markdown: string;
+  revision: number;
 }
 
 export interface ImageWatermarkTaskMetadata {
@@ -361,7 +368,6 @@ export type AuthEvent =
 
 export interface GenerateDefaults {
   documentType: DocumentType;
-  mode: "fast" | "best";
   enableImages: boolean;
   imageQuality: "standard" | "premium";
 }

@@ -9,13 +9,10 @@ test.describe("Settings screen", () => {
     await expect(page.getByRole("heading", { name: /^generation$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Connection" })).toBeHidden();
 
-    // antd Radio.Group with optionType="button" hides the underlying input;
-    // click the visible label text inside the Generation Mode row.
-    await page.locator("label.ant-radio-button-wrapper").filter({ hasText: "Smart" }).first().click();
-    await expect.poll(async () => {
-      const calls = await getBridgeCalls(page, "updateSettings");
-      return calls.some((args) => (args[0] as { defaults?: { mode?: string } })?.defaults?.mode === "best");
-    }).toBe(true);
+    await expect(page.getByText("Generation Mode")).toHaveCount(0);
+    await expect(page.getByText("Smart")).toHaveCount(0);
+    const calls = await getBridgeCalls(page, "updateSettings");
+    expect(calls.some((args) => (args[0] as { defaults?: { mode?: string } })?.defaults?.mode !== undefined)).toBe(false);
   });
 
   test("switching default document type via Select sends the patch", async ({ page }) => {

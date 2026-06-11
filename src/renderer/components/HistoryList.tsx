@@ -27,13 +27,13 @@ function statusTone(status: DesktopTask["status"]): "blue" | "green" | "orange" 
     case "completed": return "green";
     case "failed": return "red";
     case "running": case "starting": return "blue";
-    case "question": return "orange";
+    case "question": case "plan_review": return "orange";
     case "cancelled": return "gray";
   }
 }
 
 function isActiveTask(status: DesktopTask["status"]): boolean {
-  return status === "running" || status === "starting";
+  return status === "running" || status === "starting" || status === "question" || status === "plan_review";
 }
 
 export function HistoryList({ workspaces, chats, activeWorkspaceId, selectedConversationId, collapsed, onSelect, onDelete, onSelectWorkspace, onNewConversation, onAddWorkspace, onRevealWorkspace, onRemoveWorkspace }: HistoryListProps) {

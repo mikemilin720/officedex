@@ -292,6 +292,34 @@ describe("DialogueScreen state machine", () => {
     );
   });
 
+  it("Plan review state approves or revises the proposed plan via respond", async () => {
+    const task: DesktopTask = {
+      id: "task-plan",
+      conversationId: "task-plan",
+      status: "plan_review",
+      events: [],
+      plan: {
+        id: "plan-1",
+        markdown: "# Proposed Plan\n\n- Build a concise deck after approval.",
+        revision: 1,
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText(/Build a concise deck after approval/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-plan", optionId: "approve" }),
+    ));
+
+    const input = screen.getByPlaceholderText(/revise the plan/i);
+    fireEvent.change(input, { target: { value: "Make it more executive." } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-plan", answer: "Make it more executive." }),
+    ));
+  });
+
   it("Running state Cancel button calls officecli.cancel with task id", async () => {
     const task: DesktopTask = {
       id: "task-run",
@@ -535,7 +563,7 @@ describe("DialogueScreen state machine", () => {
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt: replace PRODUCT", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },
     ]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Poster/i }));
@@ -559,7 +587,7 @@ describe("DialogueScreen state machine", () => {
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt: replace PRODUCT", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },
     ]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Poster/i }));
@@ -598,7 +626,7 @@ describe("DialogueScreen state machine", () => {
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Platform prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
     ]);
 
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     const localTitle = await screen.findByText("Local Admission");
     const platformTitle = await screen.findByText("Poster");
@@ -613,7 +641,7 @@ describe("DialogueScreen state machine", () => {
       { id: 8, slug: "private-poster", title: "Private Poster", description: "Private poster", promptPreset: "Private prompt", thumbnailUrl: "/api/image-templates/8/thumbnail", sortOrder: 20, enabled: true, visibility: "user_private" },
     ]);
 
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Public Poster")).toBeTruthy();
     expect(screen.getByText("Private Poster")).toBeTruthy();
@@ -641,7 +669,7 @@ describe("DialogueScreen state machine", () => {
     }));
     listImageTemplatesSpy.mockResolvedValueOnce([]);
 
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Local Admission")).toBeTruthy();
     const placeholder = document.querySelector(".image-template-thumb-placeholder");
@@ -662,7 +690,7 @@ describe("DialogueScreen state machine", () => {
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Platform prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
     ]);
 
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Local Admission")).toBeTruthy();
     expect(screen.getByText("Local Poster")).toBeTruthy();
@@ -692,7 +720,7 @@ describe("DialogueScreen state machine", () => {
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/missing-thumbnail.png", sortOrder: 10, enabled: true },
     ]);
 
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     const image = document.querySelector(".image-template-thumb img") as HTMLImageElement;
@@ -704,7 +732,7 @@ describe("DialogueScreen state machine", () => {
 
   it("keeps local image-template management out of the picker", async () => {
     listImageTemplatesSpy.mockResolvedValue([]);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText(/No image templates are configured yet/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Import JSON/i })).toBeNull();
@@ -714,7 +742,7 @@ describe("DialogueScreen state machine", () => {
 
   it("submits the selected image ratio for new image generation only", async () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast", imageRatio: "square" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", imageRatio: "square" }} />);
 
     expect(screen.getByText("Image ratio")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Landscape"));
@@ -733,7 +761,7 @@ describe("DialogueScreen state machine", () => {
 
   it("does not submit imageRatio for non-image generation", async () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "pptx", topic: "", prompt: "", mode: "fast", imageRatio: "portrait" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "pptx", topic: "", prompt: "", imageRatio: "portrait" }} />);
 
     expect(screen.queryByText("Image ratio")).toBeNull();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
@@ -748,7 +776,7 @@ describe("DialogueScreen state machine", () => {
 
   it("hides GIF from new generation and falls back to PPTX for GIF drafts", async () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "gif", topic: "", prompt: "", mode: "fast", fps: 16 }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "gif", topic: "", prompt: "", fps: 16 }} />);
 
     expect(screen.queryByText("GIF")).toBeNull();
     expect(screen.queryByText("GIF FPS")).toBeNull();
@@ -769,7 +797,7 @@ describe("DialogueScreen state machine", () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt: replace PRODUCT", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },
     ]);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "Existing prompt", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "Existing prompt" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     const textarea = screen.getByPlaceholderText(/Enter what you want to generate/i);
@@ -791,7 +819,7 @@ describe("DialogueScreen state machine", () => {
 
   it("image generation shows an empty state when no templates are configured", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([]);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText(/No image templates are configured yet/i)).toBeTruthy();
   });
@@ -800,7 +828,7 @@ describe("DialogueScreen state machine", () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },
     ]);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "pptx", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "pptx", topic: "", prompt: "" }} />);
 
     expect(screen.getByText("Quarterly Analysis Report")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Image"));
@@ -813,10 +841,28 @@ describe("DialogueScreen state machine", () => {
     expect(document.querySelector(".fluid-command-bar .image-template-picker")).toBeNull();
   });
 
+  it("keeps the new generation command bar in a fixed footer outside the start content", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    expect(await screen.findByText("Promo")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
+
+    const commandBar = document.querySelector(".fluid-command-bar");
+    const footer = commandBar?.closest(".fluid-command-footer");
+    const startCard = document.querySelector(".fluid-start-card");
+
+    expect(commandBar).toBeTruthy();
+    expect(footer).toBeTruthy();
+    expect(startCard).toBeTruthy();
+    expect(startCard?.contains(commandBar)).toBe(false);
+    expect(footer?.parentElement).toBe(document.querySelector(".fluid-new-task"));
+  });
+
   it("shows an antd spinner and loading text while image templates are pending", async () => {
     const pending = deferred<Awaited<ReturnType<DesktopAPI["listImageTemplates"]>>>();
     listImageTemplatesSpy.mockReturnValueOnce(pending.promise);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(document.querySelector(".ant-spin")).toBeTruthy();
     const loadingStatus = document.querySelector(".image-template-status")!;
@@ -840,7 +886,7 @@ describe("DialogueScreen state machine", () => {
       .mockResolvedValueOnce([
         { id: 8, slug: "banner", title: "Banner", description: "Hero banner", promptPreset: "Second prompt", thumbnailUrl: "/api/image-templates/8/thumbnail", sortOrder: 20, enabled: true },
       ]);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Refresh$/i }));
@@ -853,7 +899,7 @@ describe("DialogueScreen state machine", () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
     ]);
-    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Copy to my templates$/i })).toBeNull();
@@ -897,7 +943,7 @@ const SLOTTED_TEMPLATE = {
 };
 
 async function selectSlottedTemplate(locale?: Locale, template = SLOTTED_TEMPLATE) {
-  const screenNode = <DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />;
+  const screenNode = <DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />;
   render(locale ? <LocaleProvider value={locale}>{screenNode}</LocaleProvider> : screenNode);
   expect(await screen.findByText("Promo")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
@@ -978,7 +1024,7 @@ describe("Image template slots (guided fill-in)", () => {
   it("uses a required slot defaultValue when the user leaves it empty", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
     expect(await screen.findByText("Promo")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
 
@@ -994,7 +1040,7 @@ describe("Image template slots (guided fill-in)", () => {
   it("rejects a slot value containing double-brace markers", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
     expect(await screen.findByText("Promo")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
 
@@ -1009,7 +1055,7 @@ describe("Image template slots (guided fill-in)", () => {
   it("submits the assembled prompt (slots filled) with no promptTemplateId", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
-    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
     expect(await screen.findByText("Promo")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
 
@@ -1039,7 +1085,7 @@ describe("Image template slots (guided fill-in)", () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
     render(
       <LocaleProvider value="zh">
-        <DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />
+        <DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />
       </LocaleProvider>,
     );
     expect(await screen.findByText("Promo")).toBeTruthy();
@@ -1066,7 +1112,7 @@ describe("Image template slots (guided fill-in)", () => {
     listImageTemplatesSpy.mockResolvedValueOnce([untranslatedTemplate]);
     render(
       <LocaleProvider value="zh">
-        <DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "", mode: "fast" }} />
+        <DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />
       </LocaleProvider>,
     );
     expect(await screen.findByText("Promo")).toBeTruthy();
@@ -1169,14 +1215,26 @@ describe("Conversation multi-round", () => {
     }
   });
 
-  it("scrolls to a sentinel after the continuation composer", async () => {
+  it("keeps the continuation composer in a fixed footer outside the chat thread", async () => {
+    render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
+    const composer = screen.getByTestId("continuation-composer");
+    const footer = composer.closest(".conversation-footer");
+    const thread = document.querySelector(".chat-thread");
+
+    expect(footer).toBeTruthy();
+    expect(thread).toBeTruthy();
+    expect(thread?.contains(composer)).toBe(false);
+    expect(footer?.parentElement).toBe(document.querySelector(".conversation-layout"));
+  });
+
+  it("scrolls to a sentinel inside the chat thread instead of the fixed footer", async () => {
     render(<DialogueScreen {...baseProps()} tasks={[makeCompletedImageTask()]} />);
     const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
 
-    const layout = document.querySelector(".conversation-layout");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(layout?.lastElementChild);
+    const thread = document.querySelector(".chat-thread");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(thread?.lastElementChild);
   });
 
   it("scrolls again when restored conversation content resizes after preview loading", async () => {

@@ -422,7 +422,6 @@ const (
 
 type GenerateDefaults struct {
 	DocumentType DocumentType `json:"documentType"`
-	Mode         GenerateMode `json:"mode"`
 	EnableImages bool         `json:"enableImages"`
 	ImageQuality ImageQuality `json:"imageQuality"`
 }

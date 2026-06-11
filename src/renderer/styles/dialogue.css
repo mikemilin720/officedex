@@ -41,18 +41,23 @@
 
 .fluid-new-task {
   display: flex;
-  min-height: 100%;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
-  gap: 20px;
-  padding: 36px 48px 24px;
+  overflow: hidden;
+  padding: 36px 48px 0;
 }
 
 .fluid-start-card {
   display: grid;
   flex: 1;
+  min-height: 0;
   place-items: center;
   align-content: center;
   gap: 16px;
+  overflow: hidden;
+  padding-bottom: 20px;
   text-align: center;
 }
 
@@ -182,12 +187,25 @@
   background: var(--n-canvas);
 }
 
+.fluid-command-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  flex-shrink: 0;
+  margin: 0 -48px;
+  padding: 12px 48px 20px;
+  background: var(--n-surface-soft);
+}
+
 .fluid-command-bar {
+  max-height: min(52vh, 560px);
+  overflow-y: auto;
   border: 1px solid var(--n-hairline);
   border-radius: var(--radius-lg);
   background: var(--n-canvas);
   padding: 16px;
   box-shadow: var(--shadow-subtle);
+  scrollbar-gutter: stable;
 }
 
 .format-row {
@@ -650,6 +668,16 @@
   flex-wrap: wrap;
 }
 
+.fluid-command-bar > .composer-actions {
+  position: sticky;
+  bottom: -16px;
+  z-index: 2;
+  margin: 10px -16px -16px;
+  border-top: 1px solid var(--n-hairline-soft);
+  background: var(--n-canvas);
+  padding: 10px 16px 16px;
+}
+
 .reference-image-upload-button {
   min-width: 150px;
 }
@@ -738,16 +766,50 @@
 
 .conversation-layout {
   display: flex;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
-  gap: 16px;
-  padding: 36px 48px 20px;
+  overflow: hidden;
+  padding: 36px 48px 0;
 }
 
 .chat-thread {
   display: flex;
   flex: 1;
+  min-height: 0;
   flex-direction: column;
   gap: 18px;
+  overflow-y: auto;
+  padding-bottom: 18px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.conversation-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  flex-shrink: 0;
+  margin: 0 -48px;
+  padding: 12px 48px 20px;
+  background: var(--n-surface-soft);
+}
+
+.plan-review-message pre {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.plan-review-composer {
+  gap: 10px;
+}
+
+.plan-review-composer .inline-answer {
+  flex: 1;
 }
 
 .time-marker {
@@ -1437,8 +1499,26 @@
 }
 
 @media (max-width: 760px) {
+  .fluid-new-task {
+    padding: 20px 20px 0;
+  }
+
+  .fluid-command-footer {
+    margin: 0 -20px;
+    padding: 10px 20px 16px;
+  }
+
+  .fluid-command-bar {
+    max-height: 58vh;
+  }
+
   .conversation-layout {
-    padding: 20px;
+    padding: 20px 20px 0;
+  }
+
+  .conversation-footer {
+    margin: 0 -20px;
+    padding: 10px 20px 16px;
   }
 
   .fluid-prompt-grid {

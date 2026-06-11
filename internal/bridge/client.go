@@ -519,15 +519,14 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		}
 		sessionID = opened
 	}
-	mode := string(input.Mode)
-	if mode == "" {
-		mode = "fast"
+	mode := strings.TrimSpace(string(input.Mode))
+	if mode == "" && isOfficeDocumentType(input.DocumentType) {
+		mode = "best"
 	}
 	args := map[string]any{
 		"document_type":      input.DocumentType,
 		"topic":              input.Topic,
 		"prompt":             input.Prompt,
-		"mode":               mode,
 		"runtime_mode":       input.RuntimeMode,
 		"prompt_template_id": input.PromptTemplateID,
 		"out":                input.OutputDir,
@@ -546,6 +545,9 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		// render a high-fidelity preview; see docs/sidecar-preview-html.md
 		// for the expected sidecar contract.
 		"emit_preview": true,
+	}
+	if mode != "" {
+		args["mode"] = mode
 	}
 	if ratio != "" {
 		args["ratio"] = ratio
@@ -574,6 +576,15 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		return TaskInvokeResult{}, fmt.Errorf("bridge: decode task/invoke: %w", err)
 	}
 	return result, nil
+}
+
+func isOfficeDocumentType(documentType types.DocumentType) bool {
+	switch documentType {
+	case types.DocPPTX, types.DocDOCX, types.DocXLSX, types.DocReport:
+		return true
+	default:
+		return false
+	}
 }
 
 func imageRatioArg(input types.GenerateInput) (string, error) {

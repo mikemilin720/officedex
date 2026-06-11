@@ -178,6 +178,11 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
     nextTask.question = questionFromPayload(event.payload);
     nextTask.status = "question";
   }
+  if (event.type === "task.plan") {
+    nextTask.plan = planFromPayload(event.payload);
+    nextTask.question = undefined;
+    nextTask.status = "plan_review";
+  }
   if (event.type === "task.completed") {
     const artifact = artifactFromPayload(taskID, event.payload);
     if (artifact) {
@@ -185,17 +190,20 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
     }
     nextTask.imageWatermark = imageWatermarkFromPayload(event.payload);
     nextTask.question = undefined;
+    nextTask.plan = undefined;
     nextTask.stalledSince = undefined;
     applyCreditPayload(nextTask, event.payload);
   }
   if (event.type === "task.failed") {
     nextTask.error = stringPayload(event, "message") || stringPayload(event, "error") || "Task failed";
     nextTask.question = undefined;
+    nextTask.plan = undefined;
     nextTask.stalledSince = undefined;
     applyCreditPayload(nextTask, event.payload);
   }
   if (event.type === "task.cancelled") {
     nextTask.question = undefined;
+    nextTask.plan = undefined;
     nextTask.stalledSince = undefined;
   }
 
@@ -214,6 +222,8 @@ function statusFromEvent(type: string, fallback: DesktopTask["status"]): Desktop
       return "running";
     case "task.question":
       return "question";
+    case "task.plan":
+      return "plan_review";
     case "task.completed":
       return "completed";
     case "task.failed":
@@ -223,6 +233,16 @@ function statusFromEvent(type: string, fallback: DesktopTask["status"]): Desktop
     default:
       return fallback;
   }
+}
+
+function planFromPayload(payload: BridgeEvent["payload"]) {
+  const id = String(payload?.id || payload?.plan_id || "");
+  const revision = Number(payload?.revision);
+  return {
+    id,
+    markdown: String(payload?.markdown || payload?.plan_markdown || ""),
+    revision: Number.isFinite(revision) ? revision : 0,
+  };
 }
 
 function questionFromPayload(payload: BridgeEvent["payload"]): TaskQuestion | undefined {

@@ -425,6 +425,9 @@ func TestInvokeGenerateOpensSessionFirst(t *testing.T) {
 	if args["document_type"] != "pptx" {
 		t.Errorf("document_type = %v, want pptx", args["document_type"])
 	}
+	if args["mode"] != "best" {
+		t.Errorf("mode = %v, want best for office documents", args["mode"])
+	}
 	if args["local_preview"] != true {
 		t.Errorf("local_preview = %v, want true", args["local_preview"])
 	}
@@ -467,6 +470,9 @@ func TestInvokeGenerateSendsPromptTemplateID(t *testing.T) {
 	args, _ := params["args"].(map[string]any)
 	if args["prompt_template_id"] != "7" {
 		t.Fatalf("prompt_template_id = %v, want 7", args["prompt_template_id"])
+	}
+	if _, ok := args["mode"]; ok {
+		t.Fatalf("mode should not be sent for image generation: %#v", args["mode"])
 	}
 	fake.writeResponse(t, second.idString(), map[string]any{
 		"task_id":    "task-img",
@@ -730,6 +736,9 @@ func TestInvokeGenerateSendsGIFFPSAndReferenceImagesWithoutRatio(t *testing.T) {
 	}
 	if _, ok := args["ratio"]; ok {
 		t.Fatalf("ratio should not be sent for gif generation: %#v", args["ratio"])
+	}
+	if _, ok := args["mode"]; ok {
+		t.Fatalf("mode should not be sent for gif generation: %#v", args["mode"])
 	}
 	refs, ok := args["reference_images"].([]any)
 	if !ok || len(refs) != 1 || refs[0] != "/tmp/ref.png" {

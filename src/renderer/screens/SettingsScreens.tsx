@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Progress, Radio, Select, Space, Spin, Switch, Tag, message } from "antd";
+import { Button, Form, Input, Modal, Progress, Select, Space, Spin, Switch, Tag, message } from "antd";
 import {
   CommentOutlined,
   CopyOutlined,
@@ -135,7 +135,6 @@ export function SettingsScreen({
         update({
           defaults: {
             documentType: "pptx",
-            mode: "fast",
             enableImages: true,
             imageQuality: "premium",
           },
@@ -267,18 +266,6 @@ export function SettingsScreen({
                     { value: "img", label: t("settings.option.docType.img") },
                   ]}
                   style={{ minWidth: 220 }}
-                />
-              </SettingRow>
-              <SettingRow title={t("settings.row.mode.title")} desc={t("settings.row.mode.desc")}>
-                <Radio.Group
-                  value={settings.defaults.mode}
-                  onChange={(event) => updateDefaults({ mode: event.target.value })}
-                  optionType="button"
-                  buttonStyle="solid"
-                  options={[
-                    { value: "fast", label: t("settings.option.mode.fast") },
-                    { value: "best", label: t("settings.option.mode.best") },
-                  ]}
                 />
               </SettingRow>
               <SettingRow title={t("settings.row.enableImages.title")} desc={t("settings.row.enableImages.desc")}>

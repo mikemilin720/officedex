@@ -1,4 +1,4 @@
-import { Alert, Button, Input, Modal, message, Radio, Select, Space, Switch, Tag } from "antd";
+import { Alert, Button, Input, Modal, message, Select, Space, Switch, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { officecli } from "../bridge";
 import { useT } from "../i18n";
@@ -258,18 +258,6 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
                   { value: "img", label: t("settings.option.docType.img") },
                 ]}
                 style={{ width: "100%" }}
-              />
-            </Field>
-            <Field label={t("onboarding.field.mode")}>
-              <Radio.Group
-                optionType="button"
-                buttonStyle="solid"
-                value={draft.defaults.mode}
-                onChange={(event) => updateDefaults({ mode: event.target.value })}
-                options={[
-                  { value: "fast", label: t("settings.option.mode.fast") },
-                  { value: "best", label: t("settings.option.mode.best") },
-                ]}
               />
             </Field>
             <Field label={t("onboarding.field.images")}>

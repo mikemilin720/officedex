@@ -9,7 +9,6 @@ const baseSettings: UserSettings = {
   version: 1,
   defaults: {
     documentType: "pptx",
-    mode: "fast",
     enableImages: true,
     imageQuality: "premium",
   },
@@ -99,7 +98,6 @@ describe("OnboardingScreen", () => {
 
     const patch = updateSettingsSpy.mock.calls[0][0] as Partial<UserSettings>;
     expect(patch.defaults?.documentType).toBe("pptx");
-    expect(patch.defaults?.mode).toBe("fast");
     expect(patch).not.toHaveProperty("workspaceDir");
     expect(typeof patch.onboardingCompletedAt).toBe("string");
     expect(patch.onboardingCompletedAt && new Date(patch.onboardingCompletedAt).toString()).not.toBe("Invalid Date");

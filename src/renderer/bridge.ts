@@ -57,7 +57,6 @@ const DEFAULT_BROWSER_SETTINGS: UserSettings = {
   version: 1,
   defaults: {
     documentType: "pptx",
-    mode: "fast",
     enableImages: true,
     imageQuality: "standard",
   },
@@ -318,7 +317,6 @@ function adaptSettingsPatch(patch: Partial<UserSettings>): settingsNS.Patch {
   if (patch.defaults !== undefined) {
     const d: Record<string, unknown> = {};
     if (patch.defaults.documentType !== undefined) d.documentType = patch.defaults.documentType;
-    if (patch.defaults.mode !== undefined) d.mode = patch.defaults.mode;
     if (patch.defaults.enableImages !== undefined) d.enableImages = patch.defaults.enableImages;
     if (patch.defaults.imageQuality !== undefined) d.imageQuality = patch.defaults.imageQuality;
     out.defaults = d;

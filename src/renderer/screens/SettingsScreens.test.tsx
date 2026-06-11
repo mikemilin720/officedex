@@ -88,7 +88,6 @@ function makeSettings(overrides: Partial<UserSettings> = {}): UserSettings {
     version: 1,
     defaults: {
       documentType: "pptx",
-      mode: "fast",
       enableImages: true,
       imageQuality: "premium",
       ...(overrides.defaults ?? {}),
@@ -250,16 +249,15 @@ describe("SettingsScreen", () => {
     expect(last.defaults?.documentType).toBe("docx");
   });
 
-  it("switching to Smart mode sends mode=best in updateSettings", async () => {
+  it("does not expose generation mode settings", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
     await screen.findByRole("heading", { name: /^generation$/i });
 
-    fireEvent.click(screen.getByRole("radio", { name: /smart/i }));
-    await waitFor(() => expect(updateSettingsSpy).toHaveBeenCalled());
-    const last = updateSettingsSpy.mock.calls.at(-1)![0] as Partial<UserSettings>;
-    expect(last.defaults?.mode).toBe("best");
+    expect(screen.queryByText("Generation Mode")).toBeNull();
+    expect(screen.queryByRole("radio", { name: /fast/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /smart/i })).toBeNull();
   });
 
   it("toggling enableImages persists the new value", async () => {
@@ -320,7 +318,6 @@ describe("SettingsScreen", () => {
     currentSettings = makeSettings({
       defaults: {
         documentType: "pptx",
-        mode: "fast",
         enableImages: true,
         imageQuality: "premium",
       },

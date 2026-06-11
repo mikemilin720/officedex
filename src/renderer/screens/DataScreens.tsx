@@ -187,6 +187,6 @@ function taskStatusColor(status: DesktopTask["status"]) {
   if (status === "completed") return "green";
   if (status === "failed") return "red";
   if (status === "cancelled") return "default";
-  if (status === "question") return "gold";
+  if (status === "question" || status === "plan_review") return "gold";
   return "purple";
 }
