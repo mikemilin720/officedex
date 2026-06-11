@@ -157,7 +157,6 @@ type GenerateInput struct {
 	NoProject        bool                           `json:"noProject,omitempty"`
 	ConversationID   string                         `json:"conversationId,omitempty"`
 	ParentTaskID     string                         `json:"parentTaskId,omitempty"`
-	Mode             string                         `json:"mode,omitempty"`
 	RuntimeMode      string                         `json:"runtimeMode,omitempty"`
 	PromptTemplateID string                         `json:"promptTemplateId,omitempty"`
 	SourceFile       string                         `json:"sourceFile,omitempty"`
@@ -398,13 +397,6 @@ type AuthEvent struct {
 	Code    *int          `json:"code,omitempty"`
 	Signal  string        `json:"signal,omitempty"`
 }
-
-type GenerateMode string
-
-const (
-	ModeFast GenerateMode = "fast"
-	ModeBest GenerateMode = "best"
-)
 
 type RuntimeMode string
 

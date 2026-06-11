@@ -1766,7 +1766,7 @@ func (a *App) runOfficialPaidProviderProbe(s types.UserSettings, pool *netproxy.
 		"--prompt",
 		"Write exactly: OfficeDex provider connection test OK.",
 		"--mode",
-		"fast",
+		"best",
 		"--out",
 		outDir,
 		"--no-publish",

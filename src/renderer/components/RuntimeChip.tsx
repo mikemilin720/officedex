@@ -6,7 +6,6 @@ import { useT } from "../i18n";
 import type { BridgeRuntimeSnapshot, UserSettings } from "../../shared/types";
 
 const SETTINGS_UPDATED = "officedex:settings-updated";
-const BRIDGE_EVENT = "bridge:event";
 
 interface RuntimeChipProps {
   onClick?: () => void;

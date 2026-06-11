@@ -47,7 +47,6 @@ export interface NewGenerationDraft {
   documentType: DocumentType;
   topic: string;
   prompt: string;
-  mode?: GenerateInput["mode"];
   sourceFile?: string;
   referenceImages?: string[];
   imageRatio?: ImageRatio;
@@ -60,8 +59,6 @@ export type NewChatTarget =
 
 interface DialogueProps {
   tasks: DesktopTask[];
-  conversationId?: string;
-  artifacts: Artifact[];
   newGenerationDraft?: NewGenerationDraft;
   newChatNudgeKey?: number;
   busy: boolean;
@@ -180,7 +177,7 @@ function MessageCopyButton({ text, ariaLabel }: { text: string; ariaLabel: strin
   );
 }
 
-export function DialogueScreen({ tasks, conversationId, artifacts, newGenerationDraft, newChatNudgeKey = 0, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, workspaces = [], newChatTarget = { kind: "none" }, onNewChatTargetChange, onAddWorkspace }: DialogueProps) {
+export function DialogueScreen({ tasks, newGenerationDraft, newChatNudgeKey = 0, busy, lastError, errorKind, errorDetails, bridgeStatus, onSubmit, onOpenSettings, onOpenLogin, onRetry, onPreview, onNewGenerationDraftChange, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, workspaces = [], newChatTarget = { kind: "none" }, onNewChatTargetChange, onAddWorkspace }: DialogueProps) {
   if (lastError) {
     return <ConnectionFailure kind={errorKind} status={bridgeStatus} error={lastError} details={errorDetails} onOpenSettings={onOpenSettings} onOpenLogin={onOpenLogin} onRetry={onRetry} />;
   }
@@ -201,7 +198,7 @@ export function DialogueScreen({ tasks, conversationId, artifacts, newGeneration
     );
   }
   // Conversation view with all rounds
-  return <ConversationView tasks={tasks} busy={busy} onPreview={onPreview} onForceCancel={onForceCancel} onContinueGeneration={onContinueGeneration} onContinueModify={onContinueModify} onRetryTask={onRetryTask} onOpenLogin={onOpenLogin} />;
+  return <ConversationView tasks={tasks} onPreview={onPreview} onForceCancel={onForceCancel} onContinueGeneration={onContinueGeneration} onContinueModify={onContinueModify} onRetryTask={onRetryTask} onOpenLogin={onOpenLogin} />;
 }
 
 function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatTarget, onSubmit, onDraftChange, onNewChatTargetChange, onAddWorkspace }: {
@@ -525,11 +522,32 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
     </div>
   );
 
+  const documentTypeSelector = (
+    <Radio.Group
+      optionType="button"
+      options={documentTypeOptions.map((option) => ({ value: option.value, label: option.label }))}
+    />
+  );
+
   return (
     <div
       className={`fluid-new-task ${docType === "img" ? "image-template-workspace" : ""}`}
       ref={bindDropTarget}
     >
+      {docType === "img" ? (
+        <div className="image-template-prompt-header image-template-form-header">
+          {projectHeading}
+          <div className="format-row">
+            <span>{t("dialogue.format.label")}</span>
+            <Radio.Group
+              optionType="button"
+              value={docType}
+              options={documentTypeOptions.map((option) => ({ value: option.value, label: option.label }))}
+              onChange={(event) => applyDraftPatch({ documentType: normalizeNewGenerationDocumentType(event.target.value) })}
+            />
+          </div>
+        </div>
+      ) : null}
       <section className={`fluid-start-card ${docType === "img" ? "image-template-gallery-pane" : ""}`}>
         {docType === "img" ? null : (
           <div className="fluid-spark">
@@ -597,11 +615,6 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
         )}
       </section>
       <div className={`fluid-command-footer ${docType === "img" ? "image-template-form-pane" : ""}`}>
-        {docType === "img" ? (
-          <div className="image-template-form-header">
-            {projectHeading}
-          </div>
-        ) : null}
         <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
           onDraftChange({
             documentType: normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType),
@@ -621,7 +634,7 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
             if (slotCheck.firstError) message.warning(slotCheck.firstError);
             return;
           }
-          const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, fps: rawFPS, mode: _mode, ...submitValues } = values;
+          const { promptTemplateId: _promptTemplateId, imageRatio: rawImageRatio, fps: rawFPS, ...submitValues } = values;
           void _promptTemplateId;
           const documentType = normalizeNewGenerationDocumentType(submitValues.documentType);
           const prompt = hasSlots && !rawDecoupled && selectedTemplate
@@ -642,15 +655,18 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
           }
           onSubmit(nextInput);
         }} className="fluid-command-bar">
-          <div className="format-row">
-            <span>{t("dialogue.format.label")}</span>
-            <Form.Item name="documentType" noStyle>
-              <Radio.Group
-                optionType="button"
-                options={documentTypeOptions.map((option) => ({ value: option.value, label: option.label }))}
-              />
+          {docType === "img" ? (
+            <Form.Item name="documentType" hidden>
+              <Input />
             </Form.Item>
-          </div>
+          ) : (
+            <div className="format-row">
+              <span>{t("dialogue.format.label")}</span>
+              <Form.Item name="documentType" noStyle>
+                {documentTypeSelector}
+              </Form.Item>
+            </div>
+          )}
           {docType === "img" ? (
             <div className="image-ratio-row">
               <span>{t("dialogue.imageRatio.label")}</span>
@@ -932,9 +948,8 @@ function findVerticalScrollContainer(element: HTMLElement | null): HTMLElement |
   return null;
 }
 
-function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, onOpenLogin }: {
+function ConversationView({ tasks, onPreview, onForceCancel, onContinueGeneration, onContinueModify, onRetryTask, onOpenLogin }: {
   tasks: DesktopTask[];
-  busy: boolean;
   onPreview: (artifact: Artifact) => void;
   onForceCancel?: (taskId: string) => void;
   onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio, fps?: number) => void;
@@ -946,7 +961,6 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
   const bottomRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
-  const t = useT();
   const conversationId = tasks[0]?.conversationId;
   const referenceImagesSpec = getAttachmentSpec("img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
@@ -993,18 +1007,16 @@ function ConversationView({ tasks, busy, onPreview, onForceCancel, onContinueGen
             return <ConversationRound key={task.id} task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={addReferenceImage} onRetryTask={onRetryTask} />;
           }
           // Latest + active: show as active round
-          return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} />;
+          return <ActiveTaskRound key={task.id} task={task} />;
         })}
         <div ref={bottomRef} />
       </div>
       <div className="conversation-footer">
         <ConversationFooter
           latestTask={latestTask}
-          busy={busy}
           onContinueGeneration={onContinueGeneration}
           onContinueModify={onContinueModify}
           onForceCancel={onForceCancel}
-          onOpenLogin={onOpenLogin}
           referenceImages={referenceImages}
           onReferenceImagesChange={setReferenceImages}
         />
@@ -1037,15 +1049,13 @@ function ConversationRound({ task, onPreview, onOpenLogin, onUseAsReference, onR
 
 /* ─── Active Task Round (running / starting / question) ─── */
 
-function ActiveTaskRound({ task, onForceCancel }: {
+function ActiveTaskRound({ task }: {
   task: DesktopTask;
-  onForceCancel?: (taskId: string) => void;
 }) {
   const t = useT();
   const capability = useReportCapability();
   const [reportOpen, setReportOpen] = useState(false);
   const [stalledRequestId, setStalledRequestId] = useState<string | null>(null);
-  const [cancelling, setCancelling] = useState(false);
   const subject = taskSubject(task, t);
   const documentType = task.documentType || task.artifact?.documentType || t("dialogue.history.targetTypeDefault");
   const isRunning = task.status === "running" || task.status === "starting";
@@ -1153,7 +1163,6 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
   const [publishSubmitting, setPublishSubmitting] = useState(false);
   const [publishError, setPublishError] = useState("");
   const failed = task.status === "failed";
-  const cancelled = task.status === "cancelled";
   const completed = task.status === "completed";
   const artifact = task.artifact;
   const latestEvent = task.events.at(-1);
@@ -1390,13 +1399,11 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
 
 /* ─── Conversation Footer ─── */
 
-function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinueModify, onForceCancel, onOpenLogin, referenceImages, onReferenceImagesChange }: {
+function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify, onForceCancel, referenceImages, onReferenceImagesChange }: {
   latestTask: DesktopTask;
-  busy: boolean;
   onContinueGeneration?: (documentType: string, prompt: string, referenceImages?: string[], imageRatio?: ImageRatio, fps?: number) => void;
   onContinueModify?: (documentType: string, prompt: string) => void;
   onForceCancel?: (taskId: string) => void;
-  onOpenLogin: () => void;
   referenceImages: string[];
   onReferenceImagesChange: (next: string[]) => void;
 }) {

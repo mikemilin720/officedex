@@ -519,10 +519,6 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		}
 		sessionID = opened
 	}
-	mode := strings.TrimSpace(string(input.Mode))
-	if mode == "" && isOfficeDocumentType(input.DocumentType) {
-		mode = "best"
-	}
 	args := map[string]any{
 		"document_type":      input.DocumentType,
 		"topic":              input.Topic,
@@ -546,8 +542,8 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		// for the expected sidecar contract.
 		"emit_preview": true,
 	}
-	if mode != "" {
-		args["mode"] = mode
+	if isOfficeDocumentType(input.DocumentType) {
+		args["mode"] = "best"
 	}
 	if ratio != "" {
 		args["ratio"] = ratio

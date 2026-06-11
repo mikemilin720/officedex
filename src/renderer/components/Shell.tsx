@@ -19,12 +19,10 @@ import {
   FolderOpenOutlined,
   FundProjectionScreenOutlined,
   HistoryOutlined,
-  LeftOutlined,
   LineChartOutlined,
   MessageOutlined,
   NotificationOutlined,
   PlusOutlined,
-  RightOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -35,6 +33,7 @@ import {
   UnlockOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
+import { PanelLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { notion } from "../designTokens";
 import type { NavKey } from "../defaults";
 import type { WorkspaceConversationSummary, WorkspaceSummary } from "../../shared/types";
@@ -62,7 +61,6 @@ const DEFAULT_CREDIT: CreditInfo = {
 
 interface ShellProps {
   activeNav: NavKey;
-  bridgeStatus: string;
   failed: boolean;
   errorKind?: "connection" | "auth" | "task" | "setup" | "other";
   children: React.ReactNode;
@@ -102,7 +100,6 @@ function pillLabelKey(failed: boolean, errorKind: ShellProps["errorKind"]): stri
 
 export function Shell({
   activeNav,
-  bridgeStatus,
   failed,
   errorKind,
   children,
@@ -124,11 +121,30 @@ export function Shell({
   onDeleteConversation,
 }: ShellProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarPreview, setSidebarPreview] = useState(false);
   const t = useT();
+  const sidebarToggleLabel = collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse");
+  const SidebarToggleIcon = collapsed ? (sidebarPreview ? PanelLeftClose : PanelLeftOpen) : PanelLeft;
+  const sidebarContentsCollapsed = collapsed && !sidebarPreview;
 
   return (
-    <div className={`app-shell fluid-shell ${inspector ? "preview-active sidebar-collapsed" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar">
+    <div
+      className={`app-shell fluid-shell ${inspector ? "preview-active sidebar-collapsed" : ""} ${collapsed ? "sidebar-collapsed" : ""} ${sidebarPreview ? "sidebar-preview" : ""}`}
+    >
+      <div
+        className="sidebar-hover-zone"
+        aria-hidden="true"
+        onMouseEnter={() => {
+          if (collapsed) setSidebarPreview(true);
+        }}
+      />
+      <aside
+        className="sidebar"
+        onMouseEnter={() => {
+          if (collapsed) setSidebarPreview(true);
+        }}
+        onMouseLeave={() => setSidebarPreview(false)}
+      >
         <div className="brand-block">
           <div className="brand-mark">
             <img src="./officedex-logo.svg" alt="OfficeDex logo" />
@@ -138,7 +154,7 @@ export function Shell({
             <div className={`bridge-pill ${failed ? "failed" : ""}`}>{t(pillLabelKey(failed, errorKind))}</div>
           </div>
         </div>
-        <Tooltip title={collapsed ? t("shell.newGeneration") : ""} placement="right">
+        <Tooltip title={sidebarContentsCollapsed ? t("shell.newGeneration") : ""} placement="right">
           <Button type="primary" icon={<EditOutlined />} block onClick={() => onNewGeneration()}>
             {t("shell.newGeneration")}
           </Button>
@@ -148,7 +164,7 @@ export function Shell({
           chats={chats}
           activeWorkspaceId={activeWorkspaceId}
           selectedConversationId={selectedConversationId}
-          collapsed={collapsed}
+          collapsed={sidebarContentsCollapsed}
           onSelect={onSelectTask}
           onDelete={onDeleteConversation}
           onSelectWorkspace={onSelectWorkspace}
@@ -160,19 +176,19 @@ export function Shell({
         <div className="sidebar-footer">
           <CreditMeter info={credit} hasCustomProvider={hasCustomProvider} />
           <div className="sidebar-footer-nav">
-            <Tooltip title={collapsed ? t("shell.nav.profile") : ""} placement="right">
+            <Tooltip title={sidebarContentsCollapsed ? t("shell.nav.profile") : ""} placement="right">
               <button className={`nav-item profile-link ${activeNav === "login" ? "active" : ""}`} onClick={() => onNavChange("login")}>
                 <UserOutlined />
                 <span>{t("shell.nav.profile")}</span>
               </button>
             </Tooltip>
-            <Tooltip title={collapsed ? t("shell.nav.tasks") : ""} placement="right">
+            <Tooltip title={sidebarContentsCollapsed ? t("shell.nav.tasks") : ""} placement="right">
               <button className={`nav-item ${activeNav === "tasks" ? "active" : ""}`} onClick={() => onNavChange("tasks")}>
                 <HistoryOutlined />
                 <span>{t("shell.nav.tasks")}</span>
               </button>
             </Tooltip>
-            <Tooltip title={collapsed ? t("shell.nav.settings") : ""} placement="right">
+            <Tooltip title={sidebarContentsCollapsed ? t("shell.nav.settings") : ""} placement="right">
               <button
                 className={`nav-item sidebar-settings ${activeNav === "settings" ? "active" : ""}`}
                 onClick={() => onNavChange("settings")}
@@ -183,19 +199,26 @@ export function Shell({
             </Tooltip>
           </div>
         </div>
-        <Tooltip title={collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse")} placement="right">
-          <button
-            type="button"
-            className="sidebar-divider-toggle"
-            aria-label={collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse")}
-            onClick={() => setCollapsed((c) => !c)}
-          >
-            {collapsed ? <RightOutlined /> : <LeftOutlined />}
-          </button>
-        </Tooltip>
       </aside>
       <main className="main-frame">
         <header className="topbar">
+          <div className="topbar-sidebar-slot">
+            <Tooltip title={sidebarToggleLabel} placement="bottom">
+              <button
+                type="button"
+                className={`topbar-sidebar-toggle ${collapsed ? "is-collapsed" : "is-expanded"} ${sidebarPreview ? "is-previewing" : ""}`}
+                data-sidebar-icon-state={collapsed ? (sidebarPreview ? "preview" : "hidden") : "expanded"}
+                aria-label={sidebarToggleLabel}
+                onClick={() => {
+                  setCollapsed((c) => !c);
+                  setSidebarPreview(false);
+                }}
+              >
+                <SidebarToggleIcon aria-hidden="true" strokeWidth={1.8} />
+                {collapsed ? <span className="sidebar-toggle-dot" aria-hidden="true" /> : null}
+              </button>
+            </Tooltip>
+          </div>
           <Space size={12} className="breadcrumb">
             <span>{t("shell.brand")}</span>
             <span className="crumb-separator">/</span>

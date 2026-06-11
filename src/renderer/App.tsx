@@ -300,7 +300,6 @@ export function App() {
     if (!conversationId) return [];
     return getConversationTasks(state, conversationId);
   }, [state, conversationId]);
-  const artifacts = useMemo(() => state.artifacts, [state.artifacts]);
   const tasks = useMemo(() => state.taskOrder.map((taskID) => state.tasks[taskID]).filter(Boolean), [state]);
   const conversations = useMemo(() => getConversationList(state), [state]);
   const sidebarWorkspaces = useMemo(() => {
@@ -389,7 +388,7 @@ export function App() {
       const generateInput: GenerateInput = noProject
         ? { ...values, topic, noProject: true, workspaceId: undefined }
         : { ...values, topic, workspaceId: targetWorkspace?.id };
-      const result = await officecli.generate(withSmartMode(generateInput));
+      const result = await officecli.generate(generateInput);
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
         const actualContext = { ...pending.context, conversationId: result.taskId };
@@ -438,7 +437,6 @@ export function App() {
     } else {
       values.noProject = true;
     }
-    Object.assign(values, withSmartMode(values));
     void submit(values);
   }
 
@@ -581,7 +579,6 @@ export function App() {
         parentTaskId,
         topic,
         prompt,
-        mode: generationModeForDocumentType(documentType),
         enableImages: persistedSettings.defaults.enableImages,
         imageQuality: persistedSettings.defaults.imageQuality,
         referenceImages,
@@ -776,7 +773,6 @@ export function App() {
       ) : null}
       <Shell
         activeNav={activeNav}
-        bridgeStatus={capabilityStatus}
         failed={Boolean(lastError)}
         errorKind={lastError ? errorKind : undefined}
         inspector={sidePanel}
@@ -799,8 +795,6 @@ export function App() {
         {activeNav === "dialogue" ? (
           <DialogueScreen
             tasks={conversationTasks}
-            conversationId={conversationId}
-            artifacts={artifacts}
             newGenerationDraft={newGenerationDraft}
             newChatNudgeKey={newChatNudgeKey}
             workspaces={workspaces}
@@ -857,7 +851,6 @@ function createNewGenerationDraft(input: Partial<GenerateInput> = {}): NewGenera
     documentType: input.documentType ?? defaultGenerateInput.documentType ?? "pptx",
     topic: input.topic ?? "",
     prompt: input.prompt ?? "",
-    mode: input.mode,
     sourceFile: input.sourceFile,
     referenceImages: input.referenceImages,
     imageRatio: input.imageRatio ?? defaultGenerateInput.imageRatio,
@@ -876,21 +869,6 @@ function documentTypeFromTask(task: DesktopTask): GenerateInput["documentType"] 
 
 function isGenerateDocumentType(value: unknown): value is GenerateInput["documentType"] {
   return value === "pptx" || value === "docx" || value === "xlsx" || value === "report" || value === "img" || value === "gif";
-}
-
-function generationModeForDocumentType(documentType: string | undefined): GenerateInput["mode"] | undefined {
-  return documentType === "pptx" || documentType === "docx" || documentType === "xlsx" || documentType === "report"
-    ? "best"
-    : undefined;
-}
-
-function withSmartMode(input: GenerateInput): GenerateInput {
-  const mode = generationModeForDocumentType(input.documentType);
-  if (mode) {
-    return { ...input, mode };
-  }
-  const { mode: _mode, ...rest } = input;
-  return rest;
 }
 
 function errorMessage(error: unknown): string {

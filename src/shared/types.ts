@@ -158,7 +158,6 @@ export interface GenerateInput {
   noProject?: boolean;
   conversationId?: string;
   parentTaskId?: string;
-  mode?: "fast" | "best";
   promptTemplateId?: string;
   sourceFile?: string;
   referenceImages?: string[];

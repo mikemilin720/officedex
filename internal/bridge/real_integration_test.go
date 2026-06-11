@@ -166,7 +166,6 @@ func TestRealOfficeCliGenerateSmoke(t *testing.T) {
 		DocumentType: "pptx",
 		Topic:        "E2E test deck",
 		Prompt:       "Create a 3-slide test deck about OfficeDex e2e testing. Keep it short.",
-		Mode:         "fast",
 		OutputDir:    tempOut,
 		LocalPreview: false,
 	}

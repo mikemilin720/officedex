@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { message as antdMessage } from "antd";
 import type { DesktopAPI, DesktopTask, GenerateInput, WorkspaceSummary } from "../../shared/types";
@@ -913,6 +913,10 @@ describe("DialogueScreen state machine", () => {
     expect(Boolean(scratchCard.compareDocumentPosition(templateTitle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(scratchCard.classList.contains("image-template-scratch-card")).toBe(true);
 
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const pickerRule = css.match(/\.image-template-workspace \.image-template-picker\s*\{[^}]*\}/s)?.[0] ?? "";
+    expect(pickerRule).toContain("padding-top: 1px;");
+
     fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
     expect(document.querySelector(".image-template-form-title")?.textContent).toBe("What should we work on?");
     expect(screen.getByText("Fill in the template")).toBeTruthy();
@@ -981,6 +985,53 @@ describe("DialogueScreen state machine", () => {
     expect(galleryCardRule).toContain("break-inside: avoid;");
     expect(actionsRule).toContain("grid-template-columns: minmax(0, 1fr) auto;");
     expect(actionsOverrideRule).toContain("display: grid;");
+  });
+
+  it("places the image-template headline and document format selector in a full-width header row", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
+    render(
+      <DialogueScreen
+        {...baseProps({
+          workspaces: [{ id: "ws-1", path: "/tmp/ppt-test", name: "ppt-test", active: true, conversations: [] }],
+          newChatTarget: { kind: "workspace", workspaceId: "ws-1" },
+        })}
+        newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }}
+      />,
+    );
+
+    expect(await screen.findByText("Promo")).toBeTruthy();
+    const workspace = document.querySelector(".image-template-workspace");
+    const fullWidthHeader = document.querySelector(".image-template-prompt-header");
+    const formPane = document.querySelector(".image-template-form-pane");
+    const galleryPane = document.querySelector(".image-template-gallery-pane");
+    const formatRow = fullWidthHeader?.querySelector(".format-row");
+
+    expect(workspace?.firstElementChild).toBe(fullWidthHeader);
+    expect(fullWidthHeader?.contains(document.querySelector(".image-template-form-title"))).toBe(true);
+    expect(formatRow).toBeTruthy();
+    expect(formPane?.contains(fullWidthHeader)).toBe(false);
+    expect(formPane?.querySelector(".format-row")).toBeNull();
+    expect(galleryPane).toBeTruthy();
+    expect(fullWidthHeader).toBeTruthy();
+    expect(galleryPane!.compareDocumentPosition(fullWidthHeader!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const workspaceRule = css.match(/\.image-template-workspace\s*\{[^}]*\}/s)?.[0] ?? "";
+    const headerRule = css.match(/\.image-template-prompt-header\s*\{[^}]*\}/s)?.[0] ?? "";
+    const galleryPaneRule = css.match(/\.image-template-workspace \.image-template-gallery-pane\s*\{[^}]*\}/s)?.[0] ?? "";
+    const formPaneRule = css.match(/\.image-template-form-pane\s*\{[^}]*\}/s)?.[0] ?? "";
+    expect(workspaceRule).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
+    expect(headerRule).toContain("grid-column: 1 / -1;");
+    expect(headerRule).toContain("grid-row: 1;");
+    expect(headerRule).toContain("justify-items: center;");
+    expect(headerRule).toContain("text-align: center;");
+    expect(galleryPaneRule).toContain("grid-row: 2;");
+    expect(formPaneRule).toContain("grid-row: 2;");
+
+    const formatRowRule = css.match(/\.image-template-prompt-header \.format-row\s*\{[^}]*\}/s)?.[0] ?? "";
+    const titleRule = css.match(/\.image-template-prompt-header \.fluid-start-title\s*\{[^}]*\}/s)?.[0] ?? "";
+    expect(formatRowRule).toContain("justify-content: center;");
+    expect(titleRule).toContain("justify-content: center;");
   });
 
   it("uses the project headline in the image-template form header", async () => {

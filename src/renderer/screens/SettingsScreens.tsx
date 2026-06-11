@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Progress, Select, Space, Spin, Switch, Tag, message } from "antd";
+import { Button, Input, Modal, Progress, Select, Space, Spin, Switch, Tag, message } from "antd";
 import {
   CommentOutlined,
   CopyOutlined,
@@ -13,10 +13,9 @@ import {
   RocketOutlined,
   SafetyCertificateOutlined,
   SyncOutlined,
-  UserOutlined,
 } from "@ant-design/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MaterialSymbol, StatusDot } from "../components/Shell";
+import { MaterialSymbol } from "../components/Shell";
 import { DiagnosticsPanel } from "../components/DiagnosticsPanel";
 import { officecli } from "../bridge";
 import { useSettings } from "../useSettings";

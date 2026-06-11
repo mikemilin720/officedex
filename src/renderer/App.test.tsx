@@ -724,7 +724,6 @@ describe("App task flow", () => {
             },
           ],
         }]}
-        artifacts={[]}
         busy={false}
         bridgeStatus="connected"
         onSubmit={vi.fn()}
@@ -776,14 +775,6 @@ describe("App task flow", () => {
           ],
           artifact,
         }]}
-        artifacts={[
-          {
-            taskId: "other-task",
-            filePath: "/tmp/other-task.pptx",
-            fileName: "other-task.pptx",
-            documentType: "pptx",
-          },
-        ]}
         busy={false}
         bridgeStatus="connected"
         onSubmit={vi.fn()}
@@ -829,14 +820,6 @@ describe("App task flow", () => {
             },
           ],
         }]}
-        artifacts={[
-          {
-            taskId: "other-task",
-            filePath: "/tmp/other-task.pptx",
-            fileName: "other-task.pptx",
-            documentType: "pptx",
-          },
-        ]}
         busy={false}
         bridgeStatus="connected"
         onSubmit={vi.fn()}

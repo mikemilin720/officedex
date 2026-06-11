@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { ComponentType } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopAPI } from "../../shared/types";
@@ -33,7 +33,6 @@ describe("Shell sidebar layout", () => {
           Shell as unknown as ComponentType<Record<string, unknown>>,
           {
             activeNav: "tasks",
-            bridgeStatus: "connected",
             failed: false,
             tasks: [],
             selectedTaskId: undefined,
@@ -67,7 +66,6 @@ describe("Shell sidebar layout", () => {
           Shell as unknown as ComponentType<Record<string, unknown>>,
           {
             activeNav: "tasks",
-            bridgeStatus: "connected",
             failed: false,
             tasks: [],
             selectedTaskId: undefined,
@@ -108,5 +106,60 @@ describe("Shell sidebar layout", () => {
     expect(settingsRule).not.toContain("border-top");
     expect(settingsRule).not.toContain("padding-top");
     expect(css).toMatch(/\.sidebar-settings::after\s*\{[^}]*background:\s*var\(--n-hairline-soft\);/s);
+  });
+
+  it("uses the topbar as the only sidebar control and reveals the hidden sidebar from the left edge", () => {
+    render(
+      <LocaleProvider value="en">
+        {createElement(
+          Shell as unknown as ComponentType<Record<string, unknown>>,
+          {
+            activeNav: "tasks",
+            failed: false,
+            tasks: [],
+            selectedTaskId: undefined,
+            workspaces: [],
+            chats: [],
+            activeWorkspaceId: undefined,
+            activeWorkspaceName: undefined,
+            selectedConversationId: undefined,
+            onNavChange: vi.fn(),
+            onNewGeneration: vi.fn(),
+            onSelectWorkspace: vi.fn(),
+            onAddWorkspace: vi.fn(),
+            onRevealWorkspace: vi.fn(),
+            onRemoveWorkspace: vi.fn(),
+            onSelectTask: vi.fn(),
+            onDeleteTask: vi.fn(),
+            onDeleteConversation: vi.fn(),
+          },
+          <div />,
+        )}
+      </LocaleProvider>,
+    );
+    const css = readFileSync("src/renderer/styles/shell.css", "utf8");
+    const shell = document.querySelector(".app-shell");
+    const toggle = screen.getByRole("button", { name: /collapse sidebar/i });
+
+    expect(document.querySelector(".sidebar-divider-toggle")).toBeNull();
+    expect(toggle.closest(".topbar-sidebar-slot")).toBeTruthy();
+    expect(toggle.getAttribute("data-sidebar-icon-state")).toBe("expanded");
+
+    fireEvent.click(toggle);
+
+    expect(shell?.classList.contains("sidebar-collapsed")).toBe(true);
+    const expandToggle = screen.getByRole("button", { name: /expand sidebar/i });
+    expect(expandToggle.getAttribute("data-sidebar-icon-state")).toBe("hidden");
+    expect(expandToggle.querySelector(".sidebar-toggle-dot")).toBeTruthy();
+    const hoverZone = document.querySelector(".sidebar-hover-zone");
+    expect(hoverZone).toBeTruthy();
+    fireEvent.mouseEnter(hoverZone!);
+
+    expect(expandToggle.getAttribute("data-sidebar-icon-state")).toBe("preview");
+    expect(css).toMatch(/\.sidebar-collapsed\s*\.sidebar-hover-zone:hover\s*\+\s*\.sidebar/s);
+    expect(css).toMatch(/\.sidebar-collapsed\s*\.sidebar:hover/s);
+    expect(css).toMatch(/\.sidebar-collapsed\.sidebar-preview\s*\.sidebar/s);
+    expect(css).toMatch(/\.topbar\s*\{[^}]*z-index:\s*40;/s);
+    expect(css).toMatch(/\.app-shell\.sidebar-collapsed,[\s\S]*grid-template-columns:\s*0\s+minmax\(0,\s*1fr\)/);
   });
 });
