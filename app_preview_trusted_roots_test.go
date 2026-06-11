@@ -182,6 +182,70 @@ func TestSelectWorkspaceRefreshesPreviewRootsAndGenerationBase(t *testing.T) {
 	}
 }
 
+func TestTaskHistoryRegistersArtifactsFromStoredWorkspaceRoots(t *testing.T) {
+	dir := t.TempDir()
+	defaultWorkspace := filepath.Join(dir, "default-workspace")
+	projectWorkspace := filepath.Join(dir, "project-workspace")
+	if err := os.MkdirAll(defaultWorkspace, 0o755); err != nil {
+		t.Fatalf("mkdir default workspace: %v", err)
+	}
+	if err := os.MkdirAll(projectWorkspace, 0o755); err != nil {
+		t.Fatalf("mkdir project workspace: %v", err)
+	}
+	artifactPath := filepath.Join(projectWorkspace, "generated.png")
+	if err := os.WriteFile(artifactPath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	reg, err := preview.New(preview.RegistryOptions{TrustedRoots: []string{defaultWorkspace}})
+	if err != nil {
+		t.Fatalf("preview.New: %v", err)
+	}
+	store := localstore.New(filepath.Join(dir, "officedex.db"))
+	ctx := context.Background()
+	if err := store.Open(ctx); err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.EnsureWorkspace(ctx, projectWorkspace)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace project: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-image", localstore.TaskContext{
+		WorkspaceID:    project.ID,
+		ConversationID: "conversation-image",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-completed",
+		TaskID:  "task-image",
+		Type:    "task.completed",
+		Payload: map[string]any{
+			"result": map[string]any{
+				"file_path":     artifactPath,
+				"file_name":     "generated.png",
+				"document_type": "png",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RecordEvent: %v", err)
+	}
+	app := &App{
+		workspaceDir:   defaultWorkspace,
+		settingsStore:  settings.New(filepath.Join(dir, "settings.json"), nil),
+		localStore:     store,
+		previewReg:     reg,
+		cachedSettings: settings.Defaults(),
+	}
+
+	if _, err := app.GetTaskHistory(10); err != nil {
+		t.Fatalf("GetTaskHistory: %v", err)
+	}
+	if _, err := app.IssuePreviewToken(types.Artifact{FilePath: artifactPath}); err != nil {
+		t.Fatalf("historical project artifact should be previewable, got %v", err)
+	}
+}
+
 func TestInvalidStoredWorkspaceDoesNotBecomeActive(t *testing.T) {
 	dir := t.TempDir()
 	defaultWorkspace := filepath.Join(dir, "default-workspace")

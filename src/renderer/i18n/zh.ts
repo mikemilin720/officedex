@@ -73,6 +73,7 @@ export const zh: Record<string, string> = {
   "dialogue.imageTemplates.empty": "还没有配置图片模板。请先在 OfficeCLI admin 后台新增并启用模板。",
   "dialogue.imageTemplates.clear": "清除",
   "dialogue.imageTemplates.refresh": "刷新",
+  "dialogue.imageTemplates.scratchTitle": "从空白开始",
   "dialogue.imageTemplates.replaceHint": "模板提示词已填入，请先替换其中的产品、品牌、场景和风格元素，再生成你想要的图片。",
   "dialogue.imageTemplates.confirmReplaceTitle": "替换当前提示词？",
   "dialogue.imageTemplates.confirmReplaceBody": "选择这个模板会清空你当前写的提示词，并填入模板提示词。",

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.32] - 2026-06-11
+
+### Added
+- Project and chat conversations can now be deleted from the sidebar.
+- Image generation now includes a Start from scratch option alongside image templates.
+
+### Changed
+- Image templates now open in a split workspace with a photo-wall picker and a dedicated form area.
+- Smart generation is now the default starting point, with a cleaner prompt flow for reviewed generation.
+- Image template editing now keeps the preview available without leaving the editing flow.
+
+### Fixed
+- Questions from a running task now appear as a clear answer composer below progress.
+- Historical project artifacts can be previewed after returning to a stored workspace.
+- The first running conversation no longer duplicates when project history refreshes after an early start event.
+
 ## [0.5.30] - 2026-06-10
 
 ### Changed

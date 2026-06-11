@@ -1082,6 +1082,21 @@ func (a *App) ListChats() ([]types.WorkspaceConversationSummary, error) {
 	return a.localStore.QueryChatSummaries(ctx, 50)
 }
 
+func (a *App) DeleteConversation(conversationID string) error {
+	if a.localStore == nil {
+		return errors.New("workspace store is unavailable")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("conversation id is empty")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.localStore.RemoveConversation(ctx, conversationID)
+}
+
 func (a *App) AddWorkspace(workspacePath string) (types.WorkspaceSummary, error) {
 	cleaned, err := cleanExistingWorkspaceDir(workspacePath)
 	if err != nil {
@@ -1138,13 +1153,16 @@ func (a *App) RemoveWorkspace(workspaceID string) error {
 	if err := a.localStore.RemoveWorkspace(ctx, workspaceID); err != nil {
 		return err
 	}
+	activePath := a.workspaceDir
 	if active {
 		if err := a.localStore.ClearActiveWorkspace(ctx); err != nil {
 			return err
 		}
-		if err := a.applyActiveWorkspace(a.workspaceDir); err != nil {
-			return err
-		}
+	} else if ws, err := a.localStore.ActiveWorkspace(ctx); err == nil && ws.Path != "" {
+		activePath = ws.Path
+	}
+	if err := a.applyActiveWorkspace(activePath); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1212,6 +1230,9 @@ func (a *App) GetTaskHistory(limit int) ([]types.TaskHistoryEntry, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := a.refreshPreviewTrustedRoots(a.cachedSettings); err != nil {
+		return nil, err
 	}
 	entries, err := a.localStore.QueryRecentTaskHistory(ctx, limit)
 	if err != nil {
@@ -2715,7 +2736,11 @@ func (a *App) applyActiveWorkspace(workspacePath string) error {
 		return err
 	}
 	if a.previewReg != nil {
-		if err := a.previewReg.SetTrustedRoots(previewTrustedRoots(workspacePath, types.UserSettings{})); err != nil {
+		ctx := a.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := a.previewReg.SetTrustedRoots(a.previewTrustedRoots(ctx, workspacePath, a.cachedSettings)); err != nil {
 			return err
 		}
 	}
@@ -2769,7 +2794,17 @@ func (a *App) refreshPreviewTrustedRoots(s types.UserSettings) error {
 	if a.previewReg == nil {
 		return nil
 	}
-	roots, ok := previewTrustedRootsForUpdate(a.workspaceDir, s)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	activeWorkspace := a.workspaceDir
+	if a.localStore != nil {
+		if ws, err := a.localStore.ActiveWorkspace(ctx); err == nil && strings.TrimSpace(ws.Path) != "" {
+			activeWorkspace = ws.Path
+		}
+	}
+	roots, ok := a.previewTrustedRootsForUpdate(ctx, activeWorkspace, s)
 	if !ok {
 		return nil
 	}
@@ -2777,6 +2812,33 @@ func (a *App) refreshPreviewTrustedRoots(s types.UserSettings) error {
 		return fmt.Errorf("refresh preview trusted roots: %w", err)
 	}
 	return nil
+}
+
+func (a *App) previewTrustedRoots(ctx context.Context, activeWorkspace string, s types.UserSettings) []string {
+	roots := previewTrustedRoots(a.workspaceDir, s)
+	if cleaned, err := cleanExistingWorkspaceDir(activeWorkspace); err == nil {
+		roots = append(roots, cleaned)
+	}
+	if a.localStore == nil {
+		return roots
+	}
+	summaries, err := a.localStore.QueryWorkspaceSummaries(ctx, 0)
+	if err != nil {
+		return roots
+	}
+	for _, summary := range summaries {
+		if cleaned, err := cleanExistingWorkspaceDir(summary.Path); err == nil {
+			roots = append(roots, cleaned)
+		}
+	}
+	return roots
+}
+
+func (a *App) previewTrustedRootsForUpdate(ctx context.Context, activeWorkspace string, s types.UserSettings) ([]string, bool) {
+	if hasInvalidWorkspaceDir(s) {
+		return nil, false
+	}
+	return a.previewTrustedRoots(ctx, activeWorkspace, s), true
 }
 
 func previewTrustedRoots(workspaceDir string, s types.UserSettings) []string {

@@ -264,7 +264,7 @@ function questionFromPayload(payload: BridgeEvent["payload"]): TaskQuestion | un
     id: String(payload.id || ""),
     question: String(payload.question || ""),
     options,
-    allowFreeform: Boolean(payload.allow_freeform),
+    allowFreeform: payload.allow_freeform === true || payload.allowFreeform === true,
   };
 }
 

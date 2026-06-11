@@ -79,6 +79,18 @@ export async function installBridgeMock(page: Page, options: BridgeMockOptions =
         record("listChats", args);
         return [];
       },
+      deleteConversation: async (...args: unknown[]) => {
+        record("deleteConversation", args);
+        const conversationId = String(args[0] ?? "");
+        workspaceState = workspaceState.map((workspace) => ({
+          ...workspace,
+          conversations: workspace.conversations.filter((conversation) => {
+            const record = conversation as { conversationId?: unknown };
+            return record.conversationId !== conversationId;
+          }),
+        }));
+        return undefined;
+      },
       addWorkspace: async (...args: unknown[]) => {
         record("addWorkspace", args);
         const path = String(args[0] ?? "");

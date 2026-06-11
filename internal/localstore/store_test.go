@@ -274,6 +274,73 @@ func TestRemoveWorkspaceMovesConversationsToChats(t *testing.T) {
 	}
 }
 
+func TestRemoveConversationDeletesTasksEventsAndArtifacts(t *testing.T) {
+	store := newTempStore(t)
+	ctx := context.Background()
+	workspacePath := filepath.Join(t.TempDir(), "ppt-test")
+
+	workspace, err := store.EnsureWorkspace(ctx, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.EnsureConversation(ctx, workspace.ID, "conv-ppt", "Create deck"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	for _, taskID := range []string{"task-1", "task-2"} {
+		if err := store.RecordTaskContext(ctx, taskID, TaskContext{
+			WorkspaceID:    workspace.ID,
+			ConversationID: "conv-ppt",
+		}); err != nil {
+			t.Fatalf("RecordTaskContext(%s): %v", taskID, err)
+		}
+		if err := store.RecordEvent(types.BridgeEvent{
+			EventID: "event-" + taskID,
+			TaskID:  taskID,
+			Type:    "task.completed",
+			Payload: map[string]any{"document_type": "pptx", "topic": "Create deck"},
+		}); err != nil {
+			t.Fatalf("RecordEvent(%s): %v", taskID, err)
+		}
+		if err := store.RecordArtifact(types.Artifact{
+			TaskID:       taskID,
+			FilePath:     fmt.Sprintf("/tmp/%s.pptx", taskID),
+			FileName:     taskID + ".pptx",
+			DocumentType: "pptx",
+		}); err != nil {
+			t.Fatalf("RecordArtifact(%s): %v", taskID, err)
+		}
+	}
+
+	if err := store.RemoveConversation(ctx, "conv-ppt"); err != nil {
+		t.Fatalf("RemoveConversation: %v", err)
+	}
+
+	workspaces, err := store.QueryWorkspaceSummaries(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryWorkspaceSummaries: %v", err)
+	}
+	if len(workspaces) != 1 || len(workspaces[0].Conversations) != 0 {
+		t.Fatalf("workspace conversations = %#v, want none", workspaces)
+	}
+	history, err := store.QueryRecentTaskHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryRecentTaskHistory: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("history = %#v, want empty", history)
+	}
+	var eventCount, artifactCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events`).Scan(&eventCount); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifacts`).Scan(&artifactCount); err != nil {
+		t.Fatalf("count artifacts: %v", err)
+	}
+	if eventCount != 0 || artifactCount != 0 {
+		t.Fatalf("eventCount=%d artifactCount=%d, want 0/0", eventCount, artifactCount)
+	}
+}
+
 func TestSchemaMigrationFromV1DB(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "officedex.db")

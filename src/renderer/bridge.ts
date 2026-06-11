@@ -161,6 +161,16 @@ function createBrowserPreviewAPI(): DesktopAPI {
     getDefaultWorkspaceDir: async () => "(default workspace inside desktop app)",
     listWorkspaces: async () => browserWorkspaces,
     listChats: async () => browserChats,
+    deleteConversation: async (conversationId: string) => {
+      browserWorkspaces = browserWorkspaces.map((workspace) => ({
+        ...workspace,
+        conversations: workspace.conversations.filter((conversation) => conversation.conversationId !== conversationId),
+      }));
+      const chatIndex = browserChats.findIndex((conversation) => conversation.conversationId === conversationId);
+      if (chatIndex >= 0) {
+        browserChats.splice(chatIndex, 1);
+      }
+    },
     addWorkspace: async (path: string) => {
       const workspace: WorkspaceSummary = {
         id: `browser-${browserWorkspaces.length + 1}`,
@@ -555,6 +565,11 @@ function createWailsAPI(): DesktopAPI {
       const fn = optionalWailsFunction<() => Promise<unknown>>(["List", "Chats"].join(""));
       if (!fn) return [];
       return normaliseConversationSummaries(await fn());
+    },
+    deleteConversation: async (conversationId: string) => {
+      const fn = optionalWailsFunction<(conversationId: string) => Promise<void>>(["Delete", "Conversation"].join(""));
+      if (!fn) throw new Error("Conversation deletion requires a newer OfficeDex runtime.");
+      await fn(conversationId);
     },
     addWorkspace: async (path: string) => {
       const fn = optionalWailsFunction<(path: string) => Promise<unknown>>(["Add", "Workspace"].join(""));

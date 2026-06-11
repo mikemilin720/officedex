@@ -119,7 +119,7 @@ test.describe("Generation flow", () => {
     await expect(page.getByText("User cancelled").first()).toBeVisible();
   });
 
-  test("task.question option click calls respond with the picked option id", async ({ page }) => {
+  test("task.question places prompt above options and calls respond with the picked option id", async ({ page }) => {
     await installBridgeMock(page);
     await page.goto("/");
     await expect(page.getByPlaceholder(/enter what you want to generate/i)).toBeVisible();
@@ -133,11 +133,23 @@ test.describe("Generation flow", () => {
           { id: "yes", label: "Yes" },
           { id: "no", label: "No" },
         ],
-        allow_freeform: false,
+        allow_freeform: true,
       },
     });
 
     await expect(page.getByText(/Include financials/i)).toBeVisible();
+    await expect(page.getByText("Include financials?")).toHaveCount(1);
+    const progressBox = await page.locator(".fluid-progress-panel").boundingBox();
+    const promptBox = await page.locator(".question-composer-prompt").boundingBox();
+    const yesBox = await page.getByRole("button", { name: "Yes" }).boundingBox();
+    const freeformBox = await page.getByPlaceholder(/or add other instructions/i).boundingBox();
+    expect(progressBox).not.toBeNull();
+    expect(promptBox).not.toBeNull();
+    expect(yesBox).not.toBeNull();
+    expect(freeformBox).not.toBeNull();
+    expect(promptBox!.y).toBeGreaterThan(progressBox!.y + progressBox!.height);
+    expect(yesBox!.y).toBeGreaterThan(promptBox!.y);
+    expect(freeformBox!.y).toBeGreaterThan(yesBox!.y);
     await page.getByRole("button", { name: "Yes" }).click();
     await expect.poll(async () => (await getBridgeCalls(page, "respond")).length).toBe(1);
     const calls = await getBridgeCalls(page, "respond");
@@ -162,6 +174,28 @@ test.describe("Generation flow", () => {
       documentType: "img",
       referenceImages: ["/tmp/ref-a.png", "/tmp/ref-b.jpg"],
     });
+  });
+
+  test("Image template start area does not show its own vertical scrollbar", async ({ page }) => {
+    await installBridgeMock(page, { settings: { documentType: "img" } });
+    await page.addInitScript(() => {
+      localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+        version: 1,
+        templates: Array.from({ length: 8 }, (_, index) => ({
+          slug: `local-template-${index + 1}`,
+          title: `Local Template ${index + 1}`,
+          description: "Local image template",
+          promptPreset: "Create a polished image.",
+          sortOrder: index,
+          enabled: true,
+        })),
+      }));
+    });
+    await page.goto("/");
+
+    await expect(page.locator(".fluid-start-card .image-template-picker")).toBeVisible();
+    await expect(page.getByText("Local Template 1")).toBeVisible();
+    await expect(page.locator(".fluid-start-card")).toHaveCSS("overflow-y", "hidden");
   });
 
   test("Running state Cancel button calls officecli.cancel with the task id", async ({ page }) => {

@@ -22,7 +22,7 @@ import {
   UserOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties } from "react";
 import { getAttachmentSpec } from "../../shared/types";
 import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
@@ -37,7 +37,7 @@ import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
 import { ReportIssueDialog } from "../components/ReportIssueDialog";
 import { Check as CheckIcon, Copy as CopyIcon } from "lucide-react";
-import { loadLocalImageTemplates, saveLocalImageTemplates } from "../localImageTemplates";
+import { loadLocalImageTemplates } from "../localImageTemplates";
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -269,6 +269,28 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
   const assembledPreview = hasSlots && selectedTemplate
     ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
     : "";
+  const projectHeading = targetWorkspace ? (
+    <h1 className="fluid-start-title image-template-form-title">
+      <span>{t("dialogue.startTitleInProjectPrefix")}</span>
+      <Dropdown menu={projectMenu} trigger={["click"]}>
+        <button type="button" className="project-picker-button" aria-label={targetWorkspace.name}>
+          {targetWorkspace.name}
+          <DownOutlined />
+        </button>
+      </Dropdown>
+    </h1>
+  ) : (
+    <>
+      <h1 className="image-template-form-title">{t("dialogue.startTitleNoProject")}</h1>
+      <Dropdown menu={projectMenu} trigger={["click"]}>
+        <button type="button" className="project-picker-button project-picker-secondary" aria-label={t("dialogue.projectPicker.noProject")}>
+          <GlobalOutlined />
+          {t("dialogue.projectPicker.noProject")}
+          <DownOutlined />
+        </button>
+      </Dropdown>
+    </>
+  );
   const attachments = useAttachments(docType, {
     sourceFile: draft.sourceFile ?? null,
     referenceImages: draft.referenceImages ?? [],
@@ -400,21 +422,6 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
     apply();
   }
 
-  function deleteLocalImageTemplate(template: ImagePromptTemplate) {
-    if (template.visibility !== "local") return;
-    const targetId = String(template.id);
-    const remainingLocalTemplates = loadLocalImageTemplates().filter((item) => String(item.id) !== targetId);
-    saveLocalImageTemplates(remainingLocalTemplates);
-    setImageTemplates((items) => items.filter((item) => !(item.visibility === "local" && String(item.id) === targetId)));
-    if (selectedTemplateId === targetId) {
-      setSelectedTemplateId(undefined);
-      setSlotValues({});
-      setSlotErrors({});
-      setRawDecoupled(false);
-      setRawOpen(false);
-    }
-  }
-
   function handleSlotChange(key: string, value: string) {
     const next = { ...slotValues, [key]: value };
     setSlotValues(next);
@@ -434,6 +441,16 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
     if (selectedTemplate) seedSlots(selectedTemplate);
   }
 
+  function clearImageTemplate() {
+    setSelectedTemplateId(undefined);
+    setSlotValues({});
+    setSlotErrors({});
+    setRawDecoupled(false);
+    setRawOpen(false);
+    form.setFieldsValue({ prompt: "", promptTemplateId: undefined });
+    onDraftChange({ prompt: "" });
+  }
+
   function validateSlots(): { ok: boolean; firstError?: string } {
     if (!hasSlots || rawDecoupled) return { ok: true };
     const errs: Record<string, string> = {};
@@ -450,37 +467,84 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
     return { ok: firstKey === undefined, firstError: firstKey ? errs[firstKey] : undefined };
   }
 
+  const composerActions = (detached: boolean) => (
+    <div className={`composer-actions ${detached ? "image-template-actions-footer" : ""}`}>
+      <Space>
+        {attachments.sourceWorkbookSpec ? (
+          <Tooltip
+            title={
+              attachments.sourceWorkbookSpec.required
+                ? t("dialogue.attach.sourceFile.required", { label: attachments.sourceWorkbookSpec.label, ext: attachments.sourceWorkbookSpec.extensions[0] })
+                : attachments.sourceWorkbookSpec.label
+            }
+          >
+            <Button icon={<PaperClipOutlined />} onClick={attachments.pickSourceFile} aria-label={t("dialogue.attach.sourceFile.aria")} />
+          </Tooltip>
+        ) : null}
+        {attachments.referenceImagesSpec ? (
+          <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
+            <Button
+              className="reference-image-upload-button"
+              icon={<MaterialSymbol name="image" />}
+              onClick={attachments.pickReferenceImages}
+              disabled={attachments.isReferenceLimitReached}
+              aria-label={t("dialogue.attach.referenceImages.attach")}
+            >
+              {t("dialogue.attach.referenceImages.uploadCta")}
+            </Button>
+          </Tooltip>
+        ) : null}
+        <Tooltip title={t("dialogue.attach.advancedOptions")}>
+          <Button icon={<MaterialSymbol name="tune" />} disabled />
+        </Tooltip>
+      </Space>
+      <Button
+        type="primary"
+        htmlType={detached ? "button" : "submit"}
+        icon={<SendOutlined />}
+        loading={busy}
+        onClick={detached ? () => form.submit() : undefined}
+      >
+        {t("dialogue.generate")}
+      </Button>
+    </div>
+  );
+
   return (
     <div
-      className="fluid-new-task"
+      className={`fluid-new-task ${docType === "img" ? "image-template-workspace" : ""}`}
       ref={bindDropTarget}
     >
-      <section className="fluid-start-card">
-        <div className="fluid-spark">
-          <MaterialSymbol name="auto_awesome" />
-        </div>
-        {targetWorkspace ? (
-          <h1 className="fluid-start-title">
-            <span>{t("dialogue.startTitleInProjectPrefix")}</span>
-            <Dropdown menu={projectMenu} trigger={["click"]}>
-              <button type="button" className="project-picker-button" aria-label={targetWorkspace.name}>
-                {targetWorkspace.name}
-                <DownOutlined />
-              </button>
-            </Dropdown>
-          </h1>
-        ) : (
-          <>
-            <h1>{t("dialogue.startTitleNoProject")}</h1>
-            <Dropdown menu={projectMenu} trigger={["click"]}>
-              <button type="button" className="project-picker-button project-picker-secondary" aria-label={t("dialogue.projectPicker.noProject")}>
-                <GlobalOutlined />
-                {t("dialogue.projectPicker.noProject")}
-                <DownOutlined />
-              </button>
-            </Dropdown>
-          </>
+      <section className={`fluid-start-card ${docType === "img" ? "image-template-gallery-pane" : ""}`}>
+        {docType === "img" ? null : (
+          <div className="fluid-spark">
+            <MaterialSymbol name="auto_awesome" />
+          </div>
         )}
+        {docType !== "img" ? (
+          targetWorkspace ? (
+            <h1 className="fluid-start-title">
+              <span>{t("dialogue.startTitleInProjectPrefix")}</span>
+              <Dropdown menu={projectMenu} trigger={["click"]}>
+                <button type="button" className="project-picker-button" aria-label={targetWorkspace.name}>
+                  {targetWorkspace.name}
+                  <DownOutlined />
+                </button>
+              </Dropdown>
+            </h1>
+          ) : (
+            <>
+              <h1>{t("dialogue.startTitleNoProject")}</h1>
+              <Dropdown menu={projectMenu} trigger={["click"]}>
+                <button type="button" className="project-picker-button project-picker-secondary" aria-label={t("dialogue.projectPicker.noProject")}>
+                  <GlobalOutlined />
+                  {t("dialogue.projectPicker.noProject")}
+                  <DownOutlined />
+                </button>
+              </Dropdown>
+            </>
+          )
+        ) : null}
         {docType === "img" ? (
           <div className="fluid-start-template-list">
             <ImageTemplatePicker
@@ -489,8 +553,7 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
               loading={templatesLoading}
               error={templatesError}
               onSelect={applyImageTemplate}
-              onDeleteLocal={deleteLocalImageTemplate}
-              onClear={() => setSelectedTemplateId(undefined)}
+              onClear={clearImageTemplate}
               onRefresh={loadImageTemplates}
               t={t}
             />
@@ -518,7 +581,12 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
           </>
         )}
       </section>
-      <div className="fluid-command-footer">
+      <div className={`fluid-command-footer ${docType === "img" ? "image-template-form-pane" : ""}`}>
+        {docType === "img" ? (
+          <div className="image-template-form-header">
+            {projectHeading}
+          </div>
+        ) : null}
         <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
           onDraftChange({
             documentType: normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType),
@@ -633,59 +701,39 @@ function FluidNewGeneration({ draft, busy, workspaces, newChatTarget, onSubmit, 
               onAdd={attachments.pickReferenceImages}
             />
           ) : null}
-          <div className="composer-actions">
-            <Space>
-              {attachments.sourceWorkbookSpec ? (
-                <Tooltip
-                  title={
-                    attachments.sourceWorkbookSpec.required
-                      ? t("dialogue.attach.sourceFile.required", { label: attachments.sourceWorkbookSpec.label, ext: attachments.sourceWorkbookSpec.extensions[0] })
-                      : attachments.sourceWorkbookSpec.label
-                  }
-                >
-                  <Button icon={<PaperClipOutlined />} onClick={attachments.pickSourceFile} aria-label={t("dialogue.attach.sourceFile.aria")} />
-                </Tooltip>
-              ) : null}
-              {attachments.referenceImagesSpec ? (
-                <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
-                  <Button
-                    className="reference-image-upload-button"
-                    icon={<MaterialSymbol name="image" />}
-                    onClick={attachments.pickReferenceImages}
-                    disabled={attachments.isReferenceLimitReached}
-                    aria-label={t("dialogue.attach.referenceImages.attach")}
-                  >
-                    {t("dialogue.attach.referenceImages.uploadCta")}
-                  </Button>
-                </Tooltip>
-              ) : null}
-              <Tooltip title={t("dialogue.attach.advancedOptions")}>
-                <Button icon={<MaterialSymbol name="tune" />} disabled />
-              </Tooltip>
-            </Space>
-            <Button type="primary" htmlType="submit" icon={<SendOutlined />} loading={busy}>
-              {t("dialogue.generate")}
-            </Button>
-          </div>
+          {docType === "img" ? null : composerActions(false)}
         </Form>
       </div>
+      {docType === "img" ? composerActions(true) : null}
     </div>
   );
 }
 
-function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onDeleteLocal, onClear, onRefresh, t }: {
+function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, onClear, onRefresh, t }: {
   templates: ImagePromptTemplate[];
   selectedId?: string;
   loading: boolean;
   error: string;
   onSelect: (template: ImagePromptTemplate) => void;
-  onDeleteLocal: (template: ImagePromptTemplate) => void;
   onClear: () => void;
   onRefresh: () => void;
   t: Translator;
 }) {
+  const templateColumns = [[], [], []] as ImagePromptTemplate[][];
+  templates.forEach((template, index) => {
+    templateColumns[index % templateColumns.length].push(template);
+  });
+
   return (
     <div className="image-template-picker" aria-label={t("dialogue.imageTemplates.label")}>
+      <button
+        type="button"
+        className={`image-template-scratch-card ${selectedId ? "" : "image-template-scratch-card-selected"}`}
+        aria-pressed={!selectedId}
+        onClick={() => onClear()}
+      >
+        <span>{t("dialogue.imageTemplates.scratchTitle")}</span>
+      </button>
       <div className="image-template-picker-head">
         <span>{t("dialogue.imageTemplates.label")}</span>
         <div className="image-template-picker-actions">
@@ -711,64 +759,38 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
       ) : templates.length === 0 ? (
         <div className="image-template-status">{t("dialogue.imageTemplates.empty")}</div>
       ) : (
-        <div className="image-template-grid">
-          {templates.map((template) => {
-            const id = String(template.id);
-            const selected = selectedId === id;
-            const isLocal = template.visibility === "local";
-            const scopeLabel = isLocal ? t("dialogue.imageTemplates.scope.local") : template.visibility === "user_private" ? t("dialogue.imageTemplates.scope.private") : t("dialogue.imageTemplates.scope.public");
-            return (
-              <div
-                key={id}
-                className={`image-template-card ${selected ? "image-template-card-selected" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="image-template-card-main"
-                  aria-pressed={selected}
-                  onClick={() => onSelect(template)}
-                >
-                  <ImageTemplateThumbnail src={template.thumbnailUrl}>
-                    <ImageTemplateScopeIcon
-                      label={scopeLabel}
-                      scope={isLocal ? "local" : template.visibility === "user_private" ? "private" : "public"}
-                    />
-                  </ImageTemplateThumbnail>
-                  <strong>{template.title}</strong>
-                  {template.description ? <span className="image-template-description">{template.description}</span> : null}
-                </button>
-                {isLocal ? (
-                  <button
-                    type="button"
-                    className="image-template-delete"
-                    onClick={() => onDeleteLocal(template)}
-                    aria-label={t("dialogue.imageTemplates.deleteLocalAria", { title: template.title })}
-                    title={t("dialogue.imageTemplates.deleteLocalAria", { title: template.title })}
+        <div className="image-template-grid image-template-vertical-wall">
+          {templateColumns.map((column, columnIndex) => (
+            <div className="image-template-masonry-column" key={columnIndex}>
+              {column.map((template) => {
+                const id = String(template.id);
+                const selected = selectedId === id;
+                return (
+                  <div
+                    key={id}
+                    className={`image-template-card ${selected ? "image-template-card-selected" : ""}`}
                   >
-                    <DeleteOutlined />
-                  </button>
-                ) : null}
-              </div>
-            );
-          })}
+                    <button
+                      type="button"
+                      className="image-template-card-main"
+                      aria-pressed={selected}
+                      onClick={() => onSelect(template)}
+                    >
+                      <ImageTemplateThumbnail src={template.thumbnailUrl} />
+                      <strong className="image-template-card-title">{template.title}</strong>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function ImageTemplateScopeIcon({ scope, label }: { scope: "public" | "private" | "local"; label: string }) {
-  const Icon = scope === "public" ? GlobalOutlined : scope === "private" ? UserOutlined : FolderOpenOutlined;
-  return (
-    <Tooltip title={label}>
-      <span className={`image-template-scope-icon image-template-scope-icon-${scope}`} role="img" aria-label={label}>
-        <Icon />
-      </span>
-    </Tooltip>
-  );
-}
-
-function ImageTemplateThumbnail({ src, children }: { src?: string; children?: ReactNode }) {
+function ImageTemplateThumbnail({ src }: { src?: string }) {
   const [failedSrc, setFailedSrc] = useState<string | undefined>();
   const showImage = Boolean(src && failedSrc !== src);
 
@@ -782,11 +804,10 @@ function ImageTemplateThumbnail({ src, children }: { src?: string; children?: Re
       style={showImage ? { "--image-template-thumb-src": `url("${src}")` } as CSSProperties : undefined}
     >
       {showImage ? (
-        <img src={src} alt="" draggable={false} style={{ objectFit: "contain" }} onError={() => setFailedSrc(src)} />
+        <img src={src} alt="" draggable={false} onError={() => setFailedSrc(src)} />
       ) : (
         <div className="image-template-thumb-placeholder" aria-hidden="true" />
       )}
-      {children}
     </div>
   );
 }
@@ -1025,7 +1046,7 @@ function ActiveTaskRound({ task, onForceCancel }: {
   }, [task.id, task.stalledSince, capability?.enabled]);
 
   const latestEvent = task.events.at(-1);
-  const latestText = eventText(latestEvent);
+  const latestText = task.status === "question" ? "" : eventText(latestEvent);
 
   return (
     <>
@@ -1375,6 +1396,7 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
   const [continuationPrompt, setContinuationPrompt] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [planReviewForm] = Form.useForm<{ revision: string }>();
+  const [questionForm] = Form.useForm<{ answer: string }>();
   const referenceImagesSpec = getAttachmentSpec(isGIFGeneration ? "gif" : "img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
 
@@ -1452,13 +1474,13 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
   // Question: show answer form
   if (status === "question" && latestTask.question) {
     const question = latestTask.question;
-    const [form] = Form.useForm<{ answer: string }>();
     async function answer(optionId?: string, value?: string) {
       await officecli.respond({ taskId: latestTask.id, questionId: question.id, optionId, answer: value });
     }
     return (
-      <div className="docked-composer readonly">
-        <Space wrap>
+      <div className="docked-composer question-composer">
+        <div className="question-composer-prompt">{question.question}</div>
+        <Space className="question-composer-options" wrap>
           {(question.options.length ? question.options : [
             { id: "include", label: t("dialogue.question.option.include") },
             { id: "skip", label: t("dialogue.question.option.skip") },
@@ -1469,7 +1491,7 @@ function ConversationFooter({ latestTask, busy, onContinueGeneration, onContinue
           ))}
         </Space>
         {question.allowFreeform ? (
-          <Form form={form} className="inline-answer" onFinish={(values) => answer(undefined, values.answer)}>
+          <Form form={questionForm} className="inline-answer" onFinish={(values) => answer(undefined, values.answer)}>
             <Form.Item name="answer" noStyle>
               <Input placeholder={t("dialogue.question.inputPlaceholder")} />
             </Form.Item>

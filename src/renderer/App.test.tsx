@@ -153,6 +153,79 @@ describe("App task flow", () => {
     await waitFor(() => expect(api.listChats).toHaveBeenCalledTimes(2));
   });
 
+  it("deletes a persisted project conversation from the sidebar", async () => {
+    installBridgeMock();
+    const api = window.officecli as DesktopAPI & { deleteConversation?: ReturnType<typeof vi.fn> };
+    const projectConversation = {
+      conversationId: "conv-ppt-test",
+      firstTaskId: "task-ppt-1",
+      latestTaskId: "task-ppt-2",
+      status: "completed" as const,
+      title: "Create a realistic pitch deck",
+      documentType: "pptx",
+      updatedAt: "2026-06-10T10:00:00Z",
+    };
+    api.listWorkspaces = vi.fn()
+      .mockResolvedValueOnce([{
+        id: "ws-ppt-test",
+        name: "ppt-test",
+        path: "/Users/test/ppt-test",
+        active: true,
+        conversations: [projectConversation],
+      }])
+      .mockResolvedValueOnce([{
+        id: "ws-ppt-test",
+        name: "ppt-test",
+        path: "/Users/test/ppt-test",
+        active: true,
+        conversations: [],
+      }]);
+    api.listChats = vi.fn(async () => []);
+    api.deleteConversation = vi.fn(async () => undefined);
+    const { App } = await import("./App");
+
+    render(<App />);
+    await screen.findByRole("button", { name: /Create a realistic pitch deck/ });
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+
+    await waitFor(() => expect(api.deleteConversation).toHaveBeenCalledWith("conv-ppt-test"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Create a realistic pitch deck/ })).toBeNull());
+  });
+
+  it("does not switch to a fatal error screen when the conversation delete bridge is unavailable", async () => {
+    installBridgeMock();
+    const api = window.officecli as Omit<DesktopAPI, "deleteConversation"> & { deleteConversation?: DesktopAPI["deleteConversation"] };
+    const projectConversation = {
+      conversationId: "conv-ppt-test",
+      firstTaskId: "task-ppt-1",
+      latestTaskId: "task-ppt-1",
+      status: "completed" as const,
+      title: "Create a realistic pitch deck",
+      documentType: "pptx",
+      updatedAt: "2026-06-10T10:00:00Z",
+    };
+    api.listWorkspaces = vi.fn(async () => [{
+      id: "ws-ppt-test",
+      name: "ppt-test",
+      path: "/Users/test/ppt-test",
+      active: true,
+      conversations: [projectConversation],
+    }]);
+    api.listChats = vi.fn(async () => []);
+    delete api.deleteConversation;
+    const { App } = await import("./App");
+
+    render(<App />);
+    await screen.findByRole("button", { name: /Create a realistic pitch deck/ });
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Create a realistic pitch deck/ })).toBeNull());
+    expect(screen.queryByText(/Conversation deletion requires/i)).toBeNull();
+    expect(screen.getByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+  });
+
   it("switches from submit spinner to the running task when task.started arrives before generate resolves", async () => {
     const bridge = installBridgeMock();
     bridge.generate.mockImplementation(() => new Promise(() => undefined));
@@ -196,6 +269,51 @@ describe("App task flow", () => {
     expect(await screen.findByText("Processing your request...")).toBeTruthy();
     expect(screen.getAllByText("Create a stuck DOCX").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: /What should we work on/i })).toBeNull();
+  });
+
+  it("does not duplicate the first running conversation when persisted workspace summaries arrive after an early task.started event", async () => {
+    const bridge = installBridgeMock();
+    const api = window.officecli as DesktopAPI;
+    const workspace = {
+      id: "ws-default",
+      name: "workspace",
+      path: "/Users/test/Library/Application Support/OfficeDex/workspace",
+      active: true,
+    };
+    api.listWorkspaces = vi.fn()
+      .mockResolvedValueOnce([{ ...workspace, conversations: [] }])
+      .mockResolvedValue([{ ...workspace, conversations: [{
+        conversationId: "task-started-before-return",
+        firstTaskId: "task-started-before-return",
+        latestTaskId: "task-started-before-return",
+        status: "running" as const,
+        title: "Create a stuck DOCX",
+        documentType: "docx",
+        updatedAt: "2026-06-11T07:50:11Z",
+      }] }]);
+    bridge.generate.mockImplementation(() => new Promise(() => undefined));
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
+      target: { value: "Create a stuck DOCX" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
+    await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      bridge.emit({
+        event_id: "event-started-before-return",
+        task_id: "task-started-before-return",
+        type: "task.started",
+        payload: { document_type: "docx", topic: "Create a stuck DOCX", message: "Task accepted" },
+      });
+    });
+
+    await waitFor(() => expect(api.listWorkspaces).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(document.querySelectorAll(".workspace-conversations .history-item")).toHaveLength(1));
   });
 
   it("switches to a local pending task immediately when generate does not resolve and no bridge event arrives", async () => {
@@ -1405,6 +1523,7 @@ function installBridgeMock() {
       conversations: [],
     }]),
     listChats: vi.fn(async () => []),
+    deleteConversation: vi.fn(async () => undefined),
     addWorkspace: vi.fn(async (path: string) => ({
       id: "ws-picked",
       name: path.split("/").pop() || "workspace",

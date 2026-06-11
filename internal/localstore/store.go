@@ -347,6 +347,65 @@ func (s *Store) RemoveWorkspaceByPath(ctx context.Context, workspacePath string)
 	return true, nil
 }
 
+func (s *Store) RemoveConversation(ctx context.Context, conversationID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("localstore: not open")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return fmt.Errorf("localstore: conversation id is empty")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM tasks WHERE conversation_id = ?`, conversationID)
+	if err != nil {
+		return fmt.Errorf("localstore: query conversation tasks: %w", err)
+	}
+	var taskIDs []string
+	for rows.Next() {
+		var taskID string
+		if err := rows.Scan(&taskID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("localstore: scan conversation task: %w", err)
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("localstore: begin remove conversation: %w", err)
+	}
+	for _, taskID := range taskIDs {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM task_events WHERE task_id = ?`, taskID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("localstore: remove conversation events: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM artifacts WHERE task_id = ?`, taskID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("localstore: remove conversation artifacts: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM task_credit_records WHERE task_id = ?`, taskID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("localstore: remove conversation credit records: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE conversation_id = ?`, conversationID); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("localstore: remove conversation tasks: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversations WHERE id = ?`, conversationID); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("localstore: remove conversation: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("localstore: commit remove conversation: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ClearActiveWorkspace(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

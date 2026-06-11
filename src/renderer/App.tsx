@@ -39,6 +39,13 @@ type PendingGenerate = {
   parentTaskId?: string;
 };
 
+function materializePendingContext(pending: PendingGenerate, taskId: string): TaskContextPatch | undefined {
+  if (pending.context?.conversationId !== pending.localTaskId) {
+    return pending.context;
+  }
+  return { ...pending.context, conversationId: taskId };
+}
+
 export function App() {
   const [state, setState] = useState<TaskState>(() => createInitialTaskState());
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
@@ -156,7 +163,7 @@ export function App() {
         let next = applyTaskEvent(current, event);
         if (event.task_id && pending && shouldReplaceLocalTask) {
           next = deleteTask(next, pending.localTaskId);
-          next = attachUserInput(next, event.task_id, pending.input, pending.parentTaskId, pending.context);
+          next = attachUserInput(next, event.task_id, pending.input, pending.parentTaskId, materializePendingContext(pending, event.task_id));
         }
         return next;
       });
@@ -674,13 +681,26 @@ export function App() {
     setActiveNav("login");
   }, []);
 
-  const handleDeleteConversation = useCallback((targetConversationId: string) => {
+  const handleDeleteConversation = useCallback(async (targetConversationId: string) => {
     setState((current) => deleteConversation(current, targetConversationId));
+    setWorkspaces((current) => current.map((workspace) => ({
+      ...workspace,
+      conversations: workspace.conversations.filter((conversation) => conversation.conversationId !== targetConversationId),
+    })));
+    setChats((current) => current.filter((conversation) => conversation.conversationId !== targetConversationId));
     setSelectedTaskID((current) => {
       if (current.kind !== "task") return current;
       return state.tasks[current.id]?.conversationId === targetConversationId ? { kind: "auto" } : current;
     });
-  }, [state.tasks]);
+    try {
+      await officecli.deleteConversation(targetConversationId);
+      refreshProjectLists();
+      clearError();
+    } catch (error) {
+      const text = errorMessage(error);
+      void message.error(text);
+    }
+  }, [clearError, refreshProjectLists, state.tasks]);
 
   const openInlinePreview = useCallback(async (artifact: Artifact) => {
     if (previewGrant) {

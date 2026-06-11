@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { message as antdMessage } from "antd";
@@ -290,6 +291,74 @@ describe("DialogueScreen state machine", () => {
     expect(respondSpy).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: "task-q2", questionId: "q-2", answer: "Add appendix" }),
     );
+  });
+
+  it("places the active question between progress and the answer controls", () => {
+    const task: DesktopTask = {
+      id: "task-q-layout",
+      conversationId: "task-q-layout",
+      status: "question",
+      events: [],
+      stages: [
+        { id: "analyze", label: "Analyzing request", status: "completed" },
+        { id: "outline", label: "Drafting outline", status: "active" },
+      ],
+      question: {
+        id: "q-layout",
+        question: "Who is this 10-page deck for?",
+        options: [
+          { id: "newcomers", label: "Newcomers" },
+          { id: "experienced", label: "Experienced users" },
+        ],
+        allowFreeform: true,
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const progressPanel = document.querySelector(".fluid-progress-panel")!;
+    const composer = document.querySelector(".question-composer") as HTMLElement;
+    const prompt = within(composer).getByText("Who is this 10-page deck for?");
+    const firstOption = within(composer).getByRole("button", { name: "Newcomers" });
+    const freeform = within(composer).getByPlaceholderText(/or add other instructions/i);
+
+    expect(composer).toBeTruthy();
+    expect(screen.getAllByText("Who is this 10-page deck for?")).toHaveLength(1);
+    expect(Boolean(progressPanel.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(prompt.compareDocumentPosition(firstOption) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(firstOption.compareDocumentPosition(freeform) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("renders a question after the latest task transitions from running", async () => {
+    const runningTask: DesktopTask = {
+      id: "task-q-transition",
+      conversationId: "task-q-transition",
+      status: "running",
+      events: [{ task_id: "task-q-transition", type: "task.started", payload: { document_type: "pptx" } }],
+      documentType: "pptx",
+    };
+    const questionTask: DesktopTask = {
+      ...runningTask,
+      status: "question",
+      events: [
+        ...runningTask.events,
+        { task_id: "task-q-transition", type: "task.question", payload: { question: "Who is the audience?" } },
+      ],
+      question: {
+        id: "q-audience",
+        question: "Who is the audience?",
+        options: [{ id: "leadership", label: "Leadership" }],
+        allowFreeform: false,
+      },
+    };
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[runningTask]} />);
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[questionTask]} />);
+
+    expect(screen.getByRole("button", { name: "Leadership" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Leadership" }));
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-q-transition", questionId: "q-audience", optionId: "leadership" }),
+    ));
   });
 
   it("Plan review state approves or revises the proposed plan via respond", async () => {
@@ -631,11 +700,11 @@ describe("DialogueScreen state machine", () => {
     const localTitle = await screen.findByText("Local Admission");
     const platformTitle = await screen.findByText("Poster");
     expect(Boolean(localTitle.compareDocumentPosition(platformTitle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(screen.getByLabelText("Local")).toBeTruthy();
+    expect(screen.queryByLabelText("Local")).toBeNull();
     expect(screen.queryByText("Disabled Local")).toBeNull();
   });
 
-  it("shows complete image-template previews with icon tooltips instead of scope pills and copy buttons", async () => {
+  it("shows image-template wall cards with only thumbnails and titles", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "public-poster", title: "Public Poster", description: "Cinematic poster", promptPreset: "Public prompt", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true, visibility: "platform_public" },
       { id: 8, slug: "private-poster", title: "Private Poster", description: "Private poster", promptPreset: "Private prompt", thumbnailUrl: "/api/image-templates/8/thumbnail", sortOrder: 20, enabled: true, visibility: "user_private" },
@@ -648,16 +717,22 @@ describe("DialogueScreen state machine", () => {
     expect(screen.queryByText("Public")).toBeNull();
     expect(screen.queryByText("My template")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Copy to my templates$/i })).toBeNull();
-    expect((document.querySelector(".image-template-thumb img") as HTMLImageElement).style.objectFit).toBe("contain");
+    expect(screen.queryByLabelText("Public")).toBeNull();
+    expect(screen.queryByLabelText("My template")).toBeNull();
+    expect(screen.queryByText("Cinematic poster")).toBeNull();
+    expect(screen.queryByText("Private poster")).toBeNull();
+    expect(document.querySelectorAll(".image-template-card-title")).toHaveLength(2);
+    expect((document.querySelector(".image-template-thumb img") as HTMLImageElement).style.objectFit).toBe("");
 
-    fireEvent.mouseEnter(screen.getByLabelText("Public"));
-    expect((await screen.findByRole("tooltip")).textContent).toContain("Public");
-    fireEvent.mouseLeave(screen.getByLabelText("Public"));
-
-    fireEvent.mouseEnter(screen.getByLabelText("My template"));
-    await waitFor(() => {
-      expect(screen.getAllByRole("tooltip").some((tooltip) => tooltip.textContent?.includes("My template"))).toBe(true);
-    });
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const thumbImgRule = css.match(/\.image-template-thumb img\s*\{[^}]*\}/s)?.[0] ?? "";
+    const workspaceCardRule = css.match(/\.image-template-workspace \.image-template-card\s*\{[^}]*\}/s)?.[0] ?? "";
+    const cardMainRule = css.match(/\.image-template-card-main\s*\{[^}]*\}/s)?.[0] ?? "";
+    expect(thumbImgRule).toContain("height: auto;");
+    expect(thumbImgRule).not.toContain("height: 100%");
+    expect(workspaceCardRule).toContain("align-self: start;");
+    expect(cardMainRule).toContain("align-content: start;");
+    expect(css).not.toMatch(/\.image-template-workspace \.image-template-card:nth-child\([^)]*\) \.image-template-thumb\s*\{[^}]*aspect-ratio:/s);
   });
 
   it("shows a polished placeholder for local image templates without thumbnails", async () => {
@@ -678,7 +753,7 @@ describe("DialogueScreen state machine", () => {
     expect(document.querySelector(".image-template-thumb img")).toBeNull();
   });
 
-  it("deletes local image templates from the picker and local storage only", async () => {
+  it("does not show local template management controls in the photo wall", async () => {
     localStorage.setItem("officedex:local-image-templates", JSON.stringify({
       version: 1,
       templates: [
@@ -694,25 +769,11 @@ describe("DialogueScreen state machine", () => {
 
     expect(await screen.findByText("Local Admission")).toBeTruthy();
     expect(screen.getByText("Local Poster")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Delete local template Local Admission$/i }));
-
-    await waitFor(() => expect(screen.queryByText("Local Admission")).toBeNull());
-    expect(screen.getByText("Local Poster")).toBeTruthy();
     expect(screen.getByText("Poster")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Delete local template Local Admission$/i })).toBeNull();
+    expect(screen.queryByText("Stored locally")).toBeNull();
     expect(listImageTemplatesSpy).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(localStorage.getItem("officedex:local-image-templates") ?? "{}")).toEqual({
-      version: 1,
-      templates: [
-        {
-          slug: "local-poster",
-          title: "Local Poster",
-          description: "",
-          promptPreset: "Poster prompt",
-          sortOrder: 1,
-          enabled: true,
-        },
-      ],
-    });
+    expect(JSON.parse(localStorage.getItem("officedex:local-image-templates") ?? "{}").templates).toHaveLength(2);
   });
 
   it("replaces failed image-template thumbnails with the same placeholder", async () => {
@@ -841,22 +902,104 @@ describe("DialogueScreen state machine", () => {
     expect(document.querySelector(".fluid-command-bar .image-template-picker")).toBeNull();
   });
 
-  it("keeps the new generation command bar in a fixed footer outside the start content", async () => {
+  it("places a full-width scratch generation card before image templates", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
 
-    expect(await screen.findByText("Promo")).toBeTruthy();
+    const scratchCard = await screen.findByRole("button", { name: /Start from scratch/i });
+    const picker = document.querySelector(".image-template-picker");
+    const templateTitle = await screen.findByText("Promo");
+    expect(picker?.firstElementChild).toBe(scratchCard);
+    expect(Boolean(scratchCard.compareDocumentPosition(templateTitle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(scratchCard.classList.contains("image-template-scratch-card")).toBe(true);
+
     fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
+    expect(document.querySelector(".image-template-form-title")?.textContent).toBe("What should we work on?");
+    expect(screen.getByText("Fill in the template")).toBeTruthy();
 
+    fireEvent.click(scratchCard);
+    expect(document.querySelector(".image-template-form-title")?.textContent).toBe("What should we work on?");
+    expect(screen.queryByText("Fill in the template")).toBeNull();
+    expect((screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("lays out image templates as a 1:1 photo wall and form workspace", async () => {
+    const masonryTemplates = [0, 1, 2, 3].map((index) => ({
+      ...SLOTTED_TEMPLATE,
+      id: 80 + index,
+      slug: `promo-${index + 1}`,
+      title: `Promo ${index + 1}`,
+    }));
+    listImageTemplatesSpy.mockResolvedValueOnce(masonryTemplates);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    expect(await screen.findByText("Promo 1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Promo 1/i }));
+
+    const workspace = document.querySelector(".image-template-workspace");
+    const galleryPane = document.querySelector(".image-template-gallery-pane");
+    const formPane = document.querySelector(".image-template-form-pane");
+    const actionsFooter = document.querySelector(".image-template-actions-footer");
     const commandBar = document.querySelector(".fluid-command-bar");
-    const footer = commandBar?.closest(".fluid-command-footer");
-    const startCard = document.querySelector(".fluid-start-card");
+    const templateGrid = document.querySelector(".image-template-grid");
+    const masonryColumns = document.querySelectorAll(".image-template-masonry-column");
+    const uploadButton = screen.getByRole("button", { name: /Attach reference images/i });
+    const generateButton = screen.getByRole("button", { name: /Generate$/i });
 
+    expect(workspace).toBeTruthy();
+    expect(galleryPane).toBeTruthy();
+    expect(formPane).toBeTruthy();
+    expect(actionsFooter).toBeTruthy();
     expect(commandBar).toBeTruthy();
-    expect(footer).toBeTruthy();
-    expect(startCard).toBeTruthy();
-    expect(startCard?.contains(commandBar)).toBe(false);
-    expect(footer?.parentElement).toBe(document.querySelector(".fluid-new-task"));
+    expect(workspace?.contains(galleryPane)).toBe(true);
+    expect(workspace?.contains(formPane)).toBe(true);
+    expect(formPane?.contains(commandBar)).toBe(true);
+    expect(formPane?.contains(actionsFooter)).toBe(false);
+    expect(actionsFooter?.parentElement).toBe(workspace);
+    expect(actionsFooter?.contains(uploadButton)).toBe(true);
+    expect(actionsFooter?.contains(generateButton)).toBe(true);
+    expect(Boolean(uploadButton.compareDocumentPosition(generateButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(templateGrid?.classList.contains("image-template-vertical-wall")).toBe(true);
+    expect(masonryColumns).toHaveLength(3);
+    expect(masonryColumns[0].textContent).toContain("Promo 1");
+    expect(masonryColumns[0].textContent).toContain("Promo 4");
+    expect(masonryColumns[1].textContent).toContain("Promo 2");
+    expect(masonryColumns[2].textContent).toContain("Promo 3");
+    expect(document.querySelector(".image-template-form-title")?.textContent).toBe("What should we work on?");
+
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const galleryGridRule = css.match(/\.image-template-workspace \.image-template-grid\s*\{[^}]*\}/s)?.[0] ?? "";
+    const galleryCardRule = css.match(/\.image-template-workspace \.image-template-card\s*\{[^}]*\}/s)?.[0] ?? "";
+    const masonryColumnRule = css.match(/\.image-template-masonry-column\s*\{[^}]*\}/s)?.[0] ?? "";
+    const actionsRule = css.match(/\.image-template-actions-footer\s*\{[^}]*\}/s)?.[0] ?? "";
+    const actionsOverrideRule = css.match(/\.composer-actions\.image-template-actions-footer\s*\{[^}]*\}/s)?.[0] ?? "";
+    expect(galleryGridRule).toContain("display: grid;");
+    expect(galleryGridRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
+    expect(galleryGridRule).not.toContain("column-count:");
+    expect(masonryColumnRule).toContain("display: grid;");
+    expect(masonryColumnRule).toContain("align-content: start;");
+    expect(galleryCardRule).toContain("break-inside: avoid;");
+    expect(actionsRule).toContain("grid-template-columns: minmax(0, 1fr) auto;");
+    expect(actionsOverrideRule).toContain("display: grid;");
+  });
+
+  it("uses the project headline in the image-template form header", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
+    render(
+      <DialogueScreen
+        {...baseProps({
+          workspaces: [{ id: "ws-1", path: "/tmp/ppt-test", name: "ppt-test", active: true, conversations: [] }],
+          newChatTarget: { kind: "workspace", workspaceId: "ws-1" },
+        })}
+        newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }}
+      />,
+    );
+
+    expect(await screen.findByText("Promo")).toBeTruthy();
+    const header = document.querySelector(".image-template-form-header")!;
+    expect(within(header as HTMLElement).getByText("What should we work on in")).toBeTruthy();
+    expect(within(header as HTMLElement).getByRole("button", { name: "ppt-test" })).toBeTruthy();
+    expect(within(header as HTMLElement).queryByText(/^Image templates$/i)).toBeNull();
   });
 
   it("shows an antd spinner and loading text while image templates are pending", async () => {

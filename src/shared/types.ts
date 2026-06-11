@@ -548,6 +548,7 @@ export interface DesktopAPI {
   getDefaultWorkspaceDir(): Promise<string>;
   listWorkspaces(): Promise<WorkspaceSummary[]>;
   listChats(): Promise<WorkspaceConversationSummary[]>;
+  deleteConversation(conversationId: string): Promise<void>;
   addWorkspace(path: string): Promise<WorkspaceSummary>;
   selectWorkspace(workspaceId: string): Promise<WorkspaceSummary>;
   removeWorkspace(workspaceId: string): Promise<void>;

@@ -85,6 +85,22 @@ describe("taskState", () => {
     });
   });
 
+  it("accepts renderer-facing camelCase question payload fields", () => {
+    const state = applyTaskEvent(createInitialTaskState(), {
+      event_id: "event-1",
+      task_id: "task-1",
+      type: "task.question",
+      payload: {
+        id: "question-1",
+        question: "Who is this deck for?",
+        options: [],
+        allowFreeform: true,
+      },
+    });
+
+    expect(state.tasks["task-1"].question?.allowFreeform).toBe(true);
+  });
+
   it("tracks plan review events before generation continues", () => {
     const state = applyTaskEvent(createInitialTaskState(), {
       event_id: "event-plan",
