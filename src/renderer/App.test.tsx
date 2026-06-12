@@ -116,6 +116,39 @@ describe("App task flow", () => {
     expect(bridge.generate).toHaveBeenCalledWith(expect.objectContaining({ prompt: "Generate a new quarterly review PPT" }));
   });
 
+  it("keeps a blank new chat selected when an existing running task updates", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    act(() => {
+      bridge.emit({
+        event_id: "event-running-started",
+        task_id: "task-running",
+        type: "task.started",
+        payload: { document_type: "pptx", topic: "Background deck" },
+      });
+    });
+    expect(await screen.findByText("Processing your request...")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+
+    act(() => {
+      bridge.emit({
+        event_id: "event-running-progress",
+        task_id: "task-running",
+        type: "task.progress",
+        payload: { stage: "Writing slides" },
+      });
+    });
+
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+    expect(screen.queryByText("Processing your request...")).toBeNull();
+    expect(screen.getByRole("button", { name: /Background deck/ }).classList.contains("active")).toBe(false);
+  });
+
   it("nudges the prompt input instead of resetting when New chat is clicked on an existing blank composer", async () => {
     const bridge = installBridgeMock();
     const { App } = await import("./App");

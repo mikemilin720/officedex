@@ -174,10 +174,8 @@ export function App() {
           setSelectedTaskID({ kind: "task", id: event.task_id });
           setBusy(false);
           refreshProjectLists();
-        } else {
-          setSelectedTaskID((current) => current.kind === "none" ? { kind: "task", id: event.task_id! } : current);
+          setActiveNav("dialogue");
         }
-        setActiveNav("dialogue");
       }
       if (event.type === "task.completed" || event.type === "task.failed" || event.type === "task.cancelled") {
         if (event.type === "task.completed") {
