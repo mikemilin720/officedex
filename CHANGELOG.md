@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.36] - 2026-06-12
+
+### Fixed
+- Smart generation now keeps reviewed plans available while handling richer follow-up questions from the bundled OfficeCLI runtime.
+
 ## [0.5.35] - 2026-06-12
 
 ### Changed

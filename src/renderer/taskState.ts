@@ -1,4 +1,4 @@
-import type { Artifact, BridgeEvent, DesktopTask, ImageRatio, ProviderSnapshot, StageState, TaskQuestion, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
 
 export interface TaskState {
   tasks: Record<string, DesktopTask>;
@@ -189,21 +189,15 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
       nextTask.artifact = artifact;
     }
     nextTask.imageWatermark = imageWatermarkFromPayload(event.payload);
-    nextTask.question = undefined;
-    nextTask.plan = undefined;
     nextTask.stalledSince = undefined;
     applyCreditPayload(nextTask, event.payload);
   }
   if (event.type === "task.failed") {
     nextTask.error = stringPayload(event, "message") || stringPayload(event, "error") || "Task failed";
-    nextTask.question = undefined;
-    nextTask.plan = undefined;
     nextTask.stalledSince = undefined;
     applyCreditPayload(nextTask, event.payload);
   }
   if (event.type === "task.cancelled") {
-    nextTask.question = undefined;
-    nextTask.plan = undefined;
     nextTask.stalledSince = undefined;
   }
 
@@ -238,34 +232,71 @@ function statusFromEvent(type: string, fallback: DesktopTask["status"]): Desktop
 function planFromPayload(payload: BridgeEvent["payload"]) {
   const id = String(payload?.id || payload?.plan_id || "");
   const revision = Number(payload?.revision);
-  return {
+  const result: TaskPlan = {
     id,
     markdown: String(payload?.markdown || payload?.plan_markdown || ""),
     revision: Number.isFinite(revision) ? revision : 0,
   };
+  const ep = payload?.execution_prompt || payload?.executionPrompt;
+  if (typeof ep === "string" && ep) {
+    result.executionPrompt = ep;
+  }
+  return result;
 }
 
 function questionFromPayload(payload: BridgeEvent["payload"]): TaskQuestion | undefined {
   if (!payload) {
     return undefined;
   }
+
+  function parseOption(value: unknown): { id: string; label: string; description?: string; recommended?: boolean } | null {
+    if (!value || typeof value !== "object") return null;
+    const opt = value as Record<string, unknown>;
+    const id = String(opt.id || opt.label || "");
+    const label = String(opt.label || opt.id || "");
+    if (!id || !label) return null;
+    const result: { id: string; label: string; description?: string; recommended?: boolean } = { id, label };
+    const desc = opt.description;
+    if (typeof desc === "string" && desc) result.description = desc;
+    const rec = opt.recommended;
+    if (rec === true || rec === "true") result.recommended = true;
+    return result;
+  }
+
   const options = Array.isArray(payload.options)
-    ? payload.options
-        .map((option) => {
-          if (!option || typeof option !== "object") {
-            return null;
-          }
-          const value = option as Record<string, unknown>;
-          return { id: String(value.id || value.label || ""), label: String(value.label || value.id || "") };
-        })
-        .filter((option): option is { id: string; label: string } => Boolean(option?.id && option.label))
+    ? payload.options.map(parseOption).filter((o): o is NonNullable<typeof o> => o !== null)
     : [];
-  return {
+
+  const question: TaskQuestion = {
     id: String(payload.id || ""),
     question: String(payload.question || ""),
     options,
     allowFreeform: payload.allow_freeform === true || payload.allowFreeform === true,
   };
+
+  const rawQuestions = payload.questions as Array<unknown> | undefined;
+  if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+    question.questions = rawQuestions
+      .map((rawQ) => {
+        if (!rawQ || typeof rawQ !== "object") return null;
+        const q = rawQ as Record<string, unknown>;
+        const qOptions = Array.isArray(q.options)
+          ? q.options.map(parseOption).filter((o): o is NonNullable<typeof o> => o !== null)
+          : [];
+        return {
+          id: String(q.id || ""),
+          question: String(q.question || ""),
+          options: qOptions,
+          allowFreeform: q.allow_freeform === true || q.allowFreeform === true,
+        };
+      })
+      .filter((q): q is NonNullable<typeof q> => q !== null && !!q.id);
+
+    const ci = payload.current_index ?? payload.currentIndex;
+    question.currentIndex = typeof ci === "number" ? ci : 0;
+  }
+
+  return question;
 }
 
 function artifactFromPayload(taskID: string, payload: BridgeEvent["payload"]): Artifact | undefined {

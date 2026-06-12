@@ -187,11 +187,25 @@ export interface ModifyInput {
   outputDir?: string;
 }
 
+export interface TaskQuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+  recommended?: boolean;
+}
+
 export interface TaskQuestion {
   id: string;
   question: string;
-  options: Array<{ id: string; label: string }>;
+  options: Array<TaskQuestionOption>;
   allowFreeform: boolean;
+  questions?: Array<{
+    id: string;
+    question: string;
+    options: Array<TaskQuestionOption>;
+    allowFreeform: boolean;
+  }>;
+  currentIndex?: number;
 }
 
 export type StageStatus = "pending" | "active" | "completed" | "failed";
@@ -298,6 +312,7 @@ export interface TaskPlan {
   id: string;
   markdown: string;
   revision: number;
+  executionPrompt?: string;
 }
 
 export interface ImageWatermarkTaskMetadata {
