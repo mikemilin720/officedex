@@ -138,22 +138,27 @@ test.describe("Generation flow", () => {
     });
 
     await expect(page.getByText(/Include financials/i)).toBeVisible();
+    await expect(page.getByText("Q1")).toBeVisible();
     await expect(page.getByText("Include financials?")).toHaveCount(1);
     const progressBox = await page.locator(".fluid-progress-panel").boundingBox();
     const promptBox = await page.locator(".question-composer-prompt").boundingBox();
     const yesBox = await page.getByRole("button", { name: "Yes" }).boundingBox();
-    const freeformBox = await page.getByPlaceholder(/or add other instructions/i).boundingBox();
+    const noBox = await page.getByRole("button", { name: "No" }).boundingBox();
+    const freeformBox = await page.getByPlaceholder(/custom answer if none of the options fit/i).boundingBox();
     expect(progressBox).not.toBeNull();
     expect(promptBox).not.toBeNull();
     expect(yesBox).not.toBeNull();
+    expect(noBox).not.toBeNull();
     expect(freeformBox).not.toBeNull();
     expect(promptBox!.y).toBeGreaterThan(progressBox!.y + progressBox!.height);
     expect(yesBox!.y).toBeGreaterThan(promptBox!.y);
-    expect(freeformBox!.y).toBeGreaterThan(yesBox!.y);
+    expect(noBox!.y).toBeGreaterThan(yesBox!.y);
+    expect(freeformBox!.y).toBeGreaterThan(noBox!.y);
     await page.getByRole("button", { name: "Yes" }).click();
     await expect.poll(async () => (await getBridgeCalls(page, "respond")).length).toBe(1);
     const calls = await getBridgeCalls(page, "respond");
     expect(calls[0][0]).toMatchObject({ taskId: "mock-task-q", questionId: "q-1", optionId: "yes" });
+    expect(calls[0][0]).not.toHaveProperty("answer");
   });
 
   test("Image documentType accepts reference images via openMultiFileDialog and submits referenceImages", async ({ page }) => {

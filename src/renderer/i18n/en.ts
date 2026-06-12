@@ -147,7 +147,7 @@ export const en: Record<string, string> = {
   "dialogue.question.placeholderQuestion": "Would you like to include last quarter's financial comparison data?",
   "dialogue.question.option.include": "Include",
   "dialogue.question.option.skip": "Exclude",
-  "dialogue.question.inputPlaceholder": "Or add other instructions",
+  "dialogue.question.inputPlaceholder": "Type a custom answer if none of the options fit",
   "dialogue.question.previous": "Previous question",
   "dialogue.question.next": "Next question",
   "dialogue.question.progress": "Question {current} of {total}",

@@ -402,10 +402,17 @@ func (a *App) Modify(input types.ModifyInput) (GenerateResult, error) {
 
 // RespondInput is the renderer payload for the respond binding.
 type RespondInput struct {
-	TaskID     string `json:"taskId"`
-	QuestionID string `json:"questionId,omitempty"`
+	TaskID     string               `json:"taskId"`
+	QuestionID string               `json:"questionId,omitempty"`
+	OptionID   string               `json:"optionId,omitempty"`
+	Answer     string               `json:"answer,omitempty"`
+	Answers    []RespondAnswerInput `json:"answers,omitempty"`
+}
+
+type RespondAnswerInput struct {
+	QuestionID string `json:"questionId"`
 	OptionID   string `json:"optionId,omitempty"`
-	Answer     string `json:"answer,omitempty"`
+	Answer     string `json:"answer"`
 }
 
 // Respond forwards a user answer back to the running task.
@@ -414,11 +421,20 @@ func (a *App) Respond(input RespondInput) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	answers := make([]bridge.RespondAnswer, 0, len(input.Answers))
+	for _, answer := range input.Answers {
+		answers = append(answers, bridge.RespondAnswer{
+			QuestionID: answer.QuestionID,
+			OptionID:   answer.OptionID,
+			Answer:     answer.Answer,
+		})
+	}
 	return client.RespondTask(a.ctx, bridge.RespondParams{
 		TaskID:     input.TaskID,
 		QuestionID: input.QuestionID,
 		OptionID:   input.OptionID,
 		Answer:     input.Answer,
+		Answers:    answers,
 	})
 }
 

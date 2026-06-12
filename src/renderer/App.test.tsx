@@ -438,7 +438,7 @@ describe("App task flow", () => {
 
     expect(await screen.findByText("Task Cancelled")).toBeTruthy();
     expect(screen.getAllByText("User cancelled the task").length).toBeGreaterThan(0);
-    expect(screen.getByText("task.cancelled")).toBeTruthy();
+    expect(screen.getByText("cancelled")).toBeTruthy();
   });
 
   it("shows real bridge tasks in Recent Tasks and reopens the selected task dialogue", async () => {

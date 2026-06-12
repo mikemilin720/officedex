@@ -167,7 +167,7 @@ export const zh: Record<string, string> = {
   "dialogue.question.placeholderQuestion": "是否需要纳入上季度的财务对比数据？",
   "dialogue.question.option.include": "纳入",
   "dialogue.question.option.skip": "跳过",
-  "dialogue.question.inputPlaceholder": "或补充其他说明",
+  "dialogue.question.inputPlaceholder": "如果上方选项都不合适，可在这里手动输入",
   "dialogue.question.previous": "上一个问题",
   "dialogue.question.next": "下一个问题",
   "dialogue.question.progress": "第 {current} / {total} 个问题",

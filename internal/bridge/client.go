@@ -727,6 +727,7 @@ func (c *Client) RespondTask(ctx context.Context, params RespondParams) ([]byte,
 		"question_id": params.QuestionID,
 		"option_id":   params.OptionID,
 		"answer":      params.Answer,
+		"answers":     params.Answers,
 	})
 }
 
@@ -748,6 +749,13 @@ type RespondParams struct {
 	QuestionID string
 	OptionID   string
 	Answer     string
+	Answers    []RespondAnswer
+}
+
+type RespondAnswer struct {
+	QuestionID string `json:"question_id"`
+	OptionID   string `json:"option_id,omitempty"`
+	Answer     string `json:"answer"`
 }
 
 func (c *Client) readStdout(transport Transport) {

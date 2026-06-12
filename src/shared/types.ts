@@ -194,6 +194,12 @@ export interface TaskQuestionOption {
   recommended?: boolean;
 }
 
+export interface TaskQuestionAnswer {
+  questionId: string;
+  optionId?: string;
+  answer: string;
+}
+
 export interface TaskQuestion {
   id: string;
   question: string;
@@ -534,7 +540,7 @@ export interface DesktopAPI {
   createImageTemplatePublishRequest(input: CreateImageTemplatePublishRequestInput): Promise<ImageTemplatePublishRequest>;
   generate(input: GenerateInput): Promise<{ taskId: string; sessionId: string; status: string }>;
   modify(input: ModifyInput): Promise<{ taskId: string; sessionId: string; status: string }>;
-  respond(input: { taskId: string; questionId?: string; optionId?: string; answer?: string }): Promise<unknown>;
+  respond(input: { taskId: string; questionId?: string; optionId?: string; answer?: string; answers?: TaskQuestionAnswer[] }): Promise<unknown>;
   cancel(taskId: string): Promise<unknown>;
   openPath(filePath: string): Promise<void>;
   showItemInFolder(filePath: string): Promise<void>;

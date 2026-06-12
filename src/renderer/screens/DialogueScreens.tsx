@@ -24,7 +24,7 @@ import {
 } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type FormEvent } from "react";
 import { getAttachmentSpec } from "../../shared/types";
-import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, TaskQuestionAnswer, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
@@ -1406,20 +1406,22 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
         <span>{t("dialogue.history.taskIdLabel")}</span>
         <strong>{task.id}</strong>
       </div>
-      <div className="terminal-events">
-        <h3>{t("dialogue.terminal.eventsHeading")}</h3>
-        <Timeline
-          items={eventsForTimeline(task.events, t).map((event) => ({
-            color: event.color,
-            content: (
-              <div className="timeline-copy">
-                <strong>{event.title}</strong>
-                <span>{event.meta}</span>
-              </div>
-            ),
-          }))}
-        />
-      </div>
+      {failed ? (
+        <div className="terminal-events">
+          <h3>{t("dialogue.terminal.eventsHeading")}</h3>
+          <Timeline
+            items={eventsForTimeline(task.events, t).map((event) => ({
+              color: event.color,
+              content: (
+                <div className="timeline-copy">
+                  <strong>{event.title}</strong>
+                  <span>{event.meta}</span>
+                </div>
+              ),
+            }))}
+          />
+        </div>
+      ) : null}
       <ReportIssueDialog open={reportOpen} taskId={task.id} onClose={() => setReportOpen(false)} />
     </div>
   );
@@ -1427,19 +1429,21 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
 
 /* ─── Multi-Question Composer ─── */
 
-function MultiQuestionComposer({ task }: { task: DesktopTask }) {
+function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onForceCancel?: (taskId: string) => void }) {
   const t = useT();
   const question = task.question;
   const questions = question?.questions;
-  const isMulti = Array.isArray(questions) && questions.length > 1;
-  const totalQuestions = isMulti ? questions.length : 1;
+  const questionSet = Array.isArray(questions) && questions.length > 0 ? questions : undefined;
+  const isPlanQuestionSet = Boolean(questionSet);
+  const isMulti = Boolean(questionSet && questionSet.length > 1);
+  const totalQuestions = questionSet ? questionSet.length : 1;
   const [currentIndex, setCurrentIndex] = useState(() => question?.currentIndex ?? 0);
-  const [drafts, setDrafts] = useState<Record<string, { optionId?: string; freeform: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { optionId?: string; answer: string; freeform: string }>>({});
   const [freeformValue, setFreeformValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const currentQ = isMulti ? questions[currentIndex] : question;
-  const currentDraft = drafts[currentQ?.id ?? ""] ?? { freeform: "" };
+  const currentQ = questionSet ? questionSet[currentIndex] : question;
+  const currentDraft = drafts[currentQ?.id ?? ""] ?? { answer: "", freeform: "" };
 
   useEffect(() => {
     setCurrentIndex(question?.currentIndex ?? 0);
@@ -1453,18 +1457,44 @@ function MultiQuestionComposer({ task }: { task: DesktopTask }) {
 
   async function answerQuestion(optionId?: string, value?: string) {
     if (!currentQ || submitting) return;
+    const answeredQuestion = currentQ;
+    const answeredIndex = currentIndex;
+    const optionAnswer = optionId ? currentQ.options.find((option) => option.id === optionId)?.label ?? optionId : "";
+    const answer = value?.trim() || optionAnswer;
+    if (!answer) return;
+    const shouldAdvance = Boolean(isPlanQuestionSet && answeredIndex < totalQuestions - 1);
+    const shouldBatchSubmit = Boolean(isPlanQuestionSet && !shouldAdvance);
+    const nextDrafts = {
+      ...drafts,
+      [answeredQuestion.id]: { optionId, answer, freeform: optionId ? "" : answer },
+    };
     setSubmitting(true);
     try {
-      setDrafts((prev) => ({
-        ...prev,
-        [currentQ.id]: { optionId, freeform: value ?? "" },
-      }));
-      await officecli.respond({
-        taskId: task.id,
-        questionId: currentQ.id,
-        optionId,
-        answer: value,
-      });
+      setDrafts(nextDrafts);
+      if (shouldAdvance) {
+        setCurrentIndex((index) => Math.max(index, answeredIndex + 1));
+        return;
+      }
+      if (shouldBatchSubmit && questionSet && question) {
+        await officecli.respond({
+          taskId: task.id,
+          questionId: question.id,
+          answers: buildQuestionAnswers(questionSet, nextDrafts),
+        });
+      } else {
+        await officecli.respond({
+          taskId: task.id,
+          questionId: answeredQuestion.id,
+          ...(optionId ? { optionId } : {}),
+          ...(optionId ? {} : { answer }),
+        });
+      }
+    } catch (err) {
+      if (shouldAdvance) {
+        setCurrentIndex(answeredIndex);
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`Response failed: ${msg}`);
     } finally {
       setSubmitting(false);
     }
@@ -1475,14 +1505,20 @@ function MultiQuestionComposer({ task }: { task: DesktopTask }) {
     const selectedOptionId = draft ? undefined : currentDraft.optionId;
     setDrafts((prev) => ({
       ...prev,
-      [currentQ?.id ?? ""]: { optionId: selectedOptionId, freeform: draft || currentDraft.freeform },
+      [currentQ?.id ?? ""]: {
+        optionId: selectedOptionId,
+        answer: draft || currentDraft.answer,
+        freeform: draft || currentDraft.freeform,
+      },
     }));
     setCurrentIndex(index);
   }
 
   function submitFreeform(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    answerQuestion(undefined, freeformValue);
+    const answer = freeformValue.trim();
+    if (!answer) return;
+    answerQuestion(undefined, answer);
   }
 
   if (!currentQ) return null;
@@ -1515,24 +1551,28 @@ function MultiQuestionComposer({ task }: { task: DesktopTask }) {
         </div>
       ) : null}
 
-      <div className="question-composer-prompt">{currentQ.question}</div>
+      <div className="question-composer-prompt">
+        <span className="question-composer-badge">Q{currentIndex + 1}</span>
+        <span className="question-composer-title">{currentQ.question}</span>
+      </div>
 
-      <Space className="question-composer-options" wrap>
+      <div className="question-composer-options">
         {(currentQ.options.length > 0 ? currentQ.options : [
           { id: "include", label: t("dialogue.question.option.include") },
           { id: "skip", label: t("dialogue.question.option.skip") },
         ] as Array<{ id: string; label: string; description?: string; recommended?: boolean }>).map((option) => (
           <Button
             key={option.id}
+            className="question-composer-option"
             type={currentDraft.optionId === option.id ? "primary" : "default"}
-            onClick={() => answerQuestion(option.id, option.label)}
+            onClick={() => answerQuestion(option.id)}
             disabled={submitting}
           >
             {option.label}
             {option.recommended ? <Tag style={{ marginLeft: 4 }} color="processing">{t("dialogue.question.recommended")}</Tag> : null}
           </Button>
         ))}
-      </Space>
+      </div>
 
       {currentQ.allowFreeform !== false ? (
         <form className="inline-answer" onSubmit={submitFreeform}>
@@ -1547,12 +1587,40 @@ function MultiQuestionComposer({ task }: { task: DesktopTask }) {
       ) : null}
 
       <Button danger icon={<StopOutlined />} onClick={async () => {
-        await officecli.cancel(task.id);
+        try {
+          await officecli.cancel(task.id);
+          onForceCancel?.(task.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("not found") && onForceCancel) {
+            onForceCancel(task.id);
+          } else {
+            message.error(`Cancel failed: ${msg}`);
+          }
+        }
       }}>
         {t("dialogue.running.cancel")}
       </Button>
     </div>
   );
+}
+
+function buildQuestionAnswers(
+  questions: NonNullable<NonNullable<DesktopTask["question"]>["questions"]>,
+  drafts: Record<string, { optionId?: string; answer: string; freeform: string }>,
+): TaskQuestionAnswer[] {
+  return questions
+    .map((question) => {
+      const draft = drafts[question.id];
+      const answer = draft?.answer.trim();
+      if (!draft || !answer) return null;
+      return {
+        questionId: question.id,
+        ...(draft.optionId ? { optionId: draft.optionId } : {}),
+        answer,
+      };
+    })
+    .filter((answer): answer is TaskQuestionAnswer => Boolean(answer));
 }
 
 /* ─── Conversation Footer ─── */
@@ -1575,8 +1643,7 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
   const [gifFPS, setGIFFPS] = useState<number>(() => normalizeGIFFPS(latestTask.userInput?.fps));
   const [continuationPrompt, setContinuationPrompt] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  const [revising, setRevising] = useState(false);
-  const [planReviewForm] = Form.useForm<{ revision: string }>();
+  const autoApprovedPlanRef = useRef<string>("");
   const referenceImagesSpec = getAttachmentSpec(isGIFGeneration ? "gif" : "img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
 
@@ -1588,38 +1655,37 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
     setGIFFPS(normalizeGIFFPS(latestTask.userInput?.fps));
   }, [latestTask.id, latestTask.userInput?.fps]);
 
+  useEffect(() => {
+    if (status !== "plan_review" || !latestTask.plan) return;
+    const planKey = `${latestTask.id}:${latestTask.plan.id}:${latestTask.plan.revision}`;
+    if (autoApprovedPlanRef.current === planKey) return;
+    autoApprovedPlanRef.current = planKey;
+    officecli.respond({ taskId: latestTask.id, questionId: latestTask.plan.id, optionId: "approve" }).catch((err) => {
+      autoApprovedPlanRef.current = "";
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`Plan approval failed: ${msg}`);
+    });
+  }, [latestTask.id, latestTask.plan, status]);
+
   if (status === "plan_review" && latestTask.plan) {
-    async function approve() {
-      await officecli.respond({ taskId: latestTask.id, questionId: latestTask.plan?.id, optionId: "approve" });
-    }
-    async function revise(values: { revision: string }) {
-      const answer = values.revision.trim();
-      if (!answer) return;
-      setRevising(true);
-      try {
-        await officecli.respond({ taskId: latestTask.id, questionId: latestTask.plan?.id, answer });
-        planReviewForm.resetFields();
-      } finally {
-        setRevising(false);
-      }
-    }
     return (
-      <div className="docked-composer plan-review-composer">
-        <div className="plan-review-actions">
-          <Button type="primary" icon={<CheckCircleFilled />} onClick={approve}>
-            {t("dialogue.planReview.approve")}
-          </Button>
-          <Form form={planReviewForm} className="inline-answer" onFinish={revise}>
-            <Form.Item name="revision" noStyle>
-              <Input placeholder={t("dialogue.planReview.revisePlaceholder")} disabled={revising} />
-            </Form.Item>
-            <Button htmlType="submit" icon={<SendOutlined />} loading={revising}>
-              {t("dialogue.planReview.revise")}
-            </Button>
-          </Form>
-        </div>
-        <Button danger icon={<StopOutlined />} onClick={async () => {
-          await officecli.cancel(latestTask.id);
+      <div className="docked-composer readonly plan-review-composer">
+        <Input prefix={<FileTextOutlined />} suffix={<LoadingOutlined />} placeholder={t("dialogue.running.placeholder")} disabled />
+        <Button danger icon={<StopOutlined />} loading={cancelling} onClick={async () => {
+          setCancelling(true);
+          try {
+            await officecli.cancel(latestTask.id);
+            onForceCancel?.(latestTask.id);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes("not found") && onForceCancel) {
+              onForceCancel(latestTask.id);
+            } else {
+              message.error(`Cancel failed: ${msg}`);
+            }
+          } finally {
+            setCancelling(false);
+          }
         }}>
           {t("dialogue.running.cancel")}
         </Button>
@@ -1655,7 +1721,7 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
 
   // Question: show answer form
   if (status === "question" && latestTask.question) {
-    return <MultiQuestionComposer task={latestTask} />;
+    return <MultiQuestionComposer task={latestTask} onForceCancel={onForceCancel} />;
   }
 
   // Completed / Failed / Cancelled: show continuation composer for ALL types

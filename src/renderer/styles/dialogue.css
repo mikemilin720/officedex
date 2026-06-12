@@ -1398,14 +1398,56 @@
 }
 
 .question-composer-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   color: var(--n-charcoal);
   font-size: 15px;
   font-weight: 600;
   line-height: 1.5;
 }
 
+.question-composer-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 34px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--n-hairline-strong);
+  border-radius: 6px;
+  background: var(--n-charcoal);
+  color: var(--n-surface);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.question-composer-title {
+  min-width: 0;
+  padding-top: 1px;
+  color: var(--n-charcoal);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .question-composer-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
+}
+
+.question-composer-option {
+  width: 100%;
+  min-height: 40px;
+  height: auto;
+  justify-content: flex-start;
+  padding: 8px 12px;
+  white-space: normal;
+  text-align: left;
 }
 
 .question-composer .inline-answer {
@@ -1786,32 +1828,42 @@
 /* ─── Multi-question composer ─── */
 
 .multi-question-progress {
-  display: flex;
+  display: grid;
+  grid-template-columns: 32px minmax(140px, auto) 32px;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  column-gap: 14px;
   margin-bottom: 8px;
 }
 .multi-question-nav-btn {
-  background: none;
-  border: 1px solid var(--n-border);
-  border-radius: 6px;
+  display: grid;
+  place-items: center;
   width: 32px;
   height: 32px;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--n-text);
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-1px);
 }
 .multi-question-nav-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 .multi-question-counter {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
   font-size: 13px;
   font-weight: 600;
+  line-height: 32px;
   color: var(--n-slate);
 }
 

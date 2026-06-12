@@ -246,7 +246,7 @@ describe("DialogueScreen state machine", () => {
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("workspaceId");
   });
 
-  it("Question state with options invokes respond with the picked option id", async () => {
+  it("Question state with options invokes respond without filling the custom answer", async () => {
     const task: DesktopTask = {
       id: "task-q",
       conversationId: "task-q",
@@ -259,15 +259,19 @@ describe("DialogueScreen state machine", () => {
           { id: "include", label: "Include" },
           { id: "skip", label: "Exclude" },
         ],
-        allowFreeform: false,
+        allowFreeform: true,
       },
     };
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    expect(screen.getByText("Q1")).toBeTruthy();
+    const input = screen.getByPlaceholderText(/custom answer if none of the options fit/i) as HTMLInputElement;
+    expect(input.value).toBe("");
     fireEvent.click(screen.getByRole("button", { name: /^include$/i }));
     await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
-    expect(respondSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: "task-q", questionId: "q-1", optionId: "include", answer: "Include" }),
-    );
+    const payload = respondSpy.mock.calls[0][0];
+    expect(payload).toMatchObject({ taskId: "task-q", questionId: "q-1", optionId: "include" });
+    expect(payload).not.toHaveProperty("answer");
+    expect(input.value).toBe("");
   });
 
   it("Question state freeform submits typed answer via respond", async () => {
@@ -284,7 +288,7 @@ describe("DialogueScreen state machine", () => {
       },
     };
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
-    const input = screen.getByPlaceholderText(/or add other instructions/i);
+    const input = screen.getByPlaceholderText(/custom answer if none of the options fit/i);
     fireEvent.change(input, { target: { value: "Add appendix" } });
     fireEvent.submit(input.closest("form")!);
     await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
@@ -293,14 +297,14 @@ describe("DialogueScreen state machine", () => {
     );
   });
 
-  it("Question state supports multi-step questions with recommended options", async () => {
+  it("Question state batches multi-step answers and responds once after the final option", async () => {
     const task: DesktopTask = {
       id: "task-multi-q",
       conversationId: "task-multi-q",
       status: "question",
       events: [],
       question: {
-        id: "q-audience",
+        id: "question-000009",
         question: "Who is the audience?",
         options: [{ id: "leadership", label: "Leadership", description: "Decision makers", recommended: true }],
         allowFreeform: false,
@@ -324,14 +328,60 @@ describe("DialogueScreen state machine", () => {
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
     expect(screen.getByText("Question 1 of 2")).toBeTruthy();
+    expect(screen.getByText("Q1")).toBeTruthy();
     expect(screen.getByText("Recommended")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /next question/i }));
-    expect(screen.getByText("Which tone should it use?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /leadership/i }));
+    expect(respondSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText("Which tone should it use?")).toBeTruthy());
+    expect(screen.getByText("Q2")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^detailed$/i }));
 
-    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: "task-multi-q", questionId: "q-tone", optionId: "detailed", answer: "Detailed" }),
-    ));
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
+    expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-multi-q",
+      questionId: "question-000009",
+      answers: [
+        { questionId: "q-audience", optionId: "leadership", answer: "Leadership" },
+        { questionId: "q-tone", optionId: "detailed", answer: "Detailed" },
+      ],
+    }));
+  });
+
+  it("Question state advances to the next prompt immediately without responding early", async () => {
+    const task: DesktopTask = {
+      id: "task-multi-pending",
+      conversationId: "task-multi-pending",
+      status: "question",
+      events: [],
+      question: {
+        id: "question-000010",
+        question: "Who is the audience?",
+        options: [{ id: "leadership", label: "Leadership" }],
+        allowFreeform: false,
+        currentIndex: 0,
+        questions: [
+          {
+            id: "q-audience",
+            question: "Who is the audience?",
+            options: [{ id: "leadership", label: "Leadership" }],
+            allowFreeform: false,
+          },
+          {
+            id: "q-tone",
+            question: "Which tone should it use?",
+            options: [{ id: "detailed", label: "Detailed" }],
+            allowFreeform: false,
+          },
+        ],
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^leadership$/i }));
+
+    expect(screen.getByText("Which tone should it use?")).toBeTruthy();
+    expect(screen.getByText("Question 2 of 2")).toBeTruthy();
+    expect(respondSpy).not.toHaveBeenCalled();
   });
 
   it("places the active question between progress and the answer controls", () => {
@@ -360,7 +410,7 @@ describe("DialogueScreen state machine", () => {
     const composer = document.querySelector(".question-composer") as HTMLElement;
     const prompt = within(composer).getByText("Who is this 10-page deck for?");
     const firstOption = within(composer).getByRole("button", { name: "Newcomers" });
-    const freeform = within(composer).getByPlaceholderText(/or add other instructions/i);
+    const freeform = within(composer).getByPlaceholderText(/custom answer if none of the options fit/i);
 
     expect(composer).toBeTruthy();
     expect(screen.getAllByText("Who is this 10-page deck for?")).toHaveLength(1);
@@ -402,7 +452,7 @@ describe("DialogueScreen state machine", () => {
     ));
   });
 
-  it("Plan review state approves or revises the proposed plan via respond", async () => {
+  it("Plan review state auto-approves the proposed plan and hides manual review actions", async () => {
     const task: DesktopTask = {
       id: "task-plan",
       conversationId: "task-plan",
@@ -417,17 +467,52 @@ describe("DialogueScreen state machine", () => {
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
     expect(screen.getByText(/Build a concise deck after approval/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
     await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: "task-plan", optionId: "approve" }),
     ));
+    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /revise/i })).toBeNull();
+    expect(screen.queryByPlaceholderText(/revise the plan/i)).toBeNull();
+  });
 
-    const input = screen.getByPlaceholderText(/revise the plan/i);
-    fireEvent.change(input, { target: { value: "Make it more executive." } });
-    fireEvent.submit(input.closest("form")!);
-    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: "task-plan", answer: "Make it more executive." }),
-    ));
+  it("Plan review cancel marks the task cancelled locally after bridge cancel succeeds", async () => {
+    const onForceCancel = vi.fn();
+    const task: DesktopTask = {
+      id: "task-plan-cancel",
+      conversationId: "task-plan-cancel",
+      status: "plan_review",
+      events: [],
+      plan: {
+        id: "plan-cancel",
+        markdown: "# Proposed Plan\n\n- Review before execution.",
+        revision: 1,
+      },
+    };
+    render(<DialogueScreen {...baseProps({ onForceCancel })} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("task-plan-cancel"));
+    expect(onForceCancel).toHaveBeenCalledWith("task-plan-cancel");
+  });
+
+  it("Cancelled terminal tasks do not show bridge event context", () => {
+    const task: DesktopTask = {
+      id: "task-cancelled",
+      conversationId: "task-cancelled",
+      status: "cancelled",
+      events: [
+        { task_id: "task-cancelled", type: "task.started", ts: "2026-06-12T03:09:32Z", payload: {} },
+        { task_id: "task-cancelled", type: "task.progress", ts: "2026-06-12T03:09:48Z", payload: { status: "waiting_input" } },
+        { task_id: "task-cancelled", type: "task.cancelled", ts: "2026-06-12T03:10:00Z", payload: {} },
+      ],
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Task Cancelled")).toBeTruthy();
+    expect(screen.queryByText("Bridge event context")).toBeNull();
+    expect(screen.queryByText("task.started")).toBeNull();
   });
 
   it("shows one reviewed plan on terminal task history", () => {
