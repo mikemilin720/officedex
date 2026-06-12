@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("Shell sidebar layout", () => {
-  it("uses the OfficeDex SVG logo for the sidebar brand mark", () => {
+  it("uses the OfficeDex PNG app icon for the sidebar brand mark", () => {
     render(
       <LocaleProvider value="en">
         {createElement(
@@ -56,7 +56,7 @@ describe("Shell sidebar layout", () => {
       </LocaleProvider>,
     );
 
-    expect(screen.getByAltText("OfficeDex logo").getAttribute("src")).toBe("./officedex-logo.svg");
+    expect(screen.getByAltText("OfficeDex logo").getAttribute("src")).toBe("./officedex-logo.png");
   });
 
   it("places the credit meter above Profile in the sidebar footer", () => {

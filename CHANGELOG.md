@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.34] - 2026-06-12
+
+### Fixed
+- OfficeDex now uses the new rounded document-and-terminal icon inside the app chrome, favicon, and README surfaces, matching the desktop app icon.
+
 ## [0.5.33] - 2026-06-12
 
 ### Changed

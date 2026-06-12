@@ -147,7 +147,7 @@ export function Shell({
       >
         <div className="brand-block">
           <div className="brand-mark">
-            <img src="./officedex-logo.svg" alt="OfficeDex logo" />
+            <img src="./officedex-logo.png" alt="OfficeDex logo" />
           </div>
           <div className="brand-text">
             <div className="brand">{t("shell.brand")}</div>

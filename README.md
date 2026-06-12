@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshots/officedex-logo.svg" alt="OfficeDex" width="96" />
+<img src="docs/screenshots/officedex-logo.png" alt="OfficeDex" width="96" />
 
 ### The First AI-Native VibeOfficing Platform
 
