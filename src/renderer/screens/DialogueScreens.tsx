@@ -24,7 +24,7 @@ import {
 } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type FormEvent } from "react";
 import { getAttachmentSpec } from "../../shared/types";
-import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, TaskQuestionAnswer, WorkspaceSummary } from "../../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
@@ -1462,8 +1462,7 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
     const optionAnswer = optionId ? currentQ.options.find((option) => option.id === optionId)?.label ?? optionId : "";
     const answer = value?.trim() || optionAnswer;
     if (!answer) return;
-    const shouldAdvance = Boolean(isPlanQuestionSet && answeredIndex < totalQuestions - 1);
-    const shouldBatchSubmit = Boolean(isPlanQuestionSet && !shouldAdvance);
+    const responseQuestionId = isPlanQuestionSet && question?.id ? question.id : answeredQuestion.id;
     const nextDrafts = {
       ...drafts,
       [answeredQuestion.id]: { optionId, answer, freeform: optionId ? "" : answer },
@@ -1471,28 +1470,13 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
     setSubmitting(true);
     try {
       setDrafts(nextDrafts);
-      if (shouldAdvance) {
-        setCurrentIndex((index) => Math.max(index, answeredIndex + 1));
-        return;
-      }
-      if (shouldBatchSubmit && questionSet && question) {
-        await officecli.respond({
-          taskId: task.id,
-          questionId: question.id,
-          answers: buildQuestionAnswers(questionSet, nextDrafts),
-        });
-      } else {
-        await officecli.respond({
-          taskId: task.id,
-          questionId: answeredQuestion.id,
-          ...(optionId ? { optionId } : {}),
-          ...(optionId ? {} : { answer }),
-        });
-      }
+      await officecli.respond({
+        taskId: task.id,
+        questionId: responseQuestionId,
+        ...(optionId ? { optionId, answer } : { answer }),
+      });
     } catch (err) {
-      if (shouldAdvance) {
-        setCurrentIndex(answeredIndex);
-      }
+      setCurrentIndex(answeredIndex);
       const msg = err instanceof Error ? err.message : String(err);
       message.error(`Response failed: ${msg}`);
     } finally {
@@ -1603,24 +1587,6 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
       </Button>
     </div>
   );
-}
-
-function buildQuestionAnswers(
-  questions: NonNullable<NonNullable<DesktopTask["question"]>["questions"]>,
-  drafts: Record<string, { optionId?: string; answer: string; freeform: string }>,
-): TaskQuestionAnswer[] {
-  return questions
-    .map((question) => {
-      const draft = drafts[question.id];
-      const answer = draft?.answer.trim();
-      if (!draft || !answer) return null;
-      return {
-        questionId: question.id,
-        ...(draft.optionId ? { optionId: draft.optionId } : {}),
-        answer,
-      };
-    })
-    .filter((answer): answer is TaskQuestionAnswer => Boolean(answer));
 }
 
 /* ─── Conversation Footer ─── */

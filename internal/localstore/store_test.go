@@ -148,6 +148,49 @@ func TestWorkspaceConversationMetadataPersists(t *testing.T) {
 	}
 }
 
+func TestTaskWorkspacePathReturnsRecordedWorkspacePath(t *testing.T) {
+	store := newTempStore(t)
+	ctx := context.Background()
+	workspacePath := filepath.Join(t.TempDir(), "client-a")
+	workspace, err := store.EnsureWorkspace(ctx, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-workspace", TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conv-1",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext workspace: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, "task-standalone", TaskContext{
+		ConversationID: "task-standalone",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext standalone: %v", err)
+	}
+
+	path, ok, err := store.TaskWorkspacePath(ctx, "task-workspace")
+	if err != nil {
+		t.Fatalf("TaskWorkspacePath workspace: %v", err)
+	}
+	if !ok || path != workspacePath {
+		t.Fatalf("TaskWorkspacePath workspace = %q,%v want %q,true", path, ok, workspacePath)
+	}
+	path, ok, err = store.TaskWorkspacePath(ctx, "task-standalone")
+	if err != nil {
+		t.Fatalf("TaskWorkspacePath standalone: %v", err)
+	}
+	if !ok || path != "" {
+		t.Fatalf("TaskWorkspacePath standalone = %q,%v want empty,true", path, ok)
+	}
+	_, ok, err = store.TaskWorkspacePath(ctx, "missing")
+	if err != nil {
+		t.Fatalf("TaskWorkspacePath missing: %v", err)
+	}
+	if ok {
+		t.Fatal("TaskWorkspacePath missing ok = true, want false")
+	}
+}
+
 func TestNoProjectConversationMetadataPersistsOutsideWorkspaces(t *testing.T) {
 	store := newTempStore(t)
 	ctx := context.Background()

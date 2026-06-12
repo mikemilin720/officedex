@@ -246,7 +246,7 @@ describe("DialogueScreen state machine", () => {
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("workspaceId");
   });
 
-  it("Question state with options invokes respond without filling the custom answer", async () => {
+  it("Question state with options invokes respond without filling the custom answer input", async () => {
     const task: DesktopTask = {
       id: "task-q",
       conversationId: "task-q",
@@ -269,8 +269,7 @@ describe("DialogueScreen state machine", () => {
     fireEvent.click(screen.getByRole("button", { name: /^include$/i }));
     await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
     const payload = respondSpy.mock.calls[0][0];
-    expect(payload).toMatchObject({ taskId: "task-q", questionId: "q-1", optionId: "include" });
-    expect(payload).not.toHaveProperty("answer");
+    expect(payload).toMatchObject({ taskId: "task-q", questionId: "q-1", optionId: "include", answer: "Include" });
     expect(input.value).toBe("");
   });
 
@@ -297,7 +296,7 @@ describe("DialogueScreen state machine", () => {
     );
   });
 
-  it("Question state batches multi-step answers and responds once after the final option", async () => {
+  it("Question state responds to a multi-step option with top-level answer fields", async () => {
     const task: DesktopTask = {
       id: "task-multi-q",
       conversationId: "task-multi-q",
@@ -331,23 +330,18 @@ describe("DialogueScreen state machine", () => {
     expect(screen.getByText("Q1")).toBeTruthy();
     expect(screen.getByText("Recommended")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /leadership/i }));
-    expect(respondSpy).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByText("Which tone should it use?")).toBeTruthy());
-    expect(screen.getByText("Q2")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^detailed$/i }));
 
     await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
     expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
       taskId: "task-multi-q",
       questionId: "question-000009",
-      answers: [
-        { questionId: "q-audience", optionId: "leadership", answer: "Leadership" },
-        { questionId: "q-tone", optionId: "detailed", answer: "Detailed" },
-      ],
+      optionId: "leadership",
+      answer: "Leadership",
     }));
+    expect(respondSpy.mock.calls[0][0]).not.toHaveProperty("answers");
   });
 
-  it("Question state advances to the next prompt immediately without responding early", async () => {
+  it("Question state waits for the bridge to send the next prompt after an option", async () => {
     const task: DesktopTask = {
       id: "task-multi-pending",
       conversationId: "task-multi-pending",
@@ -379,9 +373,9 @@ describe("DialogueScreen state machine", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^leadership$/i }));
 
-    expect(screen.getByText("Which tone should it use?")).toBeTruthy();
-    expect(screen.getByText("Question 2 of 2")).toBeTruthy();
-    expect(respondSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Which tone should it use?")).toBeNull();
+    expect(screen.getByText("Question 1 of 2")).toBeTruthy();
   });
 
   it("places the active question between progress and the answer controls", () => {

@@ -503,6 +503,38 @@ func (s *Store) RecordTaskContext(ctx context.Context, taskID string, taskCtx Ta
 	return nil
 }
 
+func (s *Store) TaskWorkspacePath(ctx context.Context, taskID string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return "", false, fmt.Errorf("localstore: not open")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", false, nil
+	}
+	var workspaceID string
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM tasks WHERE id = ?`, taskID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("localstore: query task workspace: %w", err)
+	}
+	if strings.TrimSpace(workspaceID) == "" {
+		return "", true, nil
+	}
+	var path string
+	err = s.db.QueryRowContext(ctx, `SELECT path FROM workspaces WHERE id = ?`, workspaceID).Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", true, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("localstore: query task workspace path: %w", err)
+	}
+	return path, true, nil
+}
+
 // RecordEvent upserts a row into tasks and inserts/replaces a row into
 // task_events. Events without a task_id are silently dropped, matching the
 // behaviour of the TypeScript source.

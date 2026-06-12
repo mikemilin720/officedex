@@ -417,7 +417,7 @@ type RespondAnswerInput struct {
 
 // Respond forwards a user answer back to the running task.
 func (a *App) Respond(input RespondInput) ([]byte, error) {
-	client, err := a.ensureBridge()
+	client, err := a.ensureBridgeForTask(input.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +440,7 @@ func (a *App) Respond(input RespondInput) ([]byte, error) {
 
 // Cancel asks the bridge to cancel a running task.
 func (a *App) Cancel(taskID string) ([]byte, error) {
-	client, err := a.ensureBridge()
+	client, err := a.ensureBridgeForTask(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -2269,6 +2269,28 @@ func (a *App) ensureBridge() (*bridge.Client, error) {
 	settingsValue := a.cachedSettings
 	a.mu.Unlock()
 	return a.ensureBridgeForCwd(a.effectiveWorkspaceDirForRuntime(settingsValue))
+}
+
+func (a *App) ensureBridgeForTask(taskID string) (*bridge.Client, error) {
+	if a.localStore == nil || strings.TrimSpace(taskID) == "" {
+		return a.ensureBridge()
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspacePath, ok, err := a.localStore.TaskWorkspacePath(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || strings.TrimSpace(workspacePath) == "" {
+		return a.ensureBridge()
+	}
+	cwd, err := cleanExistingWorkspaceDir(workspacePath)
+	if err != nil {
+		return nil, err
+	}
+	return a.ensureBridgeForCwd(cwd)
 }
 
 func (a *App) ensureBridgeForCwd(cwd string) (*bridge.Client, error) {
