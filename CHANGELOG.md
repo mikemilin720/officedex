@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.33] - 2026-06-12
+
+### Changed
+- OfficeDex now uses the new rounded document-and-terminal app icon for desktop builds.
+- The main workspace has a tighter visual rhythm across navigation, settings, onboarding, and dialogue surfaces.
+
+### Fixed
+- Starting a new chat from an already empty chat now feels responsive instead of appearing to do nothing.
+- Local macOS app builds now include the bundled OfficeCLI runtime, so the app is ready to generate immediately after launch.
+
 ## [0.5.32] - 2026-06-11
 
 ### Added
