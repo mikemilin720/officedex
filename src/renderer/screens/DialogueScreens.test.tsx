@@ -293,6 +293,47 @@ describe("DialogueScreen state machine", () => {
     );
   });
 
+  it("Question state supports multi-step questions with recommended options", async () => {
+    const task: DesktopTask = {
+      id: "task-multi-q",
+      conversationId: "task-multi-q",
+      status: "question",
+      events: [],
+      question: {
+        id: "q-audience",
+        question: "Who is the audience?",
+        options: [{ id: "leadership", label: "Leadership", description: "Decision makers", recommended: true }],
+        allowFreeform: false,
+        currentIndex: 0,
+        questions: [
+          {
+            id: "q-audience",
+            question: "Who is the audience?",
+            options: [{ id: "leadership", label: "Leadership", description: "Decision makers", recommended: true }],
+            allowFreeform: false,
+          },
+          {
+            id: "q-tone",
+            question: "Which tone should it use?",
+            options: [{ id: "detailed", label: "Detailed" }],
+            allowFreeform: false,
+          },
+        ],
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Question 1 of 2")).toBeTruthy();
+    expect(screen.getByText("Recommended")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /next question/i }));
+    expect(screen.getByText("Which tone should it use?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^detailed$/i }));
+
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-multi-q", questionId: "q-tone", optionId: "detailed", answer: "Detailed" }),
+    ));
+  });
+
   it("places the active question between progress and the answer controls", () => {
     const task: DesktopTask = {
       id: "task-q-layout",
@@ -387,6 +428,26 @@ describe("DialogueScreen state machine", () => {
     await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: "task-plan", answer: "Make it more executive." }),
     ));
+  });
+
+  it("shows one reviewed plan on terminal task history", () => {
+    const task: DesktopTask = {
+      id: "task-plan-history",
+      conversationId: "task-plan-history",
+      status: "completed",
+      events: [{ task_id: "task-plan-history", type: "task.completed", ts: "2026-06-12T03:00:00Z", payload: { message: "done" } }],
+      plan: {
+        id: "plan-history",
+        markdown: "# Reviewed Plan\n\n- Build the approved outline.",
+        revision: 2,
+        executionPrompt: "Execute the reviewed plan.",
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(document.querySelectorAll(".history-plan-details")).toHaveLength(1);
+    expect(screen.getByText("View reviewed plan")).toBeTruthy();
+    expect(screen.getByText("Execution prompt")).toBeTruthy();
   });
 
   it("Running state Cancel button calls officecli.cancel with task id", async () => {

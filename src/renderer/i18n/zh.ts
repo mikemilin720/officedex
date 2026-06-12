@@ -158,6 +158,8 @@ export const zh: Record<string, string> = {
   "dialogue.history.taskIdLabel": "任务 ID",
   "dialogue.history.author": "OfficeDex AI",
   "dialogue.history.subject.fallback": "当前生成任务",
+  "dialogue.history.viewPlan": "查看已确认计划",
+  "dialogue.history.executionPrompt": "执行提示词",
 
   // Dialogue — question
   "dialogue.question.timestamp": "今天 10:23",
@@ -166,6 +168,10 @@ export const zh: Record<string, string> = {
   "dialogue.question.option.include": "纳入",
   "dialogue.question.option.skip": "跳过",
   "dialogue.question.inputPlaceholder": "或补充其他说明",
+  "dialogue.question.previous": "上一个问题",
+  "dialogue.question.next": "下一个问题",
+  "dialogue.question.progress": "第 {current} / {total} 个问题",
+  "dialogue.question.recommended": "推荐",
   "dialogue.question.disclaimer": "OfficeDex AI 可能生成不准确内容。重要信息请人工核实。",
 
   // Dialogue — completed
@@ -248,6 +254,7 @@ export const zh: Record<string, string> = {
   "dialogue.planReview.approve": "批准",
   "dialogue.planReview.revise": "修改",
   "dialogue.planReview.revisePlaceholder": "修改这份计划……",
+  "dialogue.planReview.executionPrompt": "显示执行提示词",
   "dialogue.progress.header.running.title": "正在处理请求……",
   "dialogue.progress.header.running.tag": "生成中",
 

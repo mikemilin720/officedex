@@ -138,6 +138,8 @@ export const en: Record<string, string> = {
   "dialogue.history.taskIdLabel": "Task ID",
   "dialogue.history.author": "OfficeDex AI",
   "dialogue.history.subject.fallback": "Current generation task",
+  "dialogue.history.viewPlan": "View reviewed plan",
+  "dialogue.history.executionPrompt": "Execution prompt",
 
   // Dialogue — question
   "dialogue.question.timestamp": "Today 10:23 AM",
@@ -146,6 +148,10 @@ export const en: Record<string, string> = {
   "dialogue.question.option.include": "Include",
   "dialogue.question.option.skip": "Exclude",
   "dialogue.question.inputPlaceholder": "Or add other instructions",
+  "dialogue.question.previous": "Previous question",
+  "dialogue.question.next": "Next question",
+  "dialogue.question.progress": "Question {current} of {total}",
+  "dialogue.question.recommended": "Recommended",
   "dialogue.question.disclaimer": "OfficeDex AI may produce inaccurate information. Please verify important content.",
 
   // Dialogue — completed
@@ -228,6 +234,7 @@ export const en: Record<string, string> = {
   "dialogue.planReview.approve": "Approve",
   "dialogue.planReview.revise": "Revise",
   "dialogue.planReview.revisePlaceholder": "Revise the plan...",
+  "dialogue.planReview.executionPrompt": "Show execution prompt",
   "dialogue.progress.header.running.title": "Processing your request...",
   "dialogue.progress.header.running.tag": "Generating",
 
