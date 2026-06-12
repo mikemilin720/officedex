@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.35] - 2026-06-12
+
+### Changed
+- Image template generation now keeps the template gallery and creation controls in separate panes, making longer template catalogs easier to browse while preparing a prompt.
+- Bundled the latest OfficeCLI runtime.
+
 ## [0.5.34] - 2026-06-12
 
 ### Fixed

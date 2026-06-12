@@ -958,8 +958,8 @@ describe("DialogueScreen state machine", () => {
     expect(workspace?.contains(galleryPane)).toBe(true);
     expect(workspace?.contains(formPane)).toBe(true);
     expect(formPane?.contains(commandBar)).toBe(true);
-    expect(formPane?.contains(actionsFooter)).toBe(false);
-    expect(actionsFooter?.parentElement).toBe(workspace);
+    expect(formPane?.contains(actionsFooter)).toBe(true);
+    expect(actionsFooter?.parentElement).toBe(formPane);
     expect(actionsFooter?.contains(uploadButton)).toBe(true);
     expect(actionsFooter?.contains(generateButton)).toBe(true);
     expect(Boolean(uploadButton.compareDocumentPosition(generateButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
@@ -987,7 +987,7 @@ describe("DialogueScreen state machine", () => {
     expect(actionsOverrideRule).toContain("display: grid;");
   });
 
-  it("places the image-template headline and document format selector in a full-width header row", async () => {
+  it("places the image-template headline and document format selector in a compact full-width toolbar", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     render(
       <DialogueScreen
@@ -1020,18 +1020,19 @@ describe("DialogueScreen state machine", () => {
     const headerRule = css.match(/\.image-template-prompt-header\s*\{[^}]*\}/s)?.[0] ?? "";
     const galleryPaneRule = css.match(/\.image-template-workspace \.image-template-gallery-pane\s*\{[^}]*\}/s)?.[0] ?? "";
     const formPaneRule = css.match(/\.image-template-form-pane\s*\{[^}]*\}/s)?.[0] ?? "";
-    expect(workspaceRule).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
+    expect(workspaceRule).toContain("grid-template-rows: auto minmax(0, 1fr);");
     expect(headerRule).toContain("grid-column: 1 / -1;");
     expect(headerRule).toContain("grid-row: 1;");
-    expect(headerRule).toContain("justify-items: center;");
-    expect(headerRule).toContain("text-align: center;");
+    expect(headerRule).toContain("display: flex;");
+    expect(headerRule).toContain("justify-content: space-between;");
+    expect(headerRule).toContain("text-align: left;");
     expect(galleryPaneRule).toContain("grid-row: 2;");
     expect(formPaneRule).toContain("grid-row: 2;");
 
     const formatRowRule = css.match(/\.image-template-prompt-header \.format-row\s*\{[^}]*\}/s)?.[0] ?? "";
     const titleRule = css.match(/\.image-template-prompt-header \.fluid-start-title\s*\{[^}]*\}/s)?.[0] ?? "";
-    expect(formatRowRule).toContain("justify-content: center;");
-    expect(titleRule).toContain("justify-content: center;");
+    expect(formatRowRule).toContain("justify-content: flex-end;");
+    expect(titleRule).toContain("justify-content: flex-start;");
   });
 
   it("uses the project headline in the image-template form header", async () => {

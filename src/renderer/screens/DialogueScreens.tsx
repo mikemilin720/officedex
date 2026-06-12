@@ -734,8 +734,8 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
           ) : null}
           {docType === "img" ? null : composerActions(false)}
         </Form>
+        {docType === "img" ? composerActions(true) : null}
       </div>
-      {docType === "img" ? composerActions(true) : null}
     </div>
   );
 }

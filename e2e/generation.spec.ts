@@ -198,6 +198,63 @@ test.describe("Generation flow", () => {
     await expect(page.locator(".fluid-start-card")).toHaveCSS("overflow-y", "hidden");
   });
 
+  test("Image workspace separates the template catalog from creation controls", async ({ page }) => {
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await installBridgeMock(page, { settings: { documentType: "img" } });
+    await page.addInitScript(() => {
+      localStorage.setItem("officedex:local-image-templates", JSON.stringify({
+        version: 1,
+        templates: Array.from({ length: 9 }, (_, index) => ({
+          slug: `focused-template-${index + 1}`,
+          title: `Focused Template ${index + 1}`,
+          description: "Local image template",
+          promptPreset: "Create a polished image.",
+          sortOrder: index,
+          enabled: true,
+        })),
+      }));
+    });
+    await page.goto("/");
+
+    const workspace = page.locator(".image-template-workspace");
+    const galleryPane = page.locator(".image-template-gallery-pane");
+    const formPane = page.locator(".image-template-form-pane");
+    const commandBar = formPane.locator(".fluid-command-bar");
+    const actionsFooter = formPane.locator(".image-template-actions-footer");
+    const templateGrid = page.locator(".image-template-grid");
+    const prompt = page.getByPlaceholder(/enter what you want to generate/i);
+    const uploadButton = formPane.getByRole("button", { name: /attach reference images/i });
+    const generate = formPane.locator("button").filter({ hasText: /^Generate$/ });
+
+    await expect(workspace).toBeVisible();
+    await expect(page.locator(".image-template-picker")).toHaveCount(1);
+    await expect(galleryPane).toBeVisible();
+    await expect(formPane).toBeVisible();
+    await expect(commandBar).toBeVisible();
+    await expect(actionsFooter).toBeVisible();
+    await expect(templateGrid).toHaveCSS("overflow-y", "auto");
+    await expect(galleryPane).toHaveCSS("overflow-y", "hidden");
+    await expect(prompt).toBeVisible();
+    await expect(uploadButton).toBeVisible();
+    await expect(generate).toBeVisible();
+
+    const galleryBox = await galleryPane.boundingBox();
+    const formBox = await formPane.boundingBox();
+    const actionsBox = await actionsFooter.boundingBox();
+    const promptBox = await prompt.boundingBox();
+    const generateBox = await generate.boundingBox();
+
+    expect(galleryBox).not.toBeNull();
+    expect(formBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(promptBox).not.toBeNull();
+    expect(generateBox).not.toBeNull();
+    expect(galleryBox!.x + galleryBox!.width).toBeLessThanOrEqual(formBox!.x + 1);
+    expect(actionsBox!.x).toBeGreaterThanOrEqual(formBox!.x - 1);
+    expect(actionsBox!.x + actionsBox!.width).toBeLessThanOrEqual(formBox!.x + formBox!.width + 1);
+    expect(generateBox!.y).toBeGreaterThan(promptBox!.y + promptBox!.height);
+  });
+
   test("Running state Cancel button calls officecli.cancel with the task id", async ({ page }) => {
     await installBridgeMock(page);
     await page.goto("/");
