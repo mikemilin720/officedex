@@ -1,4 +1,5 @@
 import { act } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 import { message, Modal } from "antd";
 import { afterEach } from "vitest";
 

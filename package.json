@@ -1,6 +1,6 @@
 {
   "name": "officedex",
-  "version": "0.5.39",
+  "version": "0.5.40",
   "description": "The AI desktop workspace for documents, slides, and spreadsheets. Wails v2 + React 19 client for OfficeCLI.",
   "license": "GPL-3.0-only",
   "homepage": "https://github.com/officecli/officedex#readme",
@@ -25,8 +25,9 @@
     "dist:win": "npm run prefetch:officecli && wails build -platform windows/amd64 -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\"",
     "test": "vitest run",
     "test:all": "npm run lint && npx vitest run && go test ./... -count=1 && npm run test:e2e",
-    "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install chromium",
+    "test:e2e": "node scripts/run-real-e2e.mjs",
+    "test:e2e:real": "node scripts/run-real-e2e.mjs",
+    "test:e2e:list": "node scripts/run-real-e2e.mjs --list",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -42,7 +43,6 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^22.13.10",

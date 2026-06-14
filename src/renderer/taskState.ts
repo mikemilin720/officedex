@@ -1,4 +1,4 @@
-import type { Artifact, BridgeEvent, DesktopTask, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskQuestionAnswer, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
 
 export interface TaskState {
   tasks: Record<string, DesktopTask>;
@@ -178,6 +178,12 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
     nextTask.question = questionFromPayload(event.payload);
     nextTask.status = "question";
   }
+  if (event.type === "task.answers" && nextTask.question) {
+    nextTask.question = {
+      ...nextTask.question,
+      answers: answersFromPayload(event.payload),
+    };
+  }
   if (event.type === "task.plan") {
     nextTask.plan = planFromPayload(event.payload);
     nextTask.question = undefined;
@@ -227,6 +233,29 @@ function statusFromEvent(type: string, fallback: DesktopTask["status"]): Desktop
     default:
       return fallback;
   }
+}
+
+function answersFromPayload(payload: BridgeEvent["payload"]): TaskQuestionAnswer[] {
+  const rawAnswers = Array.isArray(payload?.answers) ? payload.answers : [];
+  return rawAnswers
+    .map((raw): TaskQuestionAnswer | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const item = raw as Record<string, unknown>;
+      const questionId = String(item.questionId || item.question_id || "");
+      const answer = String(item.answer || "");
+      if (!questionId || !answer) return null;
+      const out: TaskQuestionAnswer = { questionId, answer };
+      const questionGroupId = String(item.questionGroupId || item.question_group_id || "");
+      if (questionGroupId) out.questionGroupId = questionGroupId;
+      const optionId = String(item.optionId || item.option_id || "");
+      if (optionId) out.optionId = optionId;
+      const questionIndex = item.questionIndex ?? item.question_index;
+      if (typeof questionIndex === "number" && Number.isFinite(questionIndex)) {
+        out.questionIndex = questionIndex;
+      }
+      return out;
+    })
+    .filter((item): item is TaskQuestionAnswer => item !== null);
 }
 
 function planFromPayload(payload: BridgeEvent["payload"]) {

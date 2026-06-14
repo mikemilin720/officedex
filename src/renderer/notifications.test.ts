@@ -6,15 +6,15 @@ import {
   setNotificationsEnabled,
 } from "./notifications";
 
-class NotificationStub {
-  static permission: NotificationPermission = "granted";
-  static requestPermission = vi.fn(async () => "granted" as NotificationPermission);
-  static constructed: Array<{ title: string; options?: NotificationOptions }> = [];
+const mocks = vi.hoisted(() => ({
+  sendDesktopNotification: vi.fn(async () => undefined),
+}));
 
-  constructor(title: string, options?: NotificationOptions) {
-    NotificationStub.constructed.push({ title, options });
-  }
-}
+vi.mock("./bridge", () => ({
+  officecli: {
+    sendDesktopNotification: mocks.sendDesktopNotification,
+  },
+}));
 
 function setDocumentHidden(hidden: boolean) {
   Object.defineProperty(document, "hidden", {
@@ -51,10 +51,7 @@ describe("desktop notifications", () => {
   beforeEach(() => {
     vi.stubGlobal("localStorage", createMemoryStorage());
     localStorage.removeItem(NOTIFICATIONS_STORAGE_KEY);
-    NotificationStub.permission = "granted";
-    NotificationStub.requestPermission.mockClear();
-    NotificationStub.constructed = [];
-    vi.stubGlobal("Notification", NotificationStub);
+    mocks.sendDesktopNotification.mockClear();
     setDocumentHidden(true);
   });
 
@@ -71,12 +68,15 @@ describe("desktop notifications", () => {
     expect(readNotificationsEnabled()).toBe(false);
   });
 
-  it("notifies when enabled and the document is hidden", () => {
+  it("notifies through the desktop bridge when enabled and the document is hidden", async () => {
     maybeNotify({ title: "OfficeDex", body: "Generation finished" });
 
-    expect(NotificationStub.constructed).toEqual([
-      { title: "OfficeDex", options: { body: "Generation finished" } },
-    ]);
+    await vi.waitFor(() =>
+      expect(mocks.sendDesktopNotification).toHaveBeenCalledWith({
+        title: "OfficeDex",
+        body: "Generation finished",
+      }),
+    );
   });
 
   it("does not notify while the document is focused", () => {
@@ -84,7 +84,7 @@ describe("desktop notifications", () => {
 
     maybeNotify({ title: "OfficeDex", body: "Generation finished" });
 
-    expect(NotificationStub.constructed).toHaveLength(0);
+    expect(mocks.sendDesktopNotification).not.toHaveBeenCalled();
   });
 
   it("does not notify when notifications are disabled", () => {
@@ -92,17 +92,14 @@ describe("desktop notifications", () => {
 
     maybeNotify({ title: "OfficeDex", body: "Generation finished" });
 
-    expect(NotificationStub.constructed).toHaveLength(0);
+    expect(mocks.sendDesktopNotification).not.toHaveBeenCalled();
   });
 
-  it("requests permission before notifying when permission is default", async () => {
-    NotificationStub.permission = "default";
+  it("ignores desktop bridge failures", async () => {
+    mocks.sendDesktopNotification.mockRejectedValueOnce(new Error("permission denied"));
 
     maybeNotify({ title: "OfficeDex", body: "Generation finished" });
-    await vi.waitFor(() => expect(NotificationStub.requestPermission).toHaveBeenCalledTimes(1));
 
-    expect(NotificationStub.constructed).toEqual([
-      { title: "OfficeDex", options: { body: "Generation finished" } },
-    ]);
+    await vi.waitFor(() => expect(mocks.sendDesktopNotification).toHaveBeenCalledTimes(1));
   });
 });

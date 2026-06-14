@@ -85,6 +85,50 @@ describe("taskState", () => {
     });
   });
 
+  it("hydrates persisted plan question answers from history replay", () => {
+    const withQuestion = applyTaskEvent(createInitialTaskState(), {
+      event_id: "event-question",
+      task_id: "task-answers",
+      type: "task.question",
+      payload: {
+        id: "question-group",
+        question: "Who is the audience?",
+        currentIndex: 1,
+        questions: [
+          {
+            id: "q-audience",
+            question: "Who is the audience?",
+            options: [{ id: "leadership", label: "Leadership" }],
+            allowFreeform: false,
+          },
+          {
+            id: "q-context",
+            question: "What context should be included?",
+            options: [],
+            allowFreeform: true,
+          },
+        ],
+      },
+    });
+
+    const withAnswers = applyTaskEvent(withQuestion, {
+      event_id: "event-answers",
+      task_id: "task-answers",
+      type: "task.answers",
+      payload: {
+        answers: [
+          { questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
+          { questionId: "q-context", answer: "Mention the 2026 launch plan.", questionIndex: 1 },
+        ],
+      },
+    });
+
+    expect(withAnswers.tasks["task-answers"].question?.answers).toEqual([
+      { questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
+      { questionId: "q-context", answer: "Mention the 2026 launch plan.", questionIndex: 1 },
+    ]);
+  });
+
   it("accepts renderer-facing camelCase question payload fields", () => {
     const state = applyTaskEvent(createInitialTaskState(), {
       event_id: "event-1",
@@ -119,6 +163,29 @@ describe("taskState", () => {
       id: "plan-1",
       markdown: "# Proposed Plan\n\n- Confirm before generating.",
       revision: 2,
+    });
+  });
+
+  it("preserves execution_prompt when restoring plan review events", () => {
+    const state = applyTaskEvent(createInitialTaskState(), {
+      event_id: "event-plan",
+      task_id: "task-1",
+      type: "task.plan",
+      payload: {
+        id: "plan-1",
+        plan_id: "plan-1",
+        plan_markdown: "# Proposed Plan\n\n- Confirm before generating.",
+        execution_prompt: "Generate the PPT only after the restored plan is approved.",
+        revision: 2,
+      },
+    });
+
+    expect(state.tasks["task-1"].status).toBe("plan_review");
+    expect(state.tasks["task-1"].plan).toEqual({
+      id: "plan-1",
+      markdown: "# Proposed Plan\n\n- Confirm before generating.",
+      revision: 2,
+      executionPrompt: "Generate the PPT only after the restored plan is approved.",
     });
   });
 

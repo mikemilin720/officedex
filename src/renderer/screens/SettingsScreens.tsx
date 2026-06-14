@@ -118,10 +118,22 @@ export function SettingsScreen({
   const updateNotificationsEnabled = useCallback((checked: boolean) => {
     setNotificationsEnabled(checked);
     persistNotificationsEnabled(checked);
-    if (checked && typeof Notification !== "undefined" && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => undefined);
-    }
   }, []);
+
+  const sendTestNotification = useCallback(async () => {
+    try {
+      if (!officecli.sendDesktopNotification) {
+        throw new Error("Desktop notifications require a newer OfficeDex runtime.");
+      }
+      await officecli.sendDesktopNotification({
+        title: t("notification.title"),
+        body: t("settings.notifications.testBody"),
+      });
+      void message.success(t("settings.notifications.testSuccess"));
+    } catch (error) {
+      void message.error(t("settings.notifications.testError", { error: errorMessage(error) }));
+    }
+  }, [t]);
 
   const resetAll = useCallback(() => {
     Modal.confirm({
@@ -204,6 +216,7 @@ export function SettingsScreen({
 
   const settingsSections = [
     { key: "generation", label: t("settings.group.generation"), icon: "auto_awesome" },
+    { key: "notifications", label: t("settings.group.notifications"), icon: "notifications" },
     { key: "appearance", label: t("settings.group.appearance"), icon: "palette" },
     { key: "workspace", label: t("settings.group.workspace"), icon: "folder_open" },
     { key: "connection", label: t("settings.group.connection"), icon: "tune" },
@@ -274,13 +287,6 @@ export function SettingsScreen({
                   onChange={(checked) => updateDefaults({ enableImages: checked })}
                 />
               </SettingRow>
-              <SettingRow title={t("settings.notifications.label")} desc={t("settings.notifications.desc")}>
-                <Switch
-                  aria-label={t("settings.notifications.label")}
-                  checked={notificationsEnabled}
-                  onChange={updateNotificationsEnabled}
-                />
-              </SettingRow>
               <SettingRow title={t("settings.row.imageWatermark.title")} desc={t("settings.row.imageWatermark.desc")}>
                 <div className="settings-stack">
                   <Switch
@@ -330,6 +336,23 @@ export function SettingsScreen({
                     }}
                   />
                 </div>
+              </SettingRow>
+            </div>
+            ) : null}
+            {activeSettingsSection === "notifications" ? (
+            <div className="setting-group" id={settingsSectionId("notifications")}>
+              <h2>{t("settings.group.notifications")}</h2>
+              <SettingRow title={t("settings.notifications.label")} desc={t("settings.notifications.desc")}>
+                <Switch
+                  aria-label={t("settings.notifications.label")}
+                  checked={notificationsEnabled}
+                  onChange={updateNotificationsEnabled}
+                />
+              </SettingRow>
+              <SettingRow title={t("settings.notifications.testTitle")} desc={t("settings.notifications.testDesc")}>
+                <Button onClick={sendTestNotification} disabled={!notificationsEnabled}>
+                  {t("settings.notifications.testButton")}
+                </Button>
               </SettingRow>
             </div>
             ) : null}

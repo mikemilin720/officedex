@@ -1,3 +1,5 @@
+import { officecli } from "./bridge";
+
 export const NOTIFICATIONS_STORAGE_KEY = "officedex.notifications.enabled";
 
 type NotificationInput = {
@@ -26,23 +28,9 @@ export function setNotificationsEnabled(enabled: boolean): void {
 export function maybeNotify({ title, body }: NotificationInput): void {
   try {
     if (!readNotificationsEnabled()) return;
-    if (typeof Notification === "undefined") return;
-    if (document.hidden !== true) return;
+    if (typeof document !== "undefined" && document.hidden !== true) return;
 
-    if (Notification.permission === "granted") {
-      new Notification(title, { body });
-      return;
-    }
-
-    if (Notification.permission === "default") {
-      Notification.requestPermission()
-        .then((permission) => {
-          if (permission === "granted") {
-            new Notification(title, { body });
-          }
-        })
-        .catch(() => undefined);
-    }
+    void officecli.sendDesktopNotification?.({ title, body }).catch(() => undefined);
   } catch {
     // Notifications are best-effort and must never break task event handling.
   }

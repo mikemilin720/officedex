@@ -1053,22 +1053,6 @@
   background: var(--n-surface-soft);
 }
 
-.plan-review-message pre {
-  margin: 10px 0 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font: inherit;
-  line-height: 1.55;
-}
-
-.plan-review-composer {
-  gap: 10px;
-}
-
-.plan-review-composer .inline-answer {
-  flex: 1;
-}
-
 .time-marker {
   align-self: center;
   border-radius: var(--radius-full);
@@ -1458,6 +1442,19 @@
 .question-composer .inline-answer .ant-input {
   flex: 1;
   min-width: 0;
+}
+
+.question-composer .inline-answer.user-answer-selected .ant-input {
+  border-color: var(--n-primary) !important;
+  background: color-mix(in srgb, var(--n-primary) 6%, var(--n-canvas));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--n-primary) 14%, transparent);
+}
+
+.question-composer .inline-answer.user-answer-selected .ant-input:hover,
+.question-composer .inline-answer.user-answer-selected .ant-input:focus {
+  border-color: var(--n-primary-pressed) !important;
+  background: color-mix(in srgb, var(--n-primary) 8%, var(--n-canvas));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--n-primary) 18%, transparent);
 }
 
 /* ─── Message variants ─── */
@@ -1867,26 +1864,423 @@
   color: var(--n-slate);
 }
 
-/* ─── Plan execution prompt ─── */
+/* ─── Plan review ─── */
 
-.plan-execution-prompt-details {
-  margin-top: 12px;
-  border-top: 1px solid var(--n-border);
-  padding-top: 8px;
+.plan-review-card {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(100%, 980px);
+  max-width: min(100%, 980px);
+  min-height: min(62vh, 560px);
+  max-height: calc(100vh - 260px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--n-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--n-canvas);
+  color: var(--n-charcoal);
+  box-shadow: var(--shadow-card);
 }
-.plan-execution-prompt-details summary {
-  cursor: pointer;
-  font-weight: 500;
-  color: var(--n-purple);
-  font-size: 13px;
+
+.plan-review-card.is-expanded {
+  display: block;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
 }
+
+.plan-review-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--n-hairline);
+  background: var(--n-canvas);
+}
+
+.plan-review-card .message-author {
+  margin: 0;
+  color: var(--n-charcoal);
+}
+
+.plan-review-card .message-author strong {
+  color: var(--n-charcoal);
+}
+
+.plan-review-card-body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 24px 22px;
+  background: var(--n-canvas);
+}
+
+.plan-review-card.is-expanded .plan-review-card-body {
+  display: block;
+  min-height: auto;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.plan-review-card.is-expanded .plan-review-section + .plan-review-section {
+  margin-top: 16px;
+}
+
+.plan-review-section {
+  display: grid;
+  gap: 10px;
+}
+
+.plan-review-section h3 {
+  margin: 0;
+  color: var(--n-ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.plan-review-markdown {
+  display: grid;
+  gap: 10px;
+  color: var(--n-charcoal);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.plan-review-markdown h4,
+.plan-review-markdown h5,
+.plan-review-markdown h6,
+.plan-review-markdown p,
+.plan-review-markdown ul,
+.plan-review-markdown ol {
+  margin: 0;
+}
+
+.plan-review-markdown h4,
+.plan-review-markdown h5,
+.plan-review-markdown h6 {
+  color: var(--n-ink);
+  font-family: var(--font-body);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.plan-review-markdown h4 {
+  font-size: 16px;
+}
+
+.plan-review-markdown h5 {
+  font-size: 15px;
+}
+
+.plan-review-markdown h6 {
+  font-size: 14px;
+}
+
+.plan-review-markdown ul,
+.plan-review-markdown ol {
+  display: grid;
+  gap: 6px;
+  padding-left: 22px;
+}
+
+.plan-review-markdown li {
+  padding-left: 2px;
+}
+
+.plan-review-markdown strong {
+  color: var(--n-ink);
+  font-weight: 700;
+}
+
+.plan-review-markdown code {
+  border: 1px solid var(--n-hairline-soft);
+  border-radius: 5px;
+  background: var(--n-surface-soft);
+  color: var(--n-charcoal);
+  font: 12px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  padding: 1px 5px;
+}
+
 .plan-execution-prompt {
-  background: var(--n-bg-secondary);
-  border-radius: 6px;
-  padding: 12px;
-  font-size: 12px;
+  margin: 0;
   white-space: pre-wrap;
-  margin-top: 8px;
+  word-break: break-word;
+  font: 14px/1.7 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--n-charcoal);
+}
+
+.plan-execution-prompt-section {
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--n-hairline-soft);
+}
+
+.plan-execution-prompt {
+  border: 1px solid var(--n-hairline);
+  border-radius: var(--radius-md);
+  background: var(--n-surface-soft);
+  padding: 14px 16px;
+}
+
+.plan-review-actions-panel {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+}
+
+.plan-review-composer {
+  width: min(100%, 980px);
+  margin: 0 auto;
+  border-color: var(--n-hairline-soft);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--n-canvas) 97%, var(--n-surface-soft));
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+  padding: 12px;
+}
+
+.plan-review-expand-chin {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--n-hairline-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--n-slate);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 0 24px;
+  text-align: left;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.plan-review-expand-chin:hover,
+.plan-review-expand-chin:focus-visible {
+  background: color-mix(in srgb, var(--n-primary) 8%, var(--n-canvas));
+  color: var(--n-primary);
+}
+
+.plan-review-expand-chin:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--n-primary) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.plan-review-expand-chin .anticon {
+  margin-left: 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.plan-review-actions-title {
+  color: var(--n-slate);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 0 4px 2px;
+}
+
+.plan-review-option-row {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 12px;
+  border: 1px solid var(--n-hairline-soft) !important;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--n-surface-soft) 74%, var(--n-canvas)) !important;
+  color: var(--n-charcoal) !important;
+  box-shadow: none;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.plan-review-option-row:hover,
+.plan-review-option-row:focus-visible {
+  border-color: color-mix(in srgb, var(--n-primary) 34%, var(--n-hairline)) !important;
+  background: color-mix(in srgb, var(--n-primary) 7%, var(--n-canvas)) !important;
+  color: var(--n-ink) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--n-primary) 12%, transparent);
+}
+
+.plan-review-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-review-composer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 46px;
+  padding: 6px;
+  border: 1px solid var(--n-hairline-soft);
+  border-radius: var(--radius-md);
+  background: var(--n-canvas);
+}
+
+.plan-review-approve {
+  width: 100%;
+  border-color: var(--n-primary) !important;
+  background: var(--n-primary) !important;
+  background-color: var(--n-primary) !important;
+  color: var(--n-on-primary) !important;
+  text-align: left;
+}
+
+.plan-review-approve:hover,
+.plan-review-approve:focus-visible {
+  border-color: var(--n-primary-pressed) !important;
+  background: var(--n-primary-pressed) !important;
+  background-color: var(--n-primary-pressed) !important;
+  color: var(--n-on-primary) !important;
+}
+
+.plan-review-composer-row .ant-input-affix-wrapper {
+  height: 34px;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--n-charcoal);
+  box-shadow: none;
+  padding-inline: 8px;
+}
+
+.plan-review-composer-row .ant-input-affix-wrapper-focused,
+.plan-review-composer-row .ant-input-affix-wrapper:focus,
+.plan-review-composer-row .ant-input-affix-wrapper:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--n-surface-soft) 72%, var(--n-canvas));
+  box-shadow: none;
+}
+
+.plan-review-composer-row .ant-input-prefix {
+  color: var(--n-stone);
+  margin-inline-end: 8px;
+}
+
+.plan-review-composer-row .ant-input {
+  background: transparent;
+  color: var(--n-charcoal);
+}
+
+.plan-review-composer-row .ant-input::placeholder {
+  color: var(--n-stone);
+}
+
+.plan-review-composer-row .ant-btn {
+  height: 34px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.plan-review-cancel {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 92px;
+  border-radius: var(--radius-sm);
+  color: var(--n-slate);
+  padding-inline: 10px;
+}
+
+.plan-review-cancel:hover,
+.plan-review-cancel:focus-visible {
+  color: var(--n-charcoal);
+  background: var(--n-surface-soft);
+}
+
+.plan-review-cancel kbd,
+.plan-review-submit-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--n-surface-soft) 86%, var(--n-canvas));
+  border: 1px solid var(--n-hairline-soft);
+  color: var(--n-stone);
+  font: 12px/1 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  padding: 0 5px;
+}
+
+.plan-review-composer-row .ant-btn.plan-review-revise-submit {
+  min-width: 98px;
+  border-color: var(--n-primary) !important;
+  background: var(--n-primary) !important;
+  background-color: var(--n-primary) !important;
+  color: var(--n-on-primary) !important;
+  box-shadow: none;
+}
+
+.plan-review-composer-row .ant-btn.plan-review-revise-submit:hover,
+.plan-review-composer-row .ant-btn.plan-review-revise-submit:focus-visible {
+  border-color: var(--n-primary-pressed) !important;
+  background: var(--n-primary-pressed) !important;
+  background-color: var(--n-primary-pressed) !important;
+  color: var(--n-on-primary) !important;
+}
+
+.plan-review-composer-row .ant-btn.plan-review-revise-submit[disabled] {
+  border-color: var(--n-hairline) !important;
+  background: var(--n-surface-soft) !important;
+  background-color: var(--n-surface-soft) !important;
+  color: var(--n-stone) !important;
+}
+
+.plan-review-composer-row .ant-btn.plan-review-revise-submit .plan-review-submit-key {
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--n-on-primary) 18%, transparent);
+  border-color: color-mix(in srgb, var(--n-on-primary) 24%, transparent);
+  color: var(--n-on-primary);
+}
+
+.plan-review-composer-row .ant-btn.plan-review-revise-submit[disabled] .plan-review-submit-key {
+  background: var(--n-canvas);
+  border-color: var(--n-hairline-soft);
+  color: var(--n-stone);
+}
+
+@media (max-width: 760px) {
+  .plan-review-composer {
+    padding: 10px;
+  }
+
+  .plan-review-composer-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plan-review-cancel,
+  .plan-review-revise-submit {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 /* ─── History plan details ─── */

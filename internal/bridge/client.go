@@ -731,6 +731,18 @@ func (c *Client) RespondTask(ctx context.Context, params RespondParams) ([]byte,
 	})
 }
 
+func (c *Client) TaskStatus(ctx context.Context, taskID string) (TaskStatusResult, error) {
+	raw, err := c.Request(ctx, "task/status", map[string]any{"task_id": taskID})
+	if err != nil {
+		return TaskStatusResult{}, err
+	}
+	var result TaskStatusResult
+	if err := decodeJSON(raw, &result); err != nil {
+		return TaskStatusResult{}, fmt.Errorf("bridge: decode task/status: %w", err)
+	}
+	return result, nil
+}
+
 // CancelTask calls "task/cancel".
 func (c *Client) CancelTask(ctx context.Context, taskID string) ([]byte, error) {
 	return c.Request(ctx, "task/cancel", map[string]any{"task_id": taskID})
@@ -756,6 +768,14 @@ type RespondAnswer struct {
 	QuestionID string `json:"question_id"`
 	OptionID   string `json:"option_id,omitempty"`
 	Answer     string `json:"answer"`
+}
+
+type TaskStatusResult struct {
+	TaskID          string          `json:"task_id"`
+	SessionID       string          `json:"session_id"`
+	Status          string          `json:"status"`
+	CurrentQuestion json.RawMessage `json:"current_question,omitempty"`
+	CurrentPlan     json.RawMessage `json:"current_plan,omitempty"`
 }
 
 func (c *Client) readStdout(transport Transport) {

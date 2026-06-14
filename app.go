@@ -62,6 +62,11 @@ const (
 // The default "dev" sentinel makes `go run` / `wails dev` work without flags.
 var appVersion = "dev"
 
+type DesktopNotificationInput struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
 // App is the Wails-bound object surfaced to the renderer.
 type App struct {
 	ctx context.Context
@@ -187,6 +192,9 @@ func NewApp() (*App, error) {
 // retained so binding methods can dispatch events and open OS dialogs.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if err := wailsruntime.InitializeNotifications(ctx); err != nil {
+		wailsruntime.LogWarningf(ctx, "init notifications: %v", err)
+	}
 	if err := a.localStore.Open(ctx); err != nil {
 		wailsruntime.LogErrorf(ctx, "open local store: %v", err)
 	} else if err := a.initializeWorkspaces(ctx); err != nil {
@@ -220,6 +228,9 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.runtimeMgr != nil {
 		a.runtimeMgr.CancelDownload()
 	}
+	if ctx != nil {
+		wailsruntime.CleanupNotifications(ctx)
+	}
 }
 
 // ─── Bridge bindings ────────────────────────────────────────────────────────
@@ -241,6 +252,42 @@ func (a *App) GetCapabilities() ([]byte, error) {
 		return nil, err
 	}
 	return client.GetCapabilities(a.ctx)
+}
+
+func (a *App) SendDesktopNotification(input DesktopNotificationInput) error {
+	ctx := a.ctx
+	if ctx == nil {
+		return errors.New("desktop notification runtime is unavailable")
+	}
+
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = appName
+	}
+	body := strings.TrimSpace(input.Body)
+
+	if !wailsruntime.IsNotificationAvailable(ctx) {
+		return errors.New("desktop notifications are unavailable on this platform")
+	}
+	authorized, err := wailsruntime.CheckNotificationAuthorization(ctx)
+	if err != nil {
+		return fmt.Errorf("check notification authorization: %w", err)
+	}
+	if !authorized {
+		authorized, err = wailsruntime.RequestNotificationAuthorization(ctx)
+		if err != nil {
+			return fmt.Errorf("request notification authorization: %w", err)
+		}
+		if !authorized {
+			return errors.New("desktop notification permission denied")
+		}
+	}
+
+	return wailsruntime.SendNotification(ctx, wailsruntime.NotificationOptions{
+		ID:    fmt.Sprintf("officedex-%d", time.Now().UnixNano()),
+		Title: title,
+		Body:  body,
+	})
 }
 
 // ListImageTemplates returns server-managed image prompt templates exposed by
@@ -291,6 +338,7 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("load settings: %w", err)
 	}
+	input = normalizeGenerateInputText(input)
 	if input.DocumentType == types.DocIMG {
 		var watermark *types.ImageWatermarkGenerateOptions
 		settings, watermark = a.refreshImageWatermarkSettingsForGenerate(settings)
@@ -322,25 +370,14 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 		if err := a.recordTaskWorkspaceContext(result.TaskID, resolved.WorkspaceID, resolved.ConversationID, resolved.ParentTaskID, resolved.Topic, resolved.NoProject); err != nil {
 			return GenerateResult{}, err
 		}
-		payload := map[string]any{
-			"prompt": resolved.Prompt,
-		}
-		if resolved.PromptTemplateID != "" {
-			payload["prompt_template_id"] = resolved.PromptTemplateID
-		}
-		if resolved.SourceFile != "" {
-			payload["source_file"] = resolved.SourceFile
-		}
-		if len(resolved.ReferenceImages) > 0 {
-			payload["reference_images"] = resolved.ReferenceImages
-		}
-		if strings.TrimSpace(resolved.ImageRatio) != "" {
-			payload["image_ratio"] = strings.TrimSpace(resolved.ImageRatio)
-		}
 		_ = a.localStore.RecordEvent(types.BridgeEvent{
-			TaskID:  result.TaskID,
-			Type:    "task.user_input",
-			Payload: payload,
+			TaskID: result.TaskID,
+			Type:   "task.user_input",
+			Payload: generateInputEventPayload(resolved, localstore.TaskContext{
+				WorkspaceID:    resolved.WorkspaceID,
+				ConversationID: resolved.ConversationID,
+				ParentTaskID:   resolved.ParentTaskID,
+			}),
 		})
 	}
 	return GenerateResult{TaskID: result.TaskID, SessionID: result.SessionID, Status: result.Status}, nil
@@ -410,13 +447,18 @@ type RespondInput struct {
 }
 
 type RespondAnswerInput struct {
-	QuestionID string `json:"questionId"`
-	OptionID   string `json:"optionId,omitempty"`
-	Answer     string `json:"answer"`
+	QuestionGroupID string `json:"questionGroupId,omitempty"`
+	QuestionID      string `json:"questionId"`
+	OptionID        string `json:"optionId,omitempty"`
+	Answer          string `json:"answer"`
+	QuestionIndex   int    `json:"questionIndex,omitempty"`
 }
 
 // Respond forwards a user answer back to the running task.
 func (a *App) Respond(input RespondInput) ([]byte, error) {
+	if err := a.recordRespondAnswers(input); err != nil {
+		return nil, err
+	}
 	client, err := a.ensureBridgeForTask(input.TaskID)
 	if err != nil {
 		return nil, err
@@ -429,13 +471,246 @@ func (a *App) Respond(input RespondInput) ([]byte, error) {
 			Answer:     answer.Answer,
 		})
 	}
-	return client.RespondTask(a.ctx, bridge.RespondParams{
+	raw, err := client.RespondTask(a.ctx, bridge.RespondParams{
 		TaskID:     input.TaskID,
 		QuestionID: input.QuestionID,
 		OptionID:   input.OptionID,
 		Answer:     input.Answer,
 		Answers:    answers,
 	})
+	if err != nil && isBridgeTaskNotFoundError(err) {
+		return a.recoverStaleInteractiveRespond(input, err)
+	}
+	return raw, err
+}
+
+func (a *App) recordRespondAnswers(input RespondInput) error {
+	if a.localStore == nil || strings.TrimSpace(input.TaskID) == "" {
+		return nil
+	}
+	answers := make([]localstore.TaskAnswer, 0, len(input.Answers)+1)
+	if len(input.Answers) > 0 {
+		for _, item := range input.Answers {
+			if strings.TrimSpace(item.QuestionID) == "" {
+				continue
+			}
+			groupID := strings.TrimSpace(item.QuestionGroupID)
+			if groupID == "" {
+				groupID = strings.TrimSpace(input.QuestionID)
+			}
+			answers = append(answers, localstore.TaskAnswer{
+				QuestionGroupID: groupID,
+				QuestionID:      strings.TrimSpace(item.QuestionID),
+				OptionID:        strings.TrimSpace(item.OptionID),
+				Answer:          strings.TrimSpace(item.Answer),
+				QuestionIndex:   item.QuestionIndex,
+			})
+		}
+	} else if strings.TrimSpace(input.QuestionID) != "" && (strings.TrimSpace(input.OptionID) != "" || strings.TrimSpace(input.Answer) != "") {
+		answers = append(answers, localstore.TaskAnswer{
+			QuestionID:    strings.TrimSpace(input.QuestionID),
+			OptionID:      strings.TrimSpace(input.OptionID),
+			Answer:        strings.TrimSpace(input.Answer),
+			QuestionIndex: -1,
+		})
+	}
+	if len(answers) == 0 {
+		return nil
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.localStore.RecordTaskAnswers(ctx, strings.TrimSpace(input.TaskID), answers)
+}
+
+func (a *App) recoverStaleInteractiveRespond(input RespondInput, originalErr error) ([]byte, error) {
+	if a.localStore == nil {
+		return nil, originalErr
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	events, err := a.localStore.QueryEventsByTask(ctx, input.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if !latestTaskStateRecoverable(events) {
+		return nil, fmt.Errorf("task was interrupted and cannot be resumed; please restart this plan")
+	}
+	taskCtx, ok, err := a.localStore.TaskContext(ctx, input.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("task was interrupted and cannot be resumed; missing task context")
+	}
+	generateInput, err := recoverGenerateInputFromEvents(events, taskCtx)
+	if err != nil {
+		return nil, err
+	}
+	client, err := a.ensureBridgeForTask(input.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.InvokeGenerate(ctx, generateInput)
+	if err != nil {
+		return nil, err
+	}
+	if result.TaskID == "" {
+		return nil, fmt.Errorf("task recovery failed: replacement task id is empty")
+	}
+	if err := a.recordTaskWorkspaceContext(result.TaskID, taskCtx.WorkspaceID, taskCtx.ConversationID, input.TaskID, generateInput.Topic, generateInput.NoProject); err != nil {
+		return nil, err
+	}
+	recoveredInputEvent := types.BridgeEvent{
+		EventID: "local-recovered-input-" + uuid.NewString(),
+		TaskID:  result.TaskID,
+		Type:    "task.user_input",
+		TS:      time.Now().UTC().Format(time.RFC3339Nano),
+		Payload: generateInputEventPayload(generateInput, taskCtx),
+	}
+	_ = a.localStore.RecordEvent(recoveredInputEvent)
+	if canEmitWailsEvent(ctx) {
+		emit(ctx, bridgeEventChannel, recoveredInputEvent)
+	}
+	if err := waitForRecoverablePendingInput(ctx, client, result.TaskID); err != nil {
+		return nil, err
+	}
+	answers, err := a.localStore.QueryTaskAnswers(ctx, input.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	params := bridge.RespondParams{TaskID: result.TaskID, QuestionID: input.QuestionID}
+	if len(answers) > 0 {
+		params.Answers = make([]bridge.RespondAnswer, 0, len(answers))
+		for _, item := range answers {
+			params.Answers = append(params.Answers, bridge.RespondAnswer{
+				QuestionID: item.QuestionID,
+				OptionID:   item.OptionID,
+				Answer:     item.Answer,
+			})
+			if params.QuestionID == "" && item.QuestionGroupID != "" {
+				params.QuestionID = item.QuestionGroupID
+			}
+		}
+	} else {
+		params.OptionID = input.OptionID
+		params.Answer = input.Answer
+	}
+	if len(params.Answers) == 0 && strings.TrimSpace(params.OptionID) == "" && strings.TrimSpace(params.Answer) == "" {
+		return nil, fmt.Errorf("task was interrupted and cannot be resumed; missing saved answers")
+	}
+	if _, err := client.RespondTask(ctx, params); err != nil {
+		return nil, err
+	}
+	a.recordLocalTaskCancelled(input.TaskID, "Task was recovered after the application restarted")
+	payload, err := json.Marshal(map[string]any{
+		"accepted":      true,
+		"task_id":       result.TaskID,
+		"taskId":        result.TaskID,
+		"recoveredFrom": input.TaskID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func latestTaskStateRecoverable(events []types.BridgeEvent) bool {
+	state := ""
+	for _, event := range events {
+		switch event.Type {
+		case "task.question", "task.plan", "task.completed", "task.failed", "task.cancelled":
+			state = event.Type
+		}
+	}
+	return state == "task.question" || state == "task.plan"
+}
+
+func recoverGenerateInputFromEvents(events []types.BridgeEvent, taskCtx localstore.TaskContext) (types.GenerateInput, error) {
+	var userInput map[string]any
+	var started map[string]any
+	for _, event := range events {
+		if event.Type == "task.started" {
+			started = event.Payload
+		}
+		if event.Type == "task.user_input" {
+			userInput = event.Payload
+		}
+	}
+	if userInput == nil {
+		return types.GenerateInput{}, fmt.Errorf("task was interrupted and cannot be resumed; missing original input")
+	}
+	documentType := stringField(userInput, "document_type", "documentType")
+	if documentType == "" {
+		documentType = stringField(started, "document_type", "documentType")
+	}
+	prompt := recoverPromptFromPayload(userInput)
+	if prompt == "" {
+		prompt = stringField(started, "prompt")
+	}
+	topic := recoverTopicFromPayload(userInput)
+	if topic == "" {
+		topic = stringField(started, "topic")
+	}
+	if topic == "" {
+		topic = prompt
+	}
+	if prompt == "" {
+		prompt = topic
+	}
+	if documentType == "" || prompt == "" {
+		return types.GenerateInput{}, fmt.Errorf("task was interrupted and cannot be resumed; missing original prompt")
+	}
+	input := types.GenerateInput{
+		DocumentType:     types.DocumentType(documentType),
+		Topic:            topic,
+		Prompt:           prompt,
+		WorkspaceID:      taskCtx.WorkspaceID,
+		NoProject:        strings.TrimSpace(taskCtx.WorkspaceID) == "",
+		ConversationID:   taskCtx.ConversationID,
+		ParentTaskID:     taskCtx.ParentTaskID,
+		RuntimeMode:      stringField(userInput, "runtime_mode", "runtimeMode"),
+		PromptTemplateID: stringField(userInput, "prompt_template_id", "promptTemplateId"),
+		SourceFile:       stringField(userInput, "source_file", "sourceFile"),
+		ReferenceImages:  stringSliceField(userInput, "reference_images", "referenceImages"),
+		ImageRatio:       stringField(userInput, "image_ratio", "imageRatio"),
+		FPS:              intField(userInput, "fps"),
+		OutputDir:        stringField(userInput, "output_dir", "outputDir"),
+		Publish:          boolField(userInput, "publish"),
+		ImageQuality:     stringField(userInput, "image_quality", "imageQuality"),
+		LocalPreview:     boolField(userInput, "local_preview", "localPreview"),
+	}
+	if v, ok := optionalBoolField(userInput, "enable_images", "enableImages"); ok {
+		input.EnableImages = &v
+	}
+	return input, nil
+}
+
+func waitForRecoverablePendingInput(ctx context.Context, client *bridge.Client, taskID string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		status, err := client.TaskStatus(waitCtx, taskID)
+		if err != nil {
+			return err
+		}
+		if len(status.CurrentQuestion) > 0 || len(status.CurrentPlan) > 0 {
+			return nil
+		}
+		if status.Status == "failed" || status.Status == "completed" || status.Status == "cancelled" {
+			return fmt.Errorf("task recovery failed before input was requested: %s", status.Status)
+		}
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("task recovery timed out waiting for pending input")
+		case <-ticker.C:
+		}
+	}
 }
 
 // Cancel asks the bridge to cancel a running task.
@@ -444,7 +719,39 @@ func (a *App) Cancel(taskID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.CancelTask(a.ctx, taskID)
+	raw, err := client.CancelTask(a.ctx, taskID)
+	if err != nil {
+		if isBridgeTaskNotFoundError(err) {
+			a.recordLocalTaskCancelled(taskID, "Task was already gone when cancellation was requested")
+		}
+		return raw, err
+	}
+	a.recordLocalTaskCancelled(taskID, "Task cancelled by user")
+	return raw, nil
+}
+
+func (a *App) recordLocalTaskCancelled(taskID, message string) {
+	if a.localStore == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Task cancelled"
+	}
+	_ = a.localStore.RecordEvent(types.BridgeEvent{
+		EventID: "local-cancel-" + uuid.NewString(),
+		TaskID:  strings.TrimSpace(taskID),
+		Type:    "task.cancelled",
+		TS:      time.Now().UTC().Format(time.RFC3339Nano),
+		Payload: map[string]any{"message": message},
+	})
+}
+
+func isBridgeTaskNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") || strings.Contains(message, "not_found")
 }
 
 // ─── Shell / dialog bindings ────────────────────────────────────────────────
@@ -1782,7 +2089,7 @@ func (a *App) runOfficialPaidProviderProbe(s types.UserSettings, pool *netproxy.
 		"--prompt",
 		"Write exactly: OfficeDex provider connection test OK.",
 		"--mode",
-		"best",
+		"fast",
 		"--out",
 		outDir,
 		"--no-publish",
@@ -2260,6 +2567,208 @@ func stringField(payload map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func mapField(payload map[string]any, keys ...string) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	for _, k := range keys {
+		v, ok := payload[k]
+		if !ok {
+			continue
+		}
+		if item, ok := v.(map[string]any); ok {
+			return item
+		}
+	}
+	return nil
+}
+
+func nestedStringField(payload map[string]any, fieldKeys []string, containerKeys ...string) string {
+	if v := stringField(payload, fieldKeys...); v != "" {
+		return v
+	}
+	for _, key := range containerKeys {
+		if v := stringField(mapField(payload, key), fieldKeys...); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func recoverPromptFromPayload(payload map[string]any) string {
+	return nestedStringField(payload, []string{"prompt"}, "text_input", "textInput", "content_input", "contentInput")
+}
+
+func recoverTopicFromPayload(payload map[string]any) string {
+	return nestedStringField(payload, []string{"topic"}, "text_input", "textInput", "content_input", "contentInput")
+}
+
+func normalizeGenerateInputText(input types.GenerateInput) types.GenerateInput {
+	out := input
+	if strings.TrimSpace(out.Topic) == "" {
+		out.Topic = strings.TrimSpace(out.Prompt)
+	}
+	if strings.TrimSpace(out.Prompt) == "" {
+		out.Prompt = strings.TrimSpace(out.Topic)
+	}
+	return out
+}
+
+func intField(payload map[string]any, keys ...string) int {
+	if payload == nil {
+		return 0
+	}
+	for _, k := range keys {
+		v, ok := payload[k]
+		if !ok {
+			continue
+		}
+		switch n := v.(type) {
+		case int:
+			return n
+		case int64:
+			return int(n)
+		case float64:
+			return int(n)
+		case json.Number:
+			if i, err := n.Int64(); err == nil {
+				return int(i)
+			}
+		}
+	}
+	return 0
+}
+
+func boolField(payload map[string]any, keys ...string) bool {
+	v, _ := optionalBoolField(payload, keys...)
+	return v
+}
+
+func optionalBoolField(payload map[string]any, keys ...string) (bool, bool) {
+	if payload == nil {
+		return false, false
+	}
+	for _, k := range keys {
+		v, ok := payload[k]
+		if !ok {
+			continue
+		}
+		switch b := v.(type) {
+		case bool:
+			return b, true
+		case string:
+			if strings.EqualFold(b, "true") {
+				return true, true
+			}
+			if strings.EqualFold(b, "false") {
+				return false, true
+			}
+		}
+	}
+	return false, false
+}
+
+func stringSliceField(payload map[string]any, keys ...string) []string {
+	if payload == nil {
+		return nil
+	}
+	for _, k := range keys {
+		v, ok := payload[k]
+		if !ok {
+			continue
+		}
+		switch items := v.(type) {
+		case []string:
+			return append([]string(nil), items...)
+		case []any:
+			out := make([]string, 0, len(items))
+			for _, item := range items {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+func generateInputEventPayload(input types.GenerateInput, taskCtx localstore.TaskContext) map[string]any {
+	input = normalizeGenerateInputText(input)
+	payload := map[string]any{
+		"document_type": input.DocumentType,
+		"documentType":  input.DocumentType,
+		"topic":         input.Topic,
+		"prompt":        input.Prompt,
+		"noProject":     input.NoProject,
+		"local_preview": input.LocalPreview,
+		"localPreview":  input.LocalPreview,
+	}
+	if taskCtx.ConversationID != "" {
+		payload["conversation_id"] = taskCtx.ConversationID
+		payload["conversationId"] = taskCtx.ConversationID
+	}
+	if taskCtx.ParentTaskID != "" {
+		payload["parent_task_id"] = taskCtx.ParentTaskID
+		payload["parentTaskId"] = taskCtx.ParentTaskID
+	}
+	if taskCtx.WorkspaceID != "" {
+		payload["workspace_id"] = taskCtx.WorkspaceID
+		payload["workspaceId"] = taskCtx.WorkspaceID
+	}
+	if input.WorkspaceID != "" {
+		payload["workspace_id"] = input.WorkspaceID
+		payload["workspaceId"] = input.WorkspaceID
+	}
+	if input.ConversationID != "" && taskCtx.ConversationID == "" {
+		payload["conversation_id"] = input.ConversationID
+		payload["conversationId"] = input.ConversationID
+	}
+	if input.ParentTaskID != "" && taskCtx.ParentTaskID == "" {
+		payload["parent_task_id"] = input.ParentTaskID
+		payload["parentTaskId"] = input.ParentTaskID
+	}
+	if input.RuntimeMode != "" {
+		payload["runtime_mode"] = input.RuntimeMode
+		payload["runtimeMode"] = input.RuntimeMode
+	}
+	if input.PromptTemplateID != "" {
+		payload["prompt_template_id"] = input.PromptTemplateID
+		payload["promptTemplateId"] = input.PromptTemplateID
+	}
+	if input.SourceFile != "" {
+		payload["source_file"] = input.SourceFile
+		payload["sourceFile"] = input.SourceFile
+	}
+	if len(input.ReferenceImages) > 0 {
+		payload["reference_images"] = input.ReferenceImages
+		payload["referenceImages"] = input.ReferenceImages
+	}
+	if strings.TrimSpace(input.ImageRatio) != "" {
+		payload["image_ratio"] = strings.TrimSpace(input.ImageRatio)
+		payload["imageRatio"] = strings.TrimSpace(input.ImageRatio)
+	}
+	if input.FPS > 0 {
+		payload["fps"] = input.FPS
+	}
+	if input.OutputDir != "" {
+		payload["output_dir"] = input.OutputDir
+		payload["outputDir"] = input.OutputDir
+	}
+	if input.Publish {
+		payload["publish"] = true
+	}
+	if input.EnableImages != nil {
+		payload["enable_images"] = *input.EnableImages
+		payload["enableImages"] = *input.EnableImages
+	}
+	if input.ImageQuality != "" {
+		payload["image_quality"] = input.ImageQuality
+		payload["imageQuality"] = input.ImageQuality
+	}
+	return payload
 }
 
 // ─── Internals ──────────────────────────────────────────────────────────────
@@ -3094,6 +3603,18 @@ func emit(ctx context.Context, channel string, payload any) {
 		return
 	}
 	wailsruntime.EventsEmit(ctx, channel, payload)
+}
+
+func canEmitWailsEvent(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	switch fmt.Sprintf("%T", ctx) {
+	case "context.backgroundCtx", "context.todoCtx":
+		return false
+	default:
+		return true
+	}
 }
 
 func artifactFromCompletedEvent(event types.BridgeEvent) *types.Artifact {

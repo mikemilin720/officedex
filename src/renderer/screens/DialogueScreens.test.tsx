@@ -296,7 +296,7 @@ describe("DialogueScreen state machine", () => {
     );
   });
 
-  it("Question state responds to a multi-step option with top-level answer fields", async () => {
+  it("Question state responds to a multi-step option with ordered answers", async () => {
     const task: DesktopTask = {
       id: "task-multi-q",
       conversationId: "task-multi-q",
@@ -335,10 +335,10 @@ describe("DialogueScreen state machine", () => {
     expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
       taskId: "task-multi-q",
       questionId: "question-000009",
-      optionId: "leadership",
-      answer: "Leadership",
+      answers: [
+        { questionGroupId: "question-000009", questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
+      ],
     }));
-    expect(respondSpy.mock.calls[0][0]).not.toHaveProperty("answers");
   });
 
   it("Question state waits for the bridge to send the next prompt after an option", async () => {
@@ -376,6 +376,178 @@ describe("DialogueScreen state machine", () => {
     await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Which tone should it use?")).toBeNull();
     expect(screen.getByText("Question 1 of 2")).toBeTruthy();
+  });
+
+  it("restores a selected plan question option after the composer remounts", async () => {
+    const question = {
+      id: "question-restore-option",
+      question: "Who is the audience?",
+      options: [{ id: "leadership", label: "Leadership" }],
+      allowFreeform: false,
+      questions: [
+        {
+          id: "q-audience",
+          question: "Who is the audience?",
+          options: [{ id: "leadership", label: "Leadership" }],
+          allowFreeform: false,
+        },
+        {
+          id: "q-tone",
+          question: "Which tone should it use?",
+          options: [{ id: "detailed", label: "Detailed" }],
+          allowFreeform: false,
+        },
+      ],
+    };
+    const task: DesktopTask = {
+      id: "task-restore-option",
+      conversationId: "task-restore-option",
+      status: "question",
+      events: [],
+      question: { ...question, currentIndex: 0 },
+    };
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^leadership$/i }));
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[{ ...task, status: "running", question: undefined }]} />);
+    rerender(<DialogueScreen {...baseProps()} tasks={[{ ...task, question: { ...question, id: "question-restore-option-next", currentIndex: 1 } }]} />);
+    fireEvent.click(screen.getByRole("button", { name: /previous question/i }));
+
+    expect(screen.getByRole("button", { name: /^leadership$/i }).classList.contains("ant-btn-primary")).toBe(true);
+  });
+
+  it("restores a custom plan question answer after the composer remounts", async () => {
+    const question = {
+      id: "question-restore-freeform",
+      question: "What context should be included?",
+      options: [],
+      allowFreeform: true,
+      questions: [
+        {
+          id: "q-context",
+          question: "What context should be included?",
+          options: [],
+          allowFreeform: true,
+        },
+        {
+          id: "q-tone",
+          question: "Which tone should it use?",
+          options: [{ id: "concise", label: "Concise" }],
+          allowFreeform: false,
+        },
+      ],
+    };
+    const task: DesktopTask = {
+      id: "task-restore-freeform",
+      conversationId: "task-restore-freeform",
+      status: "question",
+      events: [],
+      question: { ...question, currentIndex: 0 },
+    };
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const input = screen.getByPlaceholderText(/custom answer if none of the options fit/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Mention the 2026 launch plan." } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[{ ...task, status: "running", question: undefined }]} />);
+    rerender(<DialogueScreen {...baseProps()} tasks={[{ ...task, question: { ...question, id: "question-restore-freeform-next", currentIndex: 1 } }]} />);
+    fireEvent.click(screen.getByRole("button", { name: /previous question/i }));
+
+    const restoredInput = screen.getByPlaceholderText(/custom answer if none of the options fit/i) as HTMLInputElement;
+    expect(restoredInput.value).toBe("Mention the 2026 launch plan.");
+    expect(restoredInput.closest("form")?.classList.contains("user-answer-selected")).toBe(true);
+  });
+
+  it("renders persisted plan question answers after a cold history restore", () => {
+    const task: DesktopTask = {
+      id: "task-history-answers",
+      conversationId: "task-history-answers",
+      status: "question",
+      events: [],
+      question: {
+        id: "question-history-answers",
+        question: "What context should be included?",
+        options: [],
+        allowFreeform: true,
+        currentIndex: 1,
+        questions: [
+          {
+            id: "q-audience",
+            question: "Who is the audience?",
+            options: [{ id: "leadership", label: "Leadership" }],
+            allowFreeform: false,
+          },
+          {
+            id: "q-context",
+            question: "What context should be included?",
+            options: [],
+            allowFreeform: true,
+          },
+        ],
+        answers: [
+          { questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
+          { questionId: "q-context", answer: "Mention the 2026 launch plan.", questionIndex: 1 },
+        ],
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const input = screen.getByPlaceholderText(/custom answer if none of the options fit/i) as HTMLInputElement;
+    expect(input.value).toBe("Mention the 2026 launch plan.");
+    expect(input.closest("form")?.classList.contains("user-answer-selected")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /previous question/i }));
+    expect(screen.getByRole("button", { name: /^leadership$/i }).classList.contains("ant-btn-primary")).toBe(true);
+  });
+
+  it("submits ordered answers for a restored multi-step plan question", async () => {
+    const task: DesktopTask = {
+      id: "task-history-submit-answers",
+      conversationId: "task-history-submit-answers",
+      status: "question",
+      events: [],
+      question: {
+        id: "question-history-submit",
+        question: "Which tone should it use?",
+        options: [{ id: "concise", label: "Concise" }],
+        allowFreeform: false,
+        currentIndex: 1,
+        questions: [
+          {
+            id: "q-audience",
+            question: "Who is the audience?",
+            options: [{ id: "leadership", label: "Leadership" }],
+            allowFreeform: false,
+          },
+          {
+            id: "q-tone",
+            question: "Which tone should it use?",
+            options: [{ id: "concise", label: "Concise" }],
+            allowFreeform: false,
+          },
+        ],
+        answers: [
+          { questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
+        ],
+      },
+    };
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^concise$/i }));
+
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledTimes(1));
+    expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-history-submit-answers",
+      questionId: "question-history-submit",
+      answers: [
+        { questionGroupId: "question-history-submit", questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
+        { questionGroupId: "question-history-submit", questionId: "q-tone", optionId: "concise", answer: "Concise", questionIndex: 1 },
+      ],
+    }));
   });
 
   it("places the active question between progress and the answer controls", () => {
@@ -446,27 +618,204 @@ describe("DialogueScreen state machine", () => {
     ));
   });
 
-  it("Plan review state auto-approves the proposed plan and hides manual review actions", async () => {
+  it("Plan review state waits for explicit approval or revision after showing the execution prompt", async () => {
+    const longPlanMarkdown = [
+      "# Proposed Plan",
+      "",
+      "- Build a concise deck after approval.",
+      ...Array.from({ length: 30 }, (_, index) => `- Restored plan detail ${index + 1}: keep the review card usable after restart.`),
+    ].join("\n");
     const task: DesktopTask = {
       id: "task-plan",
       conversationId: "task-plan",
       status: "plan_review",
       events: [],
+      stages: [
+        { id: "analyze", label: "Analyzing request", status: "completed" },
+        { id: "format", label: "Formatting & export", status: "active" },
+      ],
+      runtimeSnapshot: { mode: "hosted" },
       plan: {
         id: "plan-1",
-        markdown: "# Proposed Plan\n\n- Build a concise deck after approval.",
+        markdown: longPlanMarkdown,
         revision: 1,
+        executionPrompt: "Generate a concise deck after the user reviews this prompt.",
       },
     };
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
+    expect(screen.getByText("Execution plan")).toBeTruthy();
     expect(screen.getByText(/Build a concise deck after approval/i)).toBeTruthy();
+    expect(screen.getByText("Full execution prompt")).toBeTruthy();
+    expect(screen.getByText("Generate a concise deck after the user reviews this prompt.")).toBeTruthy();
+    const card = document.querySelector(".plan-review-card");
+    expect(card).toBeTruthy();
+    expect(card?.classList.contains("is-expanded")).toBe(false);
+    const expandButton = screen.getByRole("button", { name: /show full plan/i });
+    expect(expandButton).toBeTruthy();
+    expect(document.querySelector(".plan-review-card .plan-review-actions-panel")).toBeNull();
+    const composer = document.querySelector(".conversation-footer .plan-review-composer") as HTMLElement | null;
+    expect(composer).toBeTruthy();
+    expect(composer?.querySelector(".plan-review-actions-panel")).toBeTruthy();
+    expect(composer?.querySelector(".plan-review-option-row")).toBeTruthy();
+    expect(composer?.querySelector(".plan-review-action-index")).toBeNull();
+    expect(composer?.querySelector(".plan-review-composer-row")).toBeTruthy();
+    expect(within(composer as HTMLElement).getByRole("button", { name: /start execution/i }).classList.contains("plan-review-option-row")).toBe(true);
+    expect(within(composer as HTMLElement).getByRole("button", { name: /submit/i })).toBeDisabled();
+    expect(within(composer as HTMLElement).getByRole("button", { name: /cancel/i })).toBeTruthy();
+    expect(document.querySelector(".plan-review-expand-chin")).toBeTruthy();
+    expect(document.querySelector(".codex-plan-review")).toBeNull();
+    expect(document.querySelector(".fluid-progress-panel")).toBeNull();
+    expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
+    expect(screen.queryByText("Runtime used")).toBeNull();
+    expect(screen.queryByText("Formatting & export")).toBeNull();
+    expect(respondSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(expandButton);
+    expect(card?.classList.contains("is-expanded")).toBe(true);
+    expect(screen.queryByRole("button", { name: /show full plan/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /collapse plan/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /start execution/i }));
     await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: "task-plan", optionId: "approve" }),
+      expect.objectContaining({ taskId: "task-plan", questionId: "plan-1", optionId: "approve" }),
     ));
-    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /revise/i })).toBeNull();
-    expect(screen.queryByPlaceholderText(/revise the plan/i)).toBeNull();
+    respondSpy.mockClear();
+
+    fireEvent.change(screen.getByPlaceholderText(/tell officedex/i), { target: { value: "Add one risk slide." } });
+    expect(within(composer as HTMLElement).getByRole("button", { name: /submit/i })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-plan",
+        questionId: "plan-1",
+        optionId: "revise",
+        answer: "Add one risk slide.",
+      }),
+    ));
+  });
+
+  it("renders plan review markdown as formatted content instead of source text", () => {
+    const task: DesktopTask = {
+      id: "task-plan-markdown",
+      conversationId: "task-plan-markdown",
+      status: "plan_review",
+      events: [],
+      plan: {
+        id: "plan-markdown",
+        markdown: [
+          "# Proposed Plan",
+          "",
+          "- **任务类型**：新建文档",
+          "- Use `pptx` output",
+          "",
+          "Keep the review readable.",
+        ].join("\n"),
+        revision: 1,
+        executionPrompt: "Generate the document after approval.",
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const markdown = document.querySelector(".plan-review-markdown");
+    expect(markdown).toBeTruthy();
+    expect(within(markdown as HTMLElement).getByRole("heading", { name: "Proposed Plan" })).toBeTruthy();
+    expect(within(markdown as HTMLElement).getByText("任务类型").tagName).toBe("STRONG");
+    expect(within(markdown as HTMLElement).getByText("Use", { exact: false }).closest("li")).toBeTruthy();
+    expect(markdown?.querySelector("code")?.textContent).toBe("pptx");
+    expect(markdown?.textContent).not.toContain("# Proposed Plan");
+    expect(markdown?.textContent).not.toContain("**任务类型**");
+  });
+
+  it("keeps a reviewed plan expanded after the same plan card remounts", () => {
+    const task: DesktopTask = {
+      id: "task-plan-persist",
+      conversationId: "task-plan-persist",
+      status: "plan_review",
+      events: [],
+      plan: {
+        id: "plan-persist",
+        markdown: [
+          "# Proposed Plan",
+          "",
+          ...Array.from({ length: 24 }, (_, index) => `- Persisted expanded detail ${index + 1}.`),
+        ].join("\n"),
+        revision: 2,
+        executionPrompt: "Execute only after this persisted plan review is approved.",
+      },
+    };
+
+    const rendered = render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    fireEvent.click(screen.getByRole("button", { name: /show full plan/i }));
+    expect(document.querySelector(".plan-review-card")?.classList.contains("is-expanded")).toBe(true);
+    expect(screen.queryByRole("button", { name: /show full plan/i })).toBeNull();
+
+    rendered.unmount();
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(document.querySelector(".plan-review-card")?.classList.contains("is-expanded")).toBe(true);
+    expect(screen.queryByRole("button", { name: /show full plan/i })).toBeNull();
+  });
+
+  it("keeps restored plan review actions visible below scrollable plan content", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const cardRule = css.match(/\.plan-review-card\s*\{[^}]*\}/s)?.[0] ?? "";
+    const bodyRule = css.match(/\.plan-review-card-body\s*\{[^}]*\}/s)?.[0] ?? "";
+    const markdownRule = css.match(/\.plan-review-markdown\s*\{[^}]*\}/s)?.[0] ?? "";
+    const promptRule = css.match(/\.plan-execution-prompt\s*\{[^}]*\}/s)?.[0] ?? "";
+    const actionsRule = css.match(/\.plan-review-actions-panel\s*\{[^}]*\}/s)?.[0] ?? "";
+    const composerRule = css.match(/\.plan-review-composer\s*\{[^}]*\}/s)?.[0] ?? "";
+    const optionRowRule = css.match(/\.plan-review-option-row\s*\{[^}]*\}/s)?.[0] ?? "";
+    const composerRowRule = css.match(/\.plan-review-composer-row\s*\{[^}]*\}/s)?.[0] ?? "";
+    const approveRule = css.match(/\.plan-review-approve\s*\{[^}]*\}/s)?.[0] ?? "";
+    const cancelRule = css.match(/\.plan-review-cancel\s*\{[^}]*\}/s)?.[0] ?? "";
+    const chinRule = css.match(/\.plan-review-expand-chin\s*\{[^}]*\}/s)?.[0] ?? "";
+    const expandedCardRule = css.match(/\.plan-review-card\.is-expanded\s*\{[^}]*\}/s)?.[0] ?? "";
+    const expandedBodyRule = css.match(/\.plan-review-card\.is-expanded\s+\.plan-review-card-body\s*\{[^}]*\}/s)?.[0] ?? "";
+    const chinHoverRule = css.match(/\.plan-review-expand-chin:hover[^{]*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(cardRule).toContain("align-self: flex-start;");
+    expect(cardRule).not.toContain("align-self: center;");
+    expect(cardRule).toContain("flex: 0 0 auto;");
+    expect(cardRule).toContain("display: grid;");
+    expect(cardRule).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
+    expect(cardRule).toContain("max-height: calc(100vh - 260px);");
+    expect(bodyRule).toContain("min-height: 0;");
+    expect(bodyRule).toContain("overflow-y: auto;");
+    expect(markdownRule).not.toContain("max-height:");
+    expect(markdownRule).not.toContain("overflow-y:");
+    expect(promptRule).not.toContain("max-height:");
+    expect(promptRule).not.toContain("overflow-y:");
+    expect(actionsRule).toContain("position: relative;");
+    expect(actionsRule).not.toContain("grid-row:");
+    expect(actionsRule).not.toContain("border-top:");
+    expect(actionsRule).toContain("background: transparent;");
+    expect(composerRule).toContain("width: min(100%, 980px);");
+    expect(composerRule).toContain("box-shadow:");
+    expect(optionRowRule).toContain("width: 100%;");
+    expect(optionRowRule).toContain("justify-content: flex-start;");
+    expect(composerRowRule).toContain("grid-template-columns: minmax(0, 1fr) auto auto;");
+    expect(approveRule).not.toContain("grid-column: 1 / -1;");
+    expect(approveRule).toContain("width: 100%;");
+    expect(approveRule).toContain("border-color: var(--n-primary) !important;");
+    expect(approveRule).toContain("background: var(--n-primary) !important;");
+    expect(approveRule).toContain("color: var(--n-on-primary) !important;");
+    expect(cancelRule).not.toContain("grid-column: 1 / -1;");
+    expect(cancelRule).toContain("justify-self: end;");
+    expect(chinRule).toContain("width: 100%;");
+    expect(chinRule).not.toContain("position: absolute;");
+    expect(chinRule).not.toContain("transform:");
+    expect(chinHoverRule).toContain("background:");
+    expect(expandedCardRule).toContain("display: block;");
+    expect(expandedCardRule).toContain("max-height: none;");
+    expect(expandedCardRule).toContain("min-height: 0;");
+    expect(expandedCardRule).not.toContain("grid-template-rows:");
+    expect(expandedCardRule).toContain("overflow: hidden;");
+    expect(expandedBodyRule).toContain("display: block;");
+    expect(expandedBodyRule).toContain("height: auto;");
+    expect(expandedBodyRule).toContain("max-height: none;");
+    expect(expandedBodyRule).toContain("overflow: visible;");
   });
 
   it("Plan review cancel marks the task cancelled locally after bridge cancel succeeds", async () => {
@@ -488,6 +837,27 @@ describe("DialogueScreen state machine", () => {
 
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("task-plan-cancel"));
     expect(onForceCancel).toHaveBeenCalledWith("task-plan-cancel");
+  });
+
+  it("Plan review revision input cancels with Escape to match the visible hint", async () => {
+    const onForceCancel = vi.fn();
+    const task: DesktopTask = {
+      id: "task-plan-escape",
+      conversationId: "task-plan-escape",
+      status: "plan_review",
+      events: [],
+      plan: {
+        id: "plan-escape",
+        markdown: "# Proposed Plan\n\n- Review before execution.",
+        revision: 1,
+      },
+    };
+    render(<DialogueScreen {...baseProps({ onForceCancel })} tasks={[task]} />);
+
+    fireEvent.keyDown(screen.getByPlaceholderText(/tell officedex/i), { key: "Escape" });
+
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("task-plan-escape"));
+    expect(onForceCancel).toHaveBeenCalledWith("task-plan-escape");
   });
 
   it("Cancelled terminal tasks do not show bridge event context", () => {
@@ -927,8 +1297,10 @@ describe("DialogueScreen state machine", () => {
     const image = document.querySelector(".image-template-thumb img") as HTMLImageElement;
     expect(image).toBeTruthy();
     fireEvent.error(image);
-    expect(document.querySelector(".image-template-thumb-placeholder")).toBeTruthy();
-    expect(document.querySelector(".image-template-thumb img")).toBeNull();
+    await waitFor(() => {
+      expect(document.querySelector(".image-template-thumb-placeholder")).toBeTruthy();
+      expect(document.querySelector(".image-template-thumb img")).toBeNull();
+    });
   });
 
   it("keeps local image-template management out of the picker", async () => {

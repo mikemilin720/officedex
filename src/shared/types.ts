@@ -195,9 +195,11 @@ export interface TaskQuestionOption {
 }
 
 export interface TaskQuestionAnswer {
+  questionGroupId?: string;
   questionId: string;
   optionId?: string;
   answer: string;
+  questionIndex?: number;
 }
 
 export interface TaskQuestion {
@@ -212,6 +214,7 @@ export interface TaskQuestion {
     allowFreeform: boolean;
   }>;
   currentIndex?: number;
+  answers?: TaskQuestionAnswer[];
 }
 
 export type StageStatus = "pending" | "active" | "completed" | "failed";
@@ -562,6 +565,7 @@ export interface DesktopAPI {
   whoami(): Promise<WhoAmIResult>;
   logout(): Promise<void>;
   getCreditStatus(): Promise<CreditStatus>;
+  sendDesktopNotification?(input: { title: string; body: string }): Promise<void>;
   redeem(code: string): Promise<RedeemResult>;
   getSettings(): Promise<UserSettings>;
   updateSettings(patch: Partial<UserSettings>): Promise<UserSettings>;

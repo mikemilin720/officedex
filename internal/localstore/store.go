@@ -106,6 +106,20 @@ const schemaV4 = `
 CREATE INDEX IF NOT EXISTS idx_conversations_no_project_updated ON conversations(workspace_id, updated_at);
 `
 
+const schemaV5 = `
+CREATE TABLE IF NOT EXISTS task_answers (
+  task_id TEXT NOT NULL,
+  question_group_id TEXT NOT NULL DEFAULT '',
+  question_id TEXT NOT NULL,
+  option_id TEXT NOT NULL DEFAULT '',
+  answer TEXT NOT NULL,
+  question_index INTEGER NOT NULL DEFAULT -1,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(task_id, question_group_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_answers_task_order ON task_answers(task_id, question_index, updated_at);
+`
+
 // Store wraps a SQLite database used to persist bridge events and artifacts.
 // Safe for concurrent use.
 type Store struct {
@@ -127,6 +141,14 @@ type TaskContext struct {
 	WorkspaceID    string
 	ConversationID string
 	ParentTaskID   string
+}
+
+type TaskAnswer struct {
+	QuestionGroupID string
+	QuestionID      string
+	OptionID        string
+	Answer          string
+	QuestionIndex   int
 }
 
 // New creates a Store bound to dbPath. The database file is not opened until
@@ -264,6 +286,30 @@ func applyMigrations(ctx context.Context, db *sql.DB) error {
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("v4 commit: %w", err)
+		}
+	}
+	if current < 5 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin v5: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, schemaV5); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v5 ddl: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (5, ?)`,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v5 stamp: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 5"); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("v5 set user_version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("v5 commit: %w", err)
 		}
 	}
 	return nil
@@ -503,6 +549,30 @@ func (s *Store) RecordTaskContext(ctx context.Context, taskID string, taskCtx Ta
 	return nil
 }
 
+func (s *Store) TaskContext(ctx context.Context, taskID string) (TaskContext, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return TaskContext{}, false, fmt.Errorf("localstore: not open")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return TaskContext{}, false, nil
+	}
+	var out TaskContext
+	err := s.db.QueryRowContext(ctx,
+		`SELECT workspace_id, conversation_id, parent_task_id FROM tasks WHERE id = ?`,
+		taskID,
+	).Scan(&out.WorkspaceID, &out.ConversationID, &out.ParentTaskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskContext{}, false, nil
+	}
+	if err != nil {
+		return TaskContext{}, false, fmt.Errorf("localstore: query task context: %w", err)
+	}
+	return out, true, nil
+}
+
 func (s *Store) TaskWorkspacePath(ctx context.Context, taskID string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -533,6 +603,88 @@ func (s *Store) TaskWorkspacePath(ctx context.Context, taskID string) (string, b
 		return "", false, fmt.Errorf("localstore: query task workspace path: %w", err)
 	}
 	return path, true, nil
+}
+
+func (s *Store) RecordTaskAnswers(ctx context.Context, taskID string, answers []TaskAnswer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("localstore: not open")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || len(answers) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("localstore: begin record task answers: %w", err)
+	}
+	for _, item := range answers {
+		questionID := strings.TrimSpace(item.QuestionID)
+		answer := strings.TrimSpace(item.Answer)
+		if questionID == "" || (strings.TrimSpace(item.OptionID) == "" && answer == "") {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO task_answers(task_id, question_group_id, question_id, option_id, answer, question_index, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(task_id, question_group_id, question_id) DO UPDATE SET
+			   option_id=excluded.option_id,
+			   answer=excluded.answer,
+			   question_index=excluded.question_index,
+			   updated_at=excluded.updated_at`,
+			taskID,
+			strings.TrimSpace(item.QuestionGroupID),
+			questionID,
+			strings.TrimSpace(item.OptionID),
+			answer,
+			item.QuestionIndex,
+			now,
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("localstore: record task answer: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("localstore: commit task answers: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) QueryTaskAnswers(ctx context.Context, taskID string) ([]TaskAnswer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, fmt.Errorf("localstore: not open")
+	}
+	return s.queryTaskAnswersLocked(ctx, taskID)
+}
+
+func (s *Store) queryTaskAnswersLocked(ctx context.Context, taskID string) ([]TaskAnswer, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT question_group_id, question_id, option_id, answer, question_index
+		 FROM task_answers WHERE task_id = ?
+		 ORDER BY CASE WHEN question_index < 0 THEN 999999 ELSE question_index END, updated_at ASC, question_id ASC`,
+		taskID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: query task answers: %w", err)
+	}
+	defer rows.Close()
+	var out []TaskAnswer
+	for rows.Next() {
+		var item TaskAnswer
+		if err := rows.Scan(&item.QuestionGroupID, &item.QuestionID, &item.OptionID, &item.Answer, &item.QuestionIndex); err != nil {
+			return nil, fmt.Errorf("localstore: scan task answer: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 // RecordEvent upserts a row into tasks and inserts/replaces a row into
@@ -659,6 +811,11 @@ func (s *Store) QueryRecentTaskHistory(ctx context.Context, limit int) ([]types.
 		events, err := s.queryEventsByTaskLocked(ctx, entry.TaskID)
 		if err != nil {
 			return nil, err
+		}
+		if answers, err := s.queryTaskAnswersLocked(ctx, entry.TaskID); err != nil {
+			return nil, err
+		} else if len(answers) > 0 {
+			events = append(events, taskAnswersEvent(entry.TaskID, answers))
 		}
 		entry.Events = events
 		entries = append(entries, entry)
@@ -1046,6 +1203,30 @@ func statusFromEvent(eventType string) string {
 		return "plan_review"
 	default:
 		return "running"
+	}
+}
+
+func taskAnswersEvent(taskID string, answers []TaskAnswer) types.BridgeEvent {
+	raw := make([]map[string]any, 0, len(answers))
+	for _, item := range answers {
+		answer := map[string]any{
+			"questionId":    item.QuestionID,
+			"answer":        item.Answer,
+			"questionIndex": item.QuestionIndex,
+		}
+		if item.QuestionGroupID != "" {
+			answer["questionGroupId"] = item.QuestionGroupID
+		}
+		if item.OptionID != "" {
+			answer["optionId"] = item.OptionID
+		}
+		raw = append(raw, answer)
+	}
+	return types.BridgeEvent{
+		EventID: "local-answers-" + taskID,
+		TaskID:  taskID,
+		Type:    "task.answers",
+		Payload: map[string]any{"answers": raw},
 	}
 }
 

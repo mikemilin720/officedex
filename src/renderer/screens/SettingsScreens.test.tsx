@@ -111,6 +111,7 @@ let updateSettingsSpy: ReturnType<typeof vi.fn>;
 let getDefaultWorkspaceDirSpy: ReturnType<typeof vi.fn>;
 let openDirectoryDialogSpy: ReturnType<typeof vi.fn>;
 let testProviderSpy: ReturnType<typeof vi.fn>;
+let sendDesktopNotificationSpy: ReturnType<typeof vi.fn>;
 let whoamiSpy: ReturnType<typeof vi.fn>;
 let getCreditStatusSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
@@ -140,6 +141,7 @@ beforeEach(() => {
   getDefaultWorkspaceDirSpy = vi.fn(async () => "/tmp/default-workspace");
   openDirectoryDialogSpy = vi.fn(async () => null);
   testProviderSpy = vi.fn(async () => ({ ok: true, httpStatus: 200, latencyMs: 10, url: "official" }));
+  sendDesktopNotificationSpy = vi.fn(async () => undefined);
   whoamiSpy = vi.fn(async (): Promise<WhoAmIResult> => ({ mode: "logged_in", userId: "user-settings" }));
   getCreditStatusSpy = vi.fn(async (): Promise<CreditStatus> => ({
     mode: "logged_in",
@@ -163,6 +165,7 @@ beforeEach(() => {
     getDefaultWorkspaceDir: officecli.getDefaultWorkspaceDir,
     openDirectoryDialog: officecli.openDirectoryDialog,
     testProvider: officecli.testProvider,
+    sendDesktopNotification: officecli.sendDesktopNotification,
     whoami: officecli.whoami,
     getCreditStatus: officecli.getCreditStatus,
   };
@@ -171,6 +174,7 @@ beforeEach(() => {
   officecli.getDefaultWorkspaceDir = getDefaultWorkspaceDirSpy as unknown as DesktopAPI["getDefaultWorkspaceDir"];
   officecli.openDirectoryDialog = openDirectoryDialogSpy as unknown as DesktopAPI["openDirectoryDialog"];
   officecli.testProvider = testProviderSpy as unknown as DesktopAPI["testProvider"];
+  officecli.sendDesktopNotification = sendDesktopNotificationSpy as unknown as DesktopAPI["sendDesktopNotification"];
   officecli.whoami = whoamiSpy as unknown as DesktopAPI["whoami"];
   officecli.getCreditStatus = getCreditStatusSpy as unknown as DesktopAPI["getCreditStatus"];
 });
@@ -202,6 +206,7 @@ describe("SettingsScreen", () => {
 
     const menu = await screen.findByRole("navigation", { name: "Settings sections" });
     expect(within(menu).getByRole("button", { name: "Generation" })).toBeTruthy();
+    expect(within(menu).getByRole("button", { name: "Notification" })).toBeTruthy();
     expect(within(menu).queryByRole("button", { name: "Generation Defaults" })).toBeNull();
     expect(within(menu).queryByRole("button", { name: "Image Watermark" })).toBeNull();
     expect(within(menu).queryByRole("button", { name: "Local Image Templates" })).toBeNull();
@@ -274,7 +279,7 @@ describe("SettingsScreen", () => {
     expect(last.defaults?.enableImages).toBe(false);
   });
 
-  it("shows desktop notifications with generation defaults", async () => {
+  it("does not show desktop notifications in the Generation section", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
@@ -283,13 +288,27 @@ describe("SettingsScreen", () => {
     const generationGroup = generationHeading.closest(".setting-group");
 
     expect(generationGroup).not.toBeNull();
-    expect(within(generationGroup as HTMLElement).getByRole("switch", { name: /desktop notifications/i })).toBeTruthy();
+    expect(within(generationGroup as HTMLElement).queryByRole("switch", { name: /desktop notifications/i })).toBeNull();
+  });
+
+  it("shows desktop notifications in a dedicated Notification section", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    await selectSettingsSection("Notification");
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Notification" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: /desktop notifications/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /test desktop notification/i })).not.toBeDisabled();
+    expect(screen.queryByRole("heading", { level: 2, name: "Generation" })).toBeNull();
   });
 
   it("toggles desktop notifications in localStorage without writing Go settings", async () => {
     const { SettingsScreen } = await import("./SettingsScreens");
     render(<SettingsScreen />);
     await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Notification");
     await screen.findByText("Desktop notifications");
 
     const desktopNotificationsSwitch = screen.getByRole("switch", { name: /desktop notifications/i });
@@ -300,6 +319,45 @@ describe("SettingsScreen", () => {
     expect(
       updateSettingsSpy.mock.calls.every((args) => (args[0] as Partial<UserSettings>).defaults?.enableImages === undefined),
     ).toBe(true);
+  });
+
+  it("disables the desktop notification test button when notifications are off", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Notification");
+
+    fireEvent.click(screen.getByRole("switch", { name: /desktop notifications/i }));
+
+    expect(screen.getByRole("button", { name: /test desktop notification/i })).toBeDisabled();
+  });
+
+  it("sends a desktop notification test and reports success", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Notification");
+
+    fireEvent.click(screen.getByRole("button", { name: /test desktop notification/i }));
+
+    await waitFor(() => expect(sendDesktopNotificationSpy).toHaveBeenCalledTimes(1));
+    expect(sendDesktopNotificationSpy).toHaveBeenCalledWith({
+      title: "OfficeDex",
+      body: "This is a test desktop notification from OfficeDex.",
+    });
+    expect(antdMessage.success).toHaveBeenCalledWith("Test notification sent");
+  });
+
+  it("reports desktop notification test failures", async () => {
+    sendDesktopNotificationSpy.mockRejectedValueOnce(new Error("permission denied"));
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+    await selectSettingsSection("Notification");
+
+    fireEvent.click(screen.getByRole("button", { name: /test desktop notification/i }));
+
+    await waitFor(() => expect(antdMessage.error).toHaveBeenCalledWith("Test notification failed: permission denied"));
   });
 
   it("Workspace section is read-only and does not write workspaceDir", async () => {

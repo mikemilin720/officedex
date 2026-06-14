@@ -148,6 +148,80 @@ func TestWorkspaceConversationMetadataPersists(t *testing.T) {
 	}
 }
 
+func TestTaskAnswersPersistAndHydrateHistory(t *testing.T) {
+	store := newTempStore(t)
+	ctx := context.Background()
+
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-question",
+		TaskID:  "task-answers",
+		Type:    "task.question",
+		Payload: map[string]any{
+			"id":            "question-group",
+			"question":      "Who is the audience?",
+			"allowFreeform": true,
+			"currentIndex":  1,
+			"questions": []map[string]any{
+				{
+					"id":       "q-audience",
+					"question": "Who is the audience?",
+					"options":  []map[string]any{{"id": "leadership", "label": "Leadership"}},
+				},
+				{
+					"id":            "q-context",
+					"question":      "What context should be included?",
+					"allowFreeform": true,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RecordEvent question: %v", err)
+	}
+
+	if err := store.RecordTaskAnswers(ctx, "task-answers", []TaskAnswer{
+		{QuestionGroupID: "question-group", QuestionID: "q-audience", OptionID: "leadership", Answer: "Leadership", QuestionIndex: 0},
+		{QuestionGroupID: "question-group", QuestionID: "q-context", Answer: "Mention the 2026 launch plan.", QuestionIndex: 1},
+	}); err != nil {
+		t.Fatalf("RecordTaskAnswers: %v", err)
+	}
+
+	answers, err := store.QueryTaskAnswers(ctx, "task-answers")
+	if err != nil {
+		t.Fatalf("QueryTaskAnswers: %v", err)
+	}
+	if len(answers) != 2 {
+		t.Fatalf("answers = %d, want 2", len(answers))
+	}
+	if answers[0].QuestionID != "q-audience" || answers[0].OptionID != "leadership" || answers[0].QuestionIndex != 0 {
+		t.Fatalf("answer[0] = %#v", answers[0])
+	}
+	if answers[1].QuestionID != "q-context" || answers[1].Answer != "Mention the 2026 launch plan." || answers[1].QuestionIndex != 1 {
+		t.Fatalf("answer[1] = %#v", answers[1])
+	}
+
+	entries, err := store.QueryRecentTaskHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueryRecentTaskHistory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("history entries = %d, want 1", len(entries))
+	}
+	if len(entries[0].Events) != 2 {
+		t.Fatalf("history events = %d, want question plus answers", len(entries[0].Events))
+	}
+	answerEvent := entries[0].Events[1]
+	if answerEvent.Type != "task.answers" {
+		t.Fatalf("history answer event type = %q, want task.answers", answerEvent.Type)
+	}
+	rawAnswers, ok := answerEvent.Payload["answers"].([]map[string]any)
+	if !ok {
+		t.Fatalf("history answers payload = %#v, want []map[string]any", answerEvent.Payload["answers"])
+	}
+	if rawAnswers[1]["answer"] != "Mention the 2026 launch plan." {
+		t.Fatalf("history freeform answer = %#v", rawAnswers[1])
+	}
+}
+
 func TestTaskWorkspacePathReturnsRecordedWorkspacePath(t *testing.T) {
 	store := newTempStore(t)
 	ctx := context.Background()
@@ -422,8 +496,8 @@ func TestSchemaMigrationFromV1DB(t *testing.T) {
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Errorf("user_version = %d, want 4", version)
+	if version != 5 {
+		t.Errorf("user_version = %d, want 5", version)
 	}
 
 	events, err := store.QueryEventsByTask(ctx, "legacy-task")
@@ -824,8 +898,8 @@ func TestSchemaV1MigrationFromLegacyDB(t *testing.T) {
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Errorf("user_version = %d, want 4", version)
+	if version != 5 {
+		t.Errorf("user_version = %d, want 5", version)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)

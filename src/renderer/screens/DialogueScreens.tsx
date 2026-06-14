@@ -8,7 +8,7 @@ import {
   DeleteOutlined,
   DisconnectOutlined,
   DownOutlined,
-
+  EditOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
@@ -22,7 +22,7 @@ import {
   UserOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { getAttachmentSpec } from "../../shared/types";
 import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
@@ -1007,7 +1007,7 @@ function ConversationView({ tasks, onPreview, onForceCancel, onContinueGeneratio
             return <ConversationRound key={task.id} task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={addReferenceImage} onRetryTask={onRetryTask} />;
           }
           // Latest + active: show as active round
-          return <ActiveTaskRound key={task.id} task={task} />;
+          return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} />;
         })}
         <div ref={bottomRef} />
       </div>
@@ -1049,8 +1049,9 @@ function ConversationRound({ task, onPreview, onOpenLogin, onUseAsReference, onR
 
 /* ─── Active Task Round (running / starting / question) ─── */
 
-function ActiveTaskRound({ task }: {
+function ActiveTaskRound({ task, onForceCancel }: {
   task: DesktopTask;
+  onForceCancel?: (taskId: string) => void;
 }) {
   const t = useT();
   const capability = useReportCapability();
@@ -1097,8 +1098,8 @@ function ActiveTaskRound({ task }: {
         </ul>
       </div>
       {task.status === "plan_review" && task.plan ? <PlanReviewMessage task={task} /> : null}
-      <TaskRuntimePanel task={task} />
-      <FluidProgressPanel task={task} />
+      {task.status === "plan_review" ? null : <TaskRuntimePanel task={task} />}
+      {task.status === "plan_review" ? null : <FluidProgressPanel task={task} />}
       {task.stalledSince ? (
         <div className="message ai-message stalled-hint" style={{ borderLeft: "3px solid #fa8c16" }}>
           <div className="message-author">
@@ -1128,26 +1129,267 @@ function ActiveTaskRound({ task }: {
   );
 }
 
+function renderPlanInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let cursor = 0;
+  let tokenIndex = 0;
+
+  for (const match of text.matchAll(tokenPattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      nodes.push(text.slice(cursor, index));
+    }
+
+    const token = match[0];
+    const key = `${keyPrefix}-inline-${tokenIndex}`;
+    if (token.startsWith("**")) {
+      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    } else {
+      nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
+    }
+    cursor = index + token.length;
+    tokenIndex += 1;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+  return nodes;
+}
+
+function PlanMarkdown({ markdown }: { markdown: string }) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let index = 0;
+
+  const heading = (depth: number, content: string, key: string) => {
+    const children = renderPlanInlineMarkdown(content, key);
+    if (depth <= 1) return <h4 key={key}>{children}</h4>;
+    if (depth === 2) return <h5 key={key}>{children}</h5>;
+    return <h6 key={key}>{children}</h6>;
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      blocks.push(heading(headingMatch[1].length, headingMatch[2].trim(), `plan-heading-${index}`));
+      index += 1;
+      continue;
+    }
+
+    const unorderedMatch = /^\s*[-*]\s+(.+)$/.exec(line);
+    const orderedMatch = /^\s*\d+\.\s+(.+)$/.exec(line);
+    if (unorderedMatch || orderedMatch) {
+      const ordered = Boolean(orderedMatch);
+      const items: ReactNode[] = [];
+      while (index < lines.length) {
+        const itemMatch = ordered ? /^\s*\d+\.\s+(.+)$/.exec(lines[index]) : /^\s*[-*]\s+(.+)$/.exec(lines[index]);
+        if (!itemMatch) break;
+        items.push(<li key={`plan-item-${index}`}>{renderPlanInlineMarkdown(itemMatch[1].trim(), `plan-item-${index}`)}</li>);
+        index += 1;
+      }
+      const key = `plan-list-${index}`;
+      blocks.push(ordered ? <ol key={key}>{items}</ol> : <ul key={key}>{items}</ul>);
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const current = lines[index];
+      const currentTrimmed = current.trim();
+      if (!currentTrimmed) break;
+      if (/^(#{1,6})\s+/.test(currentTrimmed) || /^\s*[-*]\s+/.test(current) || /^\s*\d+\.\s+/.test(current)) break;
+      paragraphLines.push(currentTrimmed);
+      index += 1;
+    }
+    const text = paragraphLines.join(" ");
+    if (text) {
+      blocks.push(<p key={`plan-paragraph-${index}`}>{renderPlanInlineMarkdown(text, `plan-paragraph-${index}`)}</p>);
+    }
+  }
+
+  return <div className="plan-review-markdown">{blocks}</div>;
+}
+
+const PLAN_REVIEW_EXPANDED_STORAGE_PREFIX = "officedex.planReview.expanded.";
+
+function planReviewExpandedStorageKey(taskId: string, planId: string, revision?: number) {
+  return `${PLAN_REVIEW_EXPANDED_STORAGE_PREFIX}${taskId}:${planId}:${revision ?? 0}`;
+}
+
+function readPlanReviewExpanded(storageKey: string) {
+  if (!storageKey || typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(storageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function savePlanReviewExpanded(storageKey: string) {
+  if (!storageKey || typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(storageKey, "1");
+  } catch {
+    // Expansion is a convenience preference; storage failures should not block review.
+  }
+}
+
 function PlanReviewMessage({ task }: { task: DesktopTask }) {
   const t = useT();
+  const storageKey = task.plan ? planReviewExpandedStorageKey(task.id, task.plan.id, task.plan.revision) : "";
+  const [expanded, setExpanded] = useState(() => readPlanReviewExpanded(storageKey));
+  useEffect(() => {
+    setExpanded(readPlanReviewExpanded(storageKey));
+  }, [storageKey]);
   if (!task.plan) return null;
   const planKey = `${task.plan.id}-${task.plan.revision}`;
+  const expandPlanReview = () => {
+    savePlanReviewExpanded(storageKey);
+    setExpanded(true);
+  };
+
   return (
-    <div className="message ai-message plan-review-message" key={`plan-mount-${task.id}`}>
-      <div className="message-author">
-        <FileTextOutlined />
-        <strong>{t("dialogue.planReview.title")}</strong>
-        {task.plan.revision ? <Tag color="processing">{t("dialogue.planReview.revision", { revision: task.plan.revision })}</Tag> : null}
+    <div className={`message ai-message plan-review-message plan-review-card ${expanded ? "is-expanded" : ""}`} key={`plan-mount-${task.id}`}>
+      <div className="plan-review-card-header">
+        <div className="message-author">
+          <FileTextOutlined />
+          <strong>{t("dialogue.planReview.title")}</strong>
+          {task.plan.revision ? <Tag color="processing">{t("dialogue.planReview.revision", { revision: task.plan.revision })}</Tag> : null}
+        </div>
       </div>
-      <div key={planKey}>
-        <pre>{task.plan.markdown}</pre>
+      <div className="plan-review-card-body" key={planKey}>
+        <section className="plan-review-section">
+          <h3>{t("dialogue.planReview.planTitle")}</h3>
+          <PlanMarkdown markdown={task.plan.markdown} />
+        </section>
+        {task.plan.executionPrompt ? (
+          <section className="plan-review-section plan-execution-prompt-section">
+            <h3>{t("dialogue.planReview.executionPrompt")}</h3>
+            <pre className="plan-execution-prompt">{task.plan.executionPrompt}</pre>
+          </section>
+        ) : null}
       </div>
-      {task.plan.executionPrompt ? (
-        <details className="plan-execution-prompt-details">
-          <summary>{t("dialogue.planReview.executionPrompt")}</summary>
-          <pre className="plan-execution-prompt">{task.plan.executionPrompt}</pre>
-        </details>
+      {!expanded ? (
+        <button
+          type="button"
+          className="plan-review-expand-chin"
+          aria-label={t("dialogue.planReview.showFull")}
+          title={t("dialogue.planReview.showFull")}
+          onClick={expandPlanReview}
+        >
+          <span>{t("dialogue.planReview.showFull")}</span>
+          <DownOutlined />
+        </button>
       ) : null}
+    </div>
+  );
+}
+
+function PlanReviewActions({ task, onForceCancel }: { task: DesktopTask; onForceCancel?: (taskId: string) => void }) {
+  const t = useT();
+  const [planRevision, setPlanRevision] = useState("");
+  const [submittingPlanAction, setSubmittingPlanAction] = useState<"approve" | "revise" | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  if (!task.plan) return null;
+
+  const submitPlanAction = async (optionId: "approve" | "revise", answer?: string) => {
+    if (!task.plan || submittingPlanAction) return;
+    const trimmedAnswer = answer?.trim() ?? "";
+    if (optionId === "revise" && !trimmedAnswer) return;
+    setSubmittingPlanAction(optionId);
+    try {
+      await officecli.respond({
+        taskId: task.id,
+        questionId: task.plan.id,
+        optionId,
+        answer: trimmedAnswer || undefined,
+      });
+      if (optionId === "revise") {
+        setPlanRevision("");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`Plan response failed: ${msg}`);
+    } finally {
+      setSubmittingPlanAction(null);
+    }
+  };
+
+  const cancelPlan = async () => {
+    setCancelling(true);
+    try {
+      await officecli.cancel(task.id);
+      onForceCancel?.(task.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found") && onForceCancel) {
+        onForceCancel(task.id);
+      } else {
+        message.error(`Cancel failed: ${msg}`);
+      }
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return (
+    <div className="docked-composer plan-review-composer">
+      <div className="plan-review-actions-panel">
+        <div className="plan-review-actions-title">{t("dialogue.planReview.promptTitle")}</div>
+        <Button
+          className="plan-review-option-row plan-review-approve"
+          loading={submittingPlanAction === "approve"}
+          disabled={Boolean(submittingPlanAction)}
+          onClick={() => void submitPlanAction("approve")}
+        >
+          <span className="plan-review-option-label">{t("dialogue.planReview.approve")}</span>
+        </Button>
+        <div className="plan-review-composer-row">
+          <Input
+            prefix={<EditOutlined />}
+            placeholder={t("dialogue.planReview.revisePlaceholder")}
+            value={planRevision}
+            onChange={(event) => setPlanRevision(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || submittingPlanAction || cancelling) return;
+              event.preventDefault();
+              event.stopPropagation();
+              void cancelPlan();
+            }}
+            onPressEnter={() => void submitPlanAction("revise", planRevision)}
+            disabled={Boolean(submittingPlanAction)}
+          />
+          <Button
+            type="text"
+            className="plan-review-cancel"
+            onClick={() => void cancelPlan()}
+            loading={cancelling}
+            disabled={Boolean(submittingPlanAction)}
+          >
+            <span>{t("dialogue.running.cancel")}</span>
+            <kbd>Esc</kbd>
+          </Button>
+          <Button
+            className="plan-review-revise-submit"
+            type="primary"
+            loading={submittingPlanAction === "revise"}
+            disabled={Boolean(submittingPlanAction) || !planRevision.trim()}
+            onClick={() => void submitPlanAction("revise", planRevision)}
+          >
+            {t("dialogue.planReview.revise")}
+            <span className="plan-review-submit-key">↵</span>
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1429,6 +1671,38 @@ function TaskResultMessage({ task, onPreview, onOpenLogin, onUseAsReference, onR
 
 /* ─── Multi-Question Composer ─── */
 
+type QuestionDraft = { optionId?: string; answer: string; freeform: string };
+
+const questionDraftMemory = new Map<string, Record<string, QuestionDraft>>();
+
+function questionDraftMemoryKey(taskId: string, question?: DesktopTask["question"]) {
+  const questionSetKey = Array.isArray(question?.questions) && question.questions.length > 0
+    ? question.questions.map((item) => item.id || item.question).join("|")
+    : question?.id;
+  return `${taskId}:${questionSetKey || "question"}`;
+}
+
+function readQuestionDrafts(key: string): Record<string, QuestionDraft> {
+  return { ...(questionDraftMemory.get(key) ?? {}) };
+}
+
+function rememberQuestionDrafts(key: string, drafts: Record<string, QuestionDraft>) {
+  questionDraftMemory.set(key, { ...drafts });
+}
+
+function draftsFromQuestionAnswers(question?: DesktopTask["question"]): Record<string, QuestionDraft> {
+  const out: Record<string, QuestionDraft> = {};
+  for (const item of question?.answers ?? []) {
+    if (!item.questionId || !item.answer) continue;
+    out[item.questionId] = {
+      optionId: item.optionId,
+      answer: item.answer,
+      freeform: item.optionId ? "" : item.answer,
+    };
+  }
+  return out;
+}
+
 function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onForceCancel?: (taskId: string) => void }) {
   const t = useT();
   const question = task.question;
@@ -1437,13 +1711,31 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
   const isPlanQuestionSet = Boolean(questionSet);
   const isMulti = Boolean(questionSet && questionSet.length > 1);
   const totalQuestions = questionSet ? questionSet.length : 1;
+  const draftMemoryKey = questionDraftMemoryKey(task.id, question);
+  const persistedDrafts = useMemo(() => draftsFromQuestionAnswers(question), [question?.answers]);
   const [currentIndex, setCurrentIndex] = useState(() => question?.currentIndex ?? 0);
-  const [drafts, setDrafts] = useState<Record<string, { optionId?: string; answer: string; freeform: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, QuestionDraft>>(() => ({
+    ...readQuestionDrafts(draftMemoryKey),
+    ...persistedDrafts,
+  }));
   const [freeformValue, setFreeformValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const currentQ = questionSet ? questionSet[currentIndex] : question;
   const currentDraft = drafts[currentQ?.id ?? ""] ?? { answer: "", freeform: "" };
+  const hasFreeformAnswer = currentDraft.freeform.trim().length > 0 && !currentDraft.optionId;
+
+  function saveDrafts(nextDrafts: Record<string, QuestionDraft>) {
+    rememberQuestionDrafts(draftMemoryKey, nextDrafts);
+    setDrafts(nextDrafts);
+  }
+
+  useEffect(() => {
+    setDrafts({
+      ...readQuestionDrafts(draftMemoryKey),
+      ...persistedDrafts,
+    });
+  }, [draftMemoryKey, persistedDrafts]);
 
   useEffect(() => {
     setCurrentIndex(question?.currentIndex ?? 0);
@@ -1453,7 +1745,7 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
     if (currentQ) {
       setFreeformValue(currentDraft.freeform || "");
     }
-  }, [currentIndex, currentQ?.id]);
+  }, [currentIndex, currentQ?.id, currentDraft.freeform]);
 
   async function answerQuestion(optionId?: string, value?: string) {
     if (!currentQ || submitting) return;
@@ -1469,12 +1761,33 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
     };
     setSubmitting(true);
     try {
-      setDrafts(nextDrafts);
-      await officecli.respond({
-        taskId: task.id,
-        questionId: responseQuestionId,
-        ...(optionId ? { optionId, answer } : { answer }),
-      });
+      saveDrafts(nextDrafts);
+      if (isPlanQuestionSet && questionSet) {
+        const responseAnswers = questionSet
+          .map((item, index) => {
+            const draft = nextDrafts[item.id];
+            if (!draft?.answer) return null;
+            return {
+              questionGroupId: responseQuestionId,
+              questionId: item.id,
+              ...(draft.optionId ? { optionId: draft.optionId } : {}),
+              answer: draft.answer,
+              questionIndex: index,
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null);
+        await officecli.respond({
+          taskId: task.id,
+          questionId: responseQuestionId,
+          answers: responseAnswers,
+        });
+      } else {
+        await officecli.respond({
+          taskId: task.id,
+          questionId: responseQuestionId,
+          ...(optionId ? { optionId, answer } : { answer }),
+        });
+      }
     } catch (err) {
       setCurrentIndex(answeredIndex);
       const msg = err instanceof Error ? err.message : String(err);
@@ -1485,17 +1798,35 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
   }
 
   function navigateTo(index: number) {
+    if (!currentQ) {
+      setCurrentIndex(index);
+      return;
+    }
     const draft = freeformValue.trim();
     const selectedOptionId = draft ? undefined : currentDraft.optionId;
-    setDrafts((prev) => ({
-      ...prev,
+    saveDrafts({
+      ...drafts,
       [currentQ?.id ?? ""]: {
         optionId: selectedOptionId,
         answer: draft || currentDraft.answer,
         freeform: draft || currentDraft.freeform,
       },
-    }));
+    });
     setCurrentIndex(index);
+  }
+
+  function updateFreeformValue(value: string) {
+    setFreeformValue(value);
+    if (!currentQ) return;
+    const trimmed = value.trim();
+    saveDrafts({
+      ...drafts,
+      [currentQ.id]: {
+        optionId: trimmed ? undefined : currentDraft.optionId,
+        answer: trimmed,
+        freeform: value,
+      },
+    });
   }
 
   function submitFreeform(event: FormEvent<HTMLFormElement>) {
@@ -1559,12 +1890,12 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
       </div>
 
       {currentQ.allowFreeform !== false ? (
-        <form className="inline-answer" onSubmit={submitFreeform}>
+        <form className={`inline-answer${hasFreeformAnswer ? " user-answer-selected" : ""}`} onSubmit={submitFreeform}>
           <Input
             placeholder={t("dialogue.question.inputPlaceholder")}
             disabled={submitting}
             value={freeformValue}
-            onChange={(event) => setFreeformValue(event.target.value)}
+            onChange={(event) => updateFreeformValue(event.target.value)}
           />
           <Button type="primary" htmlType="submit" icon={<SendOutlined />} loading={submitting} />
         </form>
@@ -1609,7 +1940,6 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
   const [gifFPS, setGIFFPS] = useState<number>(() => normalizeGIFFPS(latestTask.userInput?.fps));
   const [continuationPrompt, setContinuationPrompt] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  const autoApprovedPlanRef = useRef<string>("");
   const referenceImagesSpec = getAttachmentSpec(isGIFGeneration ? "gif" : "img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
 
@@ -1621,43 +1951,16 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
     setGIFFPS(normalizeGIFFPS(latestTask.userInput?.fps));
   }, [latestTask.id, latestTask.userInput?.fps]);
 
-  useEffect(() => {
-    if (status !== "plan_review" || !latestTask.plan) return;
-    const planKey = `${latestTask.id}:${latestTask.plan.id}:${latestTask.plan.revision}`;
-    if (autoApprovedPlanRef.current === planKey) return;
-    autoApprovedPlanRef.current = planKey;
-    officecli.respond({ taskId: latestTask.id, questionId: latestTask.plan.id, optionId: "approve" }).catch((err) => {
-      autoApprovedPlanRef.current = "";
-      const msg = err instanceof Error ? err.message : String(err);
-      message.error(`Plan approval failed: ${msg}`);
-    });
-  }, [latestTask.id, latestTask.plan, status]);
-
   if (status === "plan_review" && latestTask.plan) {
     return (
-      <div className="docked-composer readonly plan-review-composer">
-        <Input prefix={<FileTextOutlined />} suffix={<LoadingOutlined />} placeholder={t("dialogue.running.placeholder")} disabled />
-        <Button danger icon={<StopOutlined />} loading={cancelling} onClick={async () => {
-          setCancelling(true);
-          try {
-            await officecli.cancel(latestTask.id);
-            onForceCancel?.(latestTask.id);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (msg.includes("not found") && onForceCancel) {
-              onForceCancel(latestTask.id);
-            } else {
-              message.error(`Cancel failed: ${msg}`);
-            }
-          } finally {
-            setCancelling(false);
-          }
-        }}>
-          {t("dialogue.running.cancel")}
-        </Button>
-      </div>
+      <PlanReviewActions
+        key={`${latestTask.id}:${latestTask.plan.id}:${latestTask.plan.revision}`}
+        task={latestTask}
+        onForceCancel={onForceCancel}
+      />
     );
   }
+  if (status === "plan_review") return null;
 
   // Running / Starting / Question: readonly composer with cancel
   if (status === "running" || status === "starting") {

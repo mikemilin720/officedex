@@ -68,6 +68,20 @@ const DEFAULT_BROWSER_SETTINGS: UserSettings = {
   imageWatermark: { showWatermark: true, preferenceSource: "system" },
 };
 
+async function sendBrowserNotification(input: { title: string; body: string }): Promise<void> {
+  if (typeof Notification === "undefined") {
+    throw new Error("Desktop notifications are not supported in this browser.");
+  }
+  let permission = Notification.permission;
+  if (permission === "default") {
+    permission = await Notification.requestPermission();
+  }
+  if (permission !== "granted") {
+    throw new Error("desktop notification permission denied");
+  }
+  new Notification(input.title, { body: input.body });
+}
+
 function createBrowserPreviewAPI(): DesktopAPI {
   let browserSettings: UserSettings = {
     ...DEFAULT_BROWSER_SETTINGS,
@@ -106,6 +120,7 @@ function createBrowserPreviewAPI(): DesktopAPI {
     openExternal: async (url: string) => {
       window.open(url, "_blank", "noopener,noreferrer");
     },
+    sendDesktopNotification: sendBrowserNotification,
     openFileDialog: async () => null,
     openDirectoryDialog: async () => null,
     openMultiFileDialog: async () => null,
@@ -616,6 +631,11 @@ function createWailsAPI(): DesktopAPI {
     getBridgeRuntimeSnapshot: async (): Promise<BridgeRuntimeSnapshot> => {
       const raw = (await WailsApp.GetBridgeRuntimeSnapshot()) as Partial<BridgeRuntimeSnapshot> | null;
       return normaliseBridgeRuntimeSnapshot(raw);
+    },
+    sendDesktopNotification: async (input: { title: string; body: string }): Promise<void> => {
+      const fn = optionalWailsFunction<(arg1: never) => Promise<void>>("SendDesktopNotification");
+      if (!fn) throw new Error("Desktop notifications require a newer OfficeDex runtime.");
+      await fn(toWails(input));
     },
     testProvider: async (input?: ProviderTestInput): Promise<ProviderTestResult> => {
       const raw = input
