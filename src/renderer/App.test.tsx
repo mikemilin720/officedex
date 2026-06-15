@@ -137,7 +137,8 @@ describe("App task flow", () => {
         payload: { document_type: "pptx", topic: "Background deck" },
       });
     });
-    expect(await screen.findByText("Thinking...")).toBeTruthy();
+    expect(await screen.findByText("Generating PPTX...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-pptx")).toBeTruthy();
 
     fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
     expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
@@ -327,7 +328,8 @@ describe("App task flow", () => {
       });
     });
 
-    expect(await screen.findByText("Thinking...")).toBeTruthy();
+    expect(await screen.findByText("Writing plan...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-plan")).toBeTruthy();
     expect(screen.getAllByText("Create a stuck DOCX").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: /What should we work on/i })).toBeNull();
   });
@@ -391,7 +393,8 @@ describe("App task flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Generate$/ }));
     await waitFor(() => expect(bridge.generate).toHaveBeenCalledTimes(1));
 
-    expect(await screen.findByText("Thinking...")).toBeTruthy();
+    expect(await screen.findByText("Writing plan...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-plan")).toBeTruthy();
     expect(screen.getAllByText("Create a pending DOCX").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: /What should we work on/i })).toBeNull();
   });
@@ -506,7 +509,8 @@ describe("App task flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Live Bridge Task/ }));
 
-    expect(await screen.findByText("Thinking...")).toBeTruthy();
+    expect(await screen.findByText("Generating PPTX...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-pptx")).toBeTruthy();
   });
 
   it("uses the page-level New chat button to return to a blank composer", async () => {
@@ -779,7 +783,8 @@ describe("App task flow", () => {
     );
 
     expect(screen.getByText("Auto-generate product roadmap")).toBeTruthy();
-    expect(screen.getByText("Thinking...")).toBeTruthy();
+    expect(screen.getByText("Generating PPTX...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-pptx")).toBeTruthy();
     expect(screen.queryByText(/Roadmap task started/)).toBeNull();
     expect(screen.queryByText("Generating milestone sections")).toBeNull();
     expect(screen.queryByText(/Q3 promo/)).toBeNull();
