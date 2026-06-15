@@ -164,6 +164,11 @@ export const zh: Record<string, string> = {
   // Dialogue — running
   "dialogue.running.placeholder": "OfficeDex 正在处理，请稍候……",
   "dialogue.running.cancel": "取消",
+  "dialogue.loading.plan": "正在写计划...",
+  "dialogue.loading.docx": "正在生成 DOCX...",
+  "dialogue.loading.pptx": "正在生成 PPTX...",
+  "dialogue.loading.xlsx": "正在生成 XLSX...",
+  "dialogue.loading.report": "正在生成报告...",
 
   // Dialogue — history
   "dialogue.history.taskInProgress": "任务进行中",

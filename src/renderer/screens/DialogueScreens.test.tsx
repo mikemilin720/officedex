@@ -209,6 +209,28 @@ function makeCompletedDocTask(docType: string, fileName: string): DesktopTask {
   };
 }
 
+function makeRunningTask(overrides: Partial<DesktopTask> = {}): DesktopTask {
+  const documentType = overrides.documentType ?? "docx";
+  return {
+    id: `task-running-${documentType}`,
+    conversationId: `task-running-${documentType}`,
+    status: "running",
+    documentType,
+    topic: `Generate ${documentType}`,
+    events: [
+      { task_id: `task-running-${documentType}`, type: "task.started", payload: { document_type: documentType, topic: `Generate ${documentType}` } },
+      { task_id: `task-running-${documentType}`, type: "task.progress", payload: { stage: "Writing content" } },
+    ],
+    stages: [
+      { id: "analyze", label: "Analyzing request", status: "completed" },
+      { id: "outline", label: "Drafting outline", status: "completed" },
+      { id: "write", label: "Writing content", status: "active" },
+    ],
+    runtimeSnapshot: { mode: "hosted" },
+    ...overrides,
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -665,35 +687,90 @@ describe("DialogueScreen state machine", () => {
     ));
   });
 
-  it("collapses a running generation into a single thinking message", () => {
-    const task: DesktopTask = {
+  it("collapses a running generation into a single loading animation message", () => {
+    const task = makeRunningTask({
       id: "task-running-thinking",
       conversationId: "task-running-thinking",
-      status: "running",
-      documentType: "docx",
       topic: "介绍大闸蟹",
       events: [
         { task_id: "task-running-thinking", type: "task.started", payload: { document_type: "docx", topic: "介绍大闸蟹" } },
         { task_id: "task-running-thinking", type: "task.progress", payload: { stage: "Writing content" } },
       ],
-      stages: [
-        { id: "analyze", label: "Analyzing request", status: "completed" },
-        { id: "outline", label: "Drafting outline", status: "completed" },
-        { id: "write", label: "Writing content", status: "active" },
-      ],
-      runtimeSnapshot: { mode: "hosted" },
-    };
+    });
 
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
     expect(screen.getByText("介绍大闸蟹")).toBeTruthy();
-    expect(screen.getByText("Thinking...")).toBeTruthy();
+    expect(screen.getByText("Generating DOCX...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-message")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-docx")).toBeTruthy();
+    expect(screen.queryByText("Thinking...")).toBeNull();
     expect(screen.queryByText(/Task received/i)).toBeNull();
     expect(screen.queryByText(/Target type/i)).toBeNull();
     expect(screen.queryByText("Runtime used")).toBeNull();
     expect(screen.queryByText("Writing content")).toBeNull();
     expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
     expect(document.querySelector(".fluid-progress-panel")).toBeNull();
+  });
+
+  it.each([
+    ["docx", "Generating DOCX...", ".generation-loading-docx"],
+    ["pptx", "Generating PPTX...", ".generation-loading-pptx"],
+    ["xlsx", "Generating XLSX...", ".generation-loading-xlsx"],
+    ["report", "Generating report...", ".generation-loading-report"],
+  ])("renders the %s generation animation while running", (documentType, label, variantClass) => {
+    render(<DialogueScreen {...baseProps()} tasks={[makeRunningTask({ documentType })]} />);
+
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(document.querySelector(".generation-loading-message")).toBeTruthy();
+    expect(document.querySelector(variantClass)).toBeTruthy();
+    expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
+    expect(document.querySelector(".fluid-progress-panel")).toBeNull();
+  });
+
+  it("renders the plan writing animation before a plan exists", () => {
+    const task = makeRunningTask({
+      documentType: "pptx",
+      userInput: {
+        prompt: "Make a 10-slide onboarding deck",
+        generationMode: "plan",
+      },
+    });
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Writing plan...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-message")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-plan")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-pptx")).toBeNull();
+  });
+
+  it("renders the target document animation after a reviewed plan returns to running", () => {
+    const task = makeRunningTask({
+      documentType: "pptx",
+      userInput: {
+        prompt: "Make a 10-slide onboarding deck",
+        generationMode: "plan",
+      },
+      plan: {
+        id: "plan-1",
+        markdown: "# Plan\n\n- Build the deck.",
+        revision: 1,
+      },
+    });
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Generating PPTX...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-pptx")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-plan")).toBeNull();
+  });
+
+  it.each(["img", "gif"])("keeps the thinking fallback for %s running tasks", (documentType) => {
+    render(<DialogueScreen {...baseProps()} tasks={[makeRunningTask({ documentType })]} />);
+
+    expect(screen.getByText("Thinking...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-message")).toBeNull();
   });
 
   it("Plan review state waits for explicit approval or revision after showing the execution prompt", async () => {

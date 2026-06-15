@@ -1289,7 +1289,7 @@ function ActiveTaskRound({ task, onForceCancel }: {
       <div className="time-marker">{timeMarker}</div>
       <UserMessage task={task} fallback={subject} />
       {isRunning ? (
-        <ThinkingMessage />
+        <GenerationLoadingMessage task={task} />
       ) : isQuestion ? null : (
         <>
           <div className="message ai-message">
@@ -1355,6 +1355,186 @@ function ThinkingMessage() {
         <span />
         <span />
       </span>
+    </div>
+  );
+}
+
+type GenerationLoadingVariant = "plan" | "docx" | "pptx" | "xlsx" | "report";
+
+const GENERATION_LOADING_DOCUMENT_TYPES = new Set<GenerationLoadingVariant>(["docx", "pptx", "xlsx", "report"]);
+
+function generationLoadingVariant(task: DesktopTask): GenerationLoadingVariant | null {
+  if (task.userInput?.generationMode === "plan" && !task.plan) {
+    return "plan";
+  }
+  const documentType = (task.documentType || task.artifact?.documentType || "").toLowerCase();
+  return GENERATION_LOADING_DOCUMENT_TYPES.has(documentType as GenerationLoadingVariant)
+    ? (documentType as GenerationLoadingVariant)
+    : null;
+}
+
+function GenerationLoadingMessage({ task }: { task: DesktopTask }) {
+  const t = useT();
+  const variant = generationLoadingVariant(task);
+  if (!variant) return <ThinkingMessage />;
+
+  return (
+    <div className={`message ai-message generation-loading-message generation-loading-${variant}`} role="status" aria-live="polite">
+      <div className="generation-loading-status">
+        <span className="generation-loading-status-dot" aria-hidden="true" />
+        <span>{t(`dialogue.loading.${variant}`)}</span>
+      </div>
+      <GenerationLoadingVisual variant={variant} stages={task.stages} />
+    </div>
+  );
+}
+
+function GenerationLoadingVisual({ variant, stages }: { variant: GenerationLoadingVariant; stages?: StageState[] }) {
+  return (
+    <div className="generation-loading-visual" aria-hidden="true">
+      {variant === "docx" ? <DocxGenerationSkeleton /> : null}
+      {variant === "pptx" ? <PptxGenerationSkeleton /> : null}
+      {variant === "xlsx" ? <XlsxGenerationSkeleton /> : null}
+      {variant === "report" ? <ReportGenerationSkeleton /> : null}
+      {variant === "plan" ? <PlanGenerationSkeleton stages={stages} /> : null}
+    </div>
+  );
+}
+
+function generationLoadingStyle(vars: Record<string, string>): CSSProperties {
+  return vars as CSSProperties;
+}
+
+function GenerationLoadingLine({ width, delay, height }: { width: string; delay?: string; height?: string }) {
+  return (
+    <span
+      className="generation-loading-line"
+      style={generationLoadingStyle({
+        "--generation-loading-width": width,
+        "--generation-loading-delay": delay ?? "0s",
+        "--generation-loading-height": height ?? "8px",
+      })}
+    />
+  );
+}
+
+function DocxGenerationSkeleton() {
+  const widths = ["92%", "78%", "88%", "66%", "95%", "74%", "84%"];
+  return (
+    <div className="generation-loading-artifact generation-loading-doc-page">
+      <span className="generation-loading-doc-top" />
+      <div className="generation-loading-doc-body">
+        {widths.map((width, index) => (
+          <GenerationLoadingLine key={`${width}-${index}`} width={width} delay={`${index * 0.11}s`} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PptxGenerationSkeleton() {
+  return (
+    <div className="generation-loading-artifact generation-loading-slide">
+      <div className="generation-loading-slide-body">
+        <div className="generation-loading-slide-title">
+          <GenerationLoadingLine width="58%" height="10px" />
+          <GenerationLoadingLine width="36%" delay="0.1s" />
+        </div>
+        <div className="generation-loading-slide-copy">
+          <GenerationLoadingLine width="92%" delay="0.18s" />
+          <GenerationLoadingLine width="72%" delay="0.3s" />
+          <GenerationLoadingLine width="84%" delay="0.42s" />
+        </div>
+        <div className="generation-loading-slide-visual">
+          {[44, 72, 58].map((height, index) => (
+            <span
+              key={height}
+              className="generation-loading-bar"
+              style={generationLoadingStyle({
+                "--generation-loading-bar-height": `${height}%`,
+                "--generation-loading-delay": `${0.24 + index * 0.16}s`,
+              })}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function XlsxGenerationSkeleton() {
+  return (
+    <div className="generation-loading-artifact generation-loading-sheet">
+      <span className="generation-loading-sheet-bar" />
+      <div className="generation-loading-sheet-grid">
+        {Array.from({ length: 30 }, (_, index) => {
+          const isHeader = index < 6;
+          const isValue = !isHeader && [8, 9, 14, 15, 20, 21, 26, 27].includes(index);
+          return (
+            <span
+              key={index}
+              className={`generation-loading-cell${isHeader ? " generation-loading-cell-header" : ""}${isValue ? " generation-loading-cell-value" : ""}`}
+              style={generationLoadingStyle({ "--generation-loading-delay": `${index * 0.045}s` })}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReportGenerationSkeleton() {
+  return (
+    <div className="generation-loading-artifact generation-loading-report-page">
+      <div className="generation-loading-report-body">
+        <div className="generation-loading-report-title">
+          <GenerationLoadingLine width="70%" height="10px" />
+          <GenerationLoadingLine width="45%" delay="0.1s" />
+        </div>
+        <div className="generation-loading-report-stats">
+          {[0.16, 0.28, 0.4].map((delay) => (
+            <span
+              key={delay}
+              className="generation-loading-stat"
+              style={generationLoadingStyle({ "--generation-loading-delay": `${delay}s` })}
+            />
+          ))}
+        </div>
+        <div className="generation-loading-report-copy">
+          {["94%", "82%", "88%", "64%", "76%"].map((width, index) => (
+            <GenerationLoadingLine key={`${width}-${index}`} width={width} delay={`${0.28 + index * 0.11}s`} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanGenerationSkeleton({ stages }: { stages?: StageState[] }) {
+  const stageCount = Math.min(Math.max(stages?.length ?? 4, 3), 4);
+  return (
+    <div className="generation-loading-artifact generation-loading-plan-board">
+      <div className="generation-loading-plan-body">
+        <div className="generation-loading-plan-title">
+          <GenerationLoadingLine width="64%" height="10px" />
+          <GenerationLoadingLine width="42%" delay="0.1s" />
+        </div>
+        <div className="generation-loading-plan-list">
+          {Array.from({ length: stageCount }, (_, index) => (
+            <div
+              key={index}
+              className="generation-loading-plan-step"
+              style={generationLoadingStyle({ "--generation-loading-delay": `${0.2 + index * 0.2}s` })}
+            >
+              <span className={index === 0 ? "generation-loading-plan-check" : "generation-loading-plan-dot"} />
+              <span className="generation-loading-plan-step-copy">
+                <GenerationLoadingLine width={index % 2 === 0 ? "88%" : "74%"} delay={`${0.28 + index * 0.2}s`} />
+                <GenerationLoadingLine width={index % 2 === 0 ? "54%" : "62%"} delay={`${0.36 + index * 0.2}s`} height="6px" />
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -144,6 +144,11 @@ export const en: Record<string, string> = {
   // Dialogue — running
   "dialogue.running.placeholder": "OfficeDex is processing, please wait...",
   "dialogue.running.cancel": "Cancel",
+  "dialogue.loading.plan": "Writing plan...",
+  "dialogue.loading.docx": "Generating DOCX...",
+  "dialogue.loading.pptx": "Generating PPTX...",
+  "dialogue.loading.xlsx": "Generating XLSX...",
+  "dialogue.loading.report": "Generating report...",
 
   // Dialogue — history
   "dialogue.history.taskInProgress": "Task in Progress",
