@@ -28,7 +28,6 @@ export function setNotificationsEnabled(enabled: boolean): void {
 export function maybeNotify({ title, body }: NotificationInput): void {
   try {
     if (!readNotificationsEnabled()) return;
-    if (typeof document !== "undefined" && document.hidden !== true) return;
 
     void officecli.sendDesktopNotification?.({ title, body }).catch(() => undefined);
   } catch {

@@ -23,6 +23,13 @@ function setDocumentHidden(hidden: boolean) {
   });
 }
 
+function setDocumentFocused(focused: boolean) {
+  Object.defineProperty(document, "hasFocus", {
+    configurable: true,
+    value: () => focused,
+  });
+}
+
 function createMemoryStorage(): Storage {
   let store: Record<string, string> = {};
   return {
@@ -53,6 +60,7 @@ describe("desktop notifications", () => {
     localStorage.removeItem(NOTIFICATIONS_STORAGE_KEY);
     mocks.sendDesktopNotification.mockClear();
     setDocumentHidden(true);
+    setDocumentFocused(false);
   });
 
   afterEach(() => {
@@ -79,12 +87,32 @@ describe("desktop notifications", () => {
     );
   });
 
-  it("does not notify while the document is focused", () => {
+  it("notifies while the document is focused", async () => {
     setDocumentHidden(false);
+    setDocumentFocused(true);
 
     maybeNotify({ title: "OfficeDex", body: "Generation finished" });
 
-    expect(mocks.sendDesktopNotification).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(mocks.sendDesktopNotification).toHaveBeenCalledWith({
+        title: "OfficeDex",
+        body: "Generation finished",
+      }),
+    );
+  });
+
+  it("notifies when the app window is unfocused even if the document stays visible", async () => {
+    setDocumentHidden(false);
+    setDocumentFocused(false);
+
+    maybeNotify({ title: "OfficeDex", body: "Generation finished" });
+
+    await vi.waitFor(() =>
+      expect(mocks.sendDesktopNotification).toHaveBeenCalledWith({
+        title: "OfficeDex",
+        body: "Generation finished",
+      }),
+    );
   });
 
   it("does not notify when notifications are disabled", () => {

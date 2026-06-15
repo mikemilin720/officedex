@@ -22,9 +22,9 @@ import {
   UserOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { getAttachmentSpec } from "../../shared/types";
-import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, GenerationMode, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
@@ -45,6 +45,7 @@ export type FailureKind = "connection" | "auth" | "task" | "setup" | "other";
 
 export interface NewGenerationDraft {
   documentType: DocumentType;
+  generationMode?: GenerationMode;
   topic: string;
   prompt: string;
   sourceFile?: string;
@@ -84,6 +85,7 @@ interface DialogueProps {
 
 const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
   documentType: "pptx",
+  generationMode: "plan",
   topic: "",
   prompt: "",
   imageRatio: "square",
@@ -94,6 +96,10 @@ const IMAGE_RATIO_OPTIONS: ImageRatio[] = ["square", "landscape", "portrait"];
 const GIF_FPS_MIN = 4;
 const GIF_FPS_MAX = 24;
 const DEFAULT_GIF_FPS = 16;
+
+function normalizeGenerationMode(_value: unknown): GenerationMode {
+  return "plan";
+}
 
 function normalizeImageRatio(value: unknown): ImageRatio {
   return IMAGE_RATIO_OPTIONS.includes(value as ImageRatio) ? (value as ImageRatio) : "square";
@@ -217,7 +223,9 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
   const t = useT();
   const initialValues = { ...defaultGenerateInput, ...settings.defaults, ...draft };
   initialValues.documentType = normalizeNewGenerationDocumentType(initialValues.documentType);
-  const docType = (Form.useWatch("documentType", form) ?? initialValues.documentType) as DocumentType;
+  initialValues.generationMode = normalizeGenerationMode(initialValues.generationMode);
+  const [currentDocumentType, setCurrentDocumentType] = useState<DocumentType>(initialValues.documentType as DocumentType);
+  const docType = currentDocumentType;
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>();
   const [imageTemplates, setImageTemplates] = useState<ImagePromptTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -297,6 +305,18 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
     referenceImages: draft.referenceImages ?? [],
     onChange: (next) => onDraftChange(next),
   });
+  const [nativeReferenceDropSignal, setNativeReferenceDropSignal] = useState(0);
+
+  useEffect(() => {
+    if (!attachments.referenceImagesSpec) return undefined;
+    return officecli.onFileDrop((paths) => {
+      setNativeReferenceDropSignal((signal) => signal + 1);
+      const added = attachments.addReferenceImagePaths(paths);
+      if (added > 0) {
+        message.success(added === 1 ? t("dialogue.attach.paste.attached") : t("dialogue.attach.paste.attachedMany", { count: added }));
+      }
+    });
+  }, [attachments.referenceImagesSpec, attachments.addReferenceImagePaths, t]);
 
   attachmentDropHandlersRef.current = {
     dragOver: (event: globalThis.DragEvent) => handleAttachmentDragOver(event, attachments),
@@ -324,14 +344,17 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
   }, [nativeDragOverHandler, nativeDropHandler]);
 
   useEffect(() => {
+    const nextDocumentType = normalizeNewGenerationDocumentType(draft.documentType);
+    setCurrentDocumentType(nextDocumentType);
     form.setFieldsValue({
-      documentType: normalizeNewGenerationDocumentType(draft.documentType),
+      documentType: nextDocumentType,
+      generationMode: normalizeGenerationMode(draft.generationMode),
       topic: draft.topic,
       prompt: draft.prompt,
       imageRatio: normalizeImageRatio(draft.imageRatio),
       fps: normalizeGIFFPS(draft.fps),
     });
-  }, [form, draft.documentType, draft.topic, draft.prompt, draft.imageRatio, draft.fps]);
+  }, [form, draft.documentType, draft.generationMode, draft.topic, draft.prompt, draft.imageRatio, draft.fps]);
 
   useEffect(() => {
     if (newChatNudgeKey === 0) return;
@@ -382,6 +405,9 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
   }, [docType, form, loadImageTemplates]);
 
   function applyDraftPatch(patch: Partial<NewGenerationDraft>) {
+    if (patch.documentType) {
+      setCurrentDocumentType(normalizeNewGenerationDocumentType(patch.documentType));
+    }
     form.setFieldsValue(patch);
     onDraftChange(patch);
   }
@@ -479,54 +505,112 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
     return { ok: firstKey === undefined, firstError: firstKey ? errs[firstKey] : undefined };
   }
 
-  const composerActions = (detached: boolean) => (
-    <div className={`composer-actions ${detached ? "image-template-actions-footer" : ""}`}>
-      <Space>
-        {attachments.sourceWorkbookSpec ? (
-          <Tooltip
-            title={
-              attachments.sourceWorkbookSpec.required
-                ? t("dialogue.attach.sourceFile.required", { label: attachments.sourceWorkbookSpec.label, ext: attachments.sourceWorkbookSpec.extensions[0] })
-                : attachments.sourceWorkbookSpec.label
-            }
-          >
-            <Button icon={<PaperClipOutlined />} onClick={attachments.pickSourceFile} aria-label={t("dialogue.attach.sourceFile.aria")} />
-          </Tooltip>
+  const composerActions = (detached: boolean) => {
+    const showAuxiliaryActions = !(detached && docType === "img");
+    return (
+      <div className={`composer-actions ${detached ? "image-template-actions-footer" : ""}`}>
+        {showAuxiliaryActions ? (
+          <Space>
+            {attachments.sourceWorkbookSpec ? (
+              <Tooltip
+                title={
+                  attachments.sourceWorkbookSpec.required
+                    ? t("dialogue.attach.sourceFile.required", { label: attachments.sourceWorkbookSpec.label, ext: attachments.sourceWorkbookSpec.extensions[0] })
+                    : attachments.sourceWorkbookSpec.label
+                }
+              >
+                <Button icon={<PaperClipOutlined />} onClick={attachments.pickSourceFile} aria-label={t("dialogue.attach.sourceFile.aria")} />
+              </Tooltip>
+            ) : null}
+            {attachments.referenceImagesSpec ? (
+              <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
+                <Button
+                  className="reference-image-upload-button"
+                  icon={<MaterialSymbol name="image" />}
+                  onClick={attachments.pickReferenceImages}
+                  disabled={attachments.isReferenceLimitReached}
+                  aria-label={t("dialogue.attach.referenceImages.attach")}
+                >
+                  {t("dialogue.attach.referenceImages.uploadCta")}
+                </Button>
+              </Tooltip>
+            ) : null}
+            <Tooltip title={t("dialogue.attach.advancedOptions")}>
+              <Button icon={<MaterialSymbol name="tune" />} disabled />
+            </Tooltip>
+          </Space>
         ) : null}
-        {attachments.referenceImagesSpec ? (
-          <Tooltip title={t("dialogue.attach.referenceImages.tooltip", { max: attachments.referenceImagesSpec.maxCount })}>
-            <Button
-              className="reference-image-upload-button"
-              icon={<MaterialSymbol name="image" />}
-              onClick={attachments.pickReferenceImages}
-              disabled={attachments.isReferenceLimitReached}
-              aria-label={t("dialogue.attach.referenceImages.attach")}
-            >
-              {t("dialogue.attach.referenceImages.uploadCta")}
-            </Button>
-          </Tooltip>
-        ) : null}
-        <Tooltip title={t("dialogue.attach.advancedOptions")}>
-          <Button icon={<MaterialSymbol name="tune" />} disabled />
-        </Tooltip>
-      </Space>
-      <Button
-        type="primary"
-        htmlType={detached ? "button" : "submit"}
-        icon={<SendOutlined />}
-        loading={busy}
-        onClick={detached ? () => form.submit() : undefined}
-      >
-        {t("dialogue.generate")}
-      </Button>
-    </div>
-  );
+        <Button
+          type="primary"
+          htmlType={detached ? "button" : "submit"}
+          icon={<SendOutlined />}
+          loading={busy}
+          onClick={detached ? () => form.submit() : undefined}
+        >
+          {t("dialogue.generate")}
+        </Button>
+      </div>
+    );
+  };
 
   const documentTypeSelector = (
     <Radio.Group
       optionType="button"
       options={documentTypeOptions.map((option) => ({ value: option.value, label: option.label }))}
     />
+  );
+  const promptField = (
+    <Form.Item name="prompt" rules={[{ required: true, message: t("dialogue.prompt.required") }]} hidden={hasSlots && !rawDecoupled && !rawOpen}>
+      <Input.TextArea className={`new-chat-nudge-input ${promptNudgeActive ? "is-new-chat-nudging" : ""}`} autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
+    </Form.Item>
+  );
+  const sourceFileAttachment = attachments.sourceWorkbookSpec && attachments.sourceFile ? (
+    <div className="attached-file">
+      <PaperClipOutlined />
+      <span title={attachments.sourceFile}>{attachments.sourceFile.split(/[/\\]/).pop()}</span>
+      <Button type="text" size="small" icon={<DeleteOutlined />} onClick={attachments.clearSourceFile} />
+    </div>
+  ) : null;
+  const referenceImageStrip = attachments.referenceImagesSpec && attachments.referenceImages.length > 0 ? (
+    <ReferenceImageStrip
+      items={attachments.referenceImages}
+      maxCount={attachments.referenceImagesSpec.maxCount}
+      onRemove={attachments.removeReferenceImage}
+      showHeader
+      showBadge
+    />
+  ) : null;
+  const imageTemplateControls = (
+    <>
+      {hasSlots && !rawDecoupled ? (
+        <TemplateSlotForm
+          slots={slots}
+          slug={selectedTemplate?.slug ?? ""}
+          values={slotValues}
+          errors={slotErrors}
+          previewText={assembledPreview}
+          onChange={handleSlotChange}
+          t={t}
+        />
+      ) : null}
+      {hasSlots && rawDecoupled ? (
+        <div className="slot-raw-decoupled">
+          <span>{t("dialogue.imageTemplates.rawDecoupledHint")}</span>
+          <Button size="small" onClick={resetToTemplate}>{t("dialogue.imageTemplates.resetToTemplate")}</Button>
+        </div>
+      ) : null}
+      {hasSlots && !rawDecoupled ? (
+        <Button type="link" size="small" className="slot-edit-raw-toggle" onClick={() => setRawOpen((open) => !open)}>
+          {t("dialogue.imageTemplates.editRawToggle")}
+        </Button>
+      ) : null}
+      {selectedTemplateId && !hasSlots ? (
+        <div className="image-template-replace-hint">{t("dialogue.imageTemplates.replaceHint")}</div>
+      ) : null}
+      {promptField}
+      {sourceFileAttachment}
+      {referenceImageStrip}
+    </>
   );
 
   return (
@@ -616,8 +700,13 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
       </section>
       <div className={`fluid-command-footer ${docType === "img" ? "image-template-form-pane" : ""}`}>
         <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={(_, values) => {
+          const nextDocumentType = normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType);
+          setCurrentDocumentType(nextDocumentType);
           onDraftChange({
-            documentType: normalizeNewGenerationDocumentType(values.documentType ?? draft.documentType),
+            documentType: nextDocumentType,
+            generationMode: nextDocumentType === "img" || nextDocumentType === "gif"
+              ? undefined
+              : "plan",
             topic: values.topic ?? "",
             prompt: values.prompt ?? "",
             imageRatio: normalizeImageRatio(values.imageRatio),
@@ -641,6 +730,11 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
             ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
             : submitValues.prompt;
           const nextInput: GenerateInput = { ...submitValues, documentType, prompt, ...attachments.collect() };
+          if (documentType === "img" || documentType === "gif") {
+            delete nextInput.generationMode;
+          } else {
+            nextInput.generationMode = "plan";
+          }
           if (targetWorkspace) {
             nextInput.workspaceId = targetWorkspace.id;
             delete nextInput.noProject;
@@ -689,50 +783,43 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
           <Form.Item name="promptTemplateId" hidden>
             <Input />
           </Form.Item>
-          {docType === "img" && hasSlots && !rawDecoupled ? (
-            <TemplateSlotForm
-              slots={slots}
-              slug={selectedTemplate?.slug ?? ""}
-              values={slotValues}
-              errors={slotErrors}
-              previewText={assembledPreview}
-              onChange={handleSlotChange}
-              t={t}
-            />
-          ) : null}
-          {docType === "img" && hasSlots && rawDecoupled ? (
-            <div className="slot-raw-decoupled">
-              <span>{t("dialogue.imageTemplates.rawDecoupledHint")}</span>
-              <Button size="small" onClick={resetToTemplate}>{t("dialogue.imageTemplates.resetToTemplate")}</Button>
-            </div>
-          ) : null}
-          {docType === "img" && hasSlots && !rawDecoupled ? (
-            <Button type="link" size="small" className="slot-edit-raw-toggle" onClick={() => setRawOpen((open) => !open)}>
-              {t("dialogue.imageTemplates.editRawToggle")}
-            </Button>
-          ) : null}
-          {docType === "img" && selectedTemplateId && !hasSlots ? (
-            <div className="image-template-replace-hint">{t("dialogue.imageTemplates.replaceHint")}</div>
-          ) : null}
-          <Form.Item name="prompt" rules={[{ required: true, message: t("dialogue.prompt.required") }]} hidden={hasSlots && !rawDecoupled && !rawOpen}>
-            <Input.TextArea className={`new-chat-nudge-input ${promptNudgeActive ? "is-new-chat-nudging" : ""}`} autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
-          </Form.Item>
-          {attachments.sourceWorkbookSpec && attachments.sourceFile ? (
-            <div className="attached-file">
-              <PaperClipOutlined />
-              <span title={attachments.sourceFile}>{attachments.sourceFile.split(/[/\\]/).pop()}</span>
-              <Button type="text" size="small" icon={<DeleteOutlined />} onClick={attachments.clearSourceFile} />
-            </div>
-          ) : null}
-          {attachments.referenceImagesSpec && attachments.referenceImages.length > 0 ? (
-            <ReferenceImageStrip
-              items={attachments.referenceImages}
-              maxCount={attachments.referenceImagesSpec.maxCount}
-              onRemove={attachments.removeReferenceImage}
-              onAdd={attachments.pickReferenceImages}
-            />
-          ) : null}
-          {docType === "img" ? null : composerActions(false)}
+          {docType === "img" ? (
+            selectedTemplateId ? (
+              <div className="image-template-template-composer">
+                <SelectedImageTemplateSummary template={selectedTemplate} onClear={clearImageTemplate} t={t} />
+                <div className="image-template-template-form-scroll">
+                  {imageTemplateControls}
+                </div>
+              </div>
+            ) : (
+              <div className="image-template-scratch-composer">
+                <div className="image-template-scratch-prompt-card">
+                  {promptField}
+                </div>
+                <div className="image-template-scratch-workspace">
+                  <ReferenceImageDropZone attachments={attachments} nativeDropSignal={nativeReferenceDropSignal} t={t}>
+                    {referenceImageStrip ?? <ReferenceImageEmptyState t={t} />}
+                  </ReferenceImageDropZone>
+                  <ImageOutputPreviewPlaceholder t={t} />
+                </div>
+                {sourceFileAttachment}
+              </div>
+            )
+          ) : (
+            <>
+              {promptField}
+              {sourceFileAttachment}
+              {attachments.referenceImagesSpec && attachments.referenceImages.length > 0 ? (
+                <ReferenceImageStrip
+                  items={attachments.referenceImages}
+                  maxCount={attachments.referenceImagesSpec.maxCount}
+                  onRemove={attachments.removeReferenceImage}
+                  onAdd={attachments.pickReferenceImages}
+                />
+              ) : null}
+              {composerActions(false)}
+            </>
+          )}
         </Form>
         {docType === "img" ? composerActions(true) : null}
       </div>
@@ -763,7 +850,14 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
         aria-pressed={!selectedId}
         onClick={() => onClear()}
       >
-        <span>{t("dialogue.imageTemplates.scratchTitle")}</span>
+        <span className="image-template-scratch-icon" aria-hidden="true">
+          <MaterialSymbol name="add" />
+        </span>
+        <span className="image-template-scratch-copy">
+          <strong>{t("dialogue.imageTemplates.scratchTitle")}</strong>
+          <span>{t("dialogue.imageTemplates.scratchSubtitle")}</span>
+        </span>
+        {!selectedId ? <span className="image-template-selected-pill">{t("dialogue.imageTemplates.selectedLabel")}</span> : null}
       </button>
       <div className="image-template-picker-head">
         <span>{t("dialogue.imageTemplates.label")}</span>
@@ -778,7 +872,6 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
           >
             <MaterialSymbol name="refresh" />
           </button>
-          {selectedId && templates.length > 0 ? <button type="button" onClick={() => onClear()}>{t("dialogue.imageTemplates.clear")}</button> : null}
         </div>
       </div>
       {loading ? (
@@ -810,6 +903,7 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
                       <ImageTemplateThumbnail src={template.thumbnailUrl} />
                       <strong className="image-template-card-title">{template.title}</strong>
                     </button>
+                    {selected ? <span className="image-template-card-selected-badge">{t("dialogue.imageTemplates.selectedLabel")}</span> : null}
                   </div>
                 );
               })}
@@ -839,6 +933,121 @@ function ImageTemplateThumbnail({ src }: { src?: string }) {
       ) : (
         <div className="image-template-thumb-placeholder" aria-hidden="true" />
       )}
+    </div>
+  );
+}
+
+function SelectedImageTemplateSummary({ template, onClear, t }: {
+  template?: ImagePromptTemplate;
+  onClear: () => void;
+  t: Translator;
+}) {
+  return (
+    <div className="image-template-selected-template-card">
+      <div className="image-template-selected-template-thumb" aria-hidden="true">
+        <ImageTemplateThumbnail src={template?.thumbnailUrl} />
+      </div>
+      <div className="image-template-selected-template-copy">
+        <strong>{template?.title ?? t("dialogue.imageTemplates.selectedTemplateFallback")}</strong>
+        <span>{t("dialogue.imageTemplates.selectedTemplateHint")}</span>
+      </div>
+      <Button onClick={onClear}>{t("dialogue.imageTemplates.scratchTitle")}</Button>
+    </div>
+  );
+}
+
+function ReferenceImageEmptyState({ t }: { t: Translator }) {
+  return (
+    <div className="image-template-reference-empty">
+      <div className="image-template-reference-icon" aria-hidden="true">
+        <MaterialSymbol name="image" />
+      </div>
+      <strong>{t("dialogue.imageTemplates.referenceEmptyTitle")}</strong>
+      <span>{t("dialogue.imageTemplates.referenceEmptyBody")}</span>
+    </div>
+  );
+}
+
+function ReferenceImageDropZone({ attachments, nativeDropSignal, t, children }: {
+  attachments: ReturnType<typeof useAttachments>;
+  nativeDropSignal: number;
+  t: Translator;
+  children: ReactNode;
+}) {
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    setActive(false);
+  }, [nativeDropSignal]);
+
+  function hasPotentialFileDrag(dataTransfer: DataTransfer | null) {
+    if (!attachments.supportsPaste || !dataTransfer) return false;
+    const types = Array.from(dataTransfer.types ?? []);
+    if (types.includes("Files")) return true;
+    return Boolean(dataTransfer.files && imageFilesFrom(dataTransfer.files).length > 0);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    if (hasPotentialFileDrag(event.dataTransfer)) {
+      setActive(true);
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = attachments.isReferenceLimitReached ? "none" : "copy";
+      }
+    }
+    handleAttachmentDragOver(event, attachments);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setActive(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    setActive(false);
+    handleAttachmentDrop(event, attachments, t);
+  }
+
+  const overlayTitle = attachments.isReferenceLimitReached
+    ? t("dialogue.imageTemplates.referenceDropLimitTitle")
+    : t("dialogue.imageTemplates.referenceDropActiveTitle");
+  const overlayBody = attachments.isReferenceLimitReached
+    ? t("dialogue.imageTemplates.referenceDropLimitBody")
+    : t("dialogue.imageTemplates.referenceDropActiveBody");
+
+  return (
+    <div
+      className={`image-template-reference-panel image-template-reference-drop-zone ${active ? "image-template-reference-drop-zone-active" : ""} ${active && attachments.isReferenceLimitReached ? "image-template-reference-drop-zone-limit" : ""}`}
+      role="region"
+      aria-label={t("dialogue.imageTemplates.referenceDropZoneLabel")}
+      tabIndex={0}
+      onDragEnter={handleDragOver}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      onPaste={makePasteHandler(attachments, t)}
+      onClick={(event) => event.currentTarget.focus()}
+    >
+      <div className="image-template-reference-drop-content">
+        {children}
+      </div>
+      {active ? (
+        <div className="image-template-reference-drop-overlay" aria-live="polite">
+          <MaterialSymbol name={attachments.isReferenceLimitReached ? "block" : "add_photo_alternate"} />
+          <strong>{overlayTitle}</strong>
+          <span>{overlayBody}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ImageOutputPreviewPlaceholder({ t }: { t: Translator }) {
+  return (
+    <div className="image-template-output-preview">
+      <div className="image-template-output-shape" aria-hidden="true" />
+      <strong>{t("dialogue.imageTemplates.previewEmptyTitle")}</strong>
+      <span>{t("dialogue.imageTemplates.previewEmptyBody")}</span>
     </div>
   );
 }
@@ -1060,6 +1269,7 @@ function ActiveTaskRound({ task, onForceCancel }: {
   const subject = taskSubject(task, t);
   const documentType = task.documentType || task.artifact?.documentType || t("dialogue.history.targetTypeDefault");
   const isRunning = task.status === "running" || task.status === "starting";
+  const isQuestion = task.status === "question";
   const timeMarker = formatLocalTimestamp(task.events[0]?.ts) || (isRunning ? t("dialogue.history.taskInProgress") : t("dialogue.history.generationHistory"));
 
   useEffect(() => {
@@ -1078,28 +1288,34 @@ function ActiveTaskRound({ task, onForceCancel }: {
     <>
       <div className="time-marker">{timeMarker}</div>
       <UserMessage task={task} fallback={subject} />
-      <div className="message ai-message">
-        <div className="message-author">
-          <MaterialSymbol name="smart_toy" />
-          <strong>{t("dialogue.history.author")}</strong>
-        </div>
-        <ul className="ai-checks">
-          <li>
-            <CheckCircleFilled /> {t("dialogue.history.taskReceived", { subject })}
-          </li>
-          <li>
-            <CheckCircleFilled /> {t("dialogue.history.targetType", { type: documentType.toUpperCase() })}
-          </li>
-          <li className={isRunning || task.status === "question" || task.status === "plan_review" ? "active" : ""}>
-            {isRunning ? <LoadingOutlined /> : <CheckCircleFilled />}{" "}
-            {latestText ? <span>{latestText}</span> : t("dialogue.history.waitingEvents")}
-          </li>
-          <li className="muted">{t("dialogue.history.taskId", { id: task.id })}</li>
-        </ul>
-      </div>
-      {task.status === "plan_review" && task.plan ? <PlanReviewMessage task={task} /> : null}
-      {task.status === "plan_review" ? null : <TaskRuntimePanel task={task} />}
-      {task.status === "plan_review" ? null : <FluidProgressPanel task={task} />}
+      {isRunning ? (
+        <ThinkingMessage />
+      ) : isQuestion ? null : (
+        <>
+          <div className="message ai-message">
+            <div className="message-author">
+              <MaterialSymbol name="smart_toy" />
+              <strong>{t("dialogue.history.author")}</strong>
+            </div>
+            <ul className="ai-checks">
+              <li>
+                <CheckCircleFilled /> {t("dialogue.history.taskReceived", { subject })}
+              </li>
+              <li>
+                <CheckCircleFilled /> {t("dialogue.history.targetType", { type: documentType.toUpperCase() })}
+              </li>
+              <li className={task.status === "question" || task.status === "plan_review" ? "active" : ""}>
+                <CheckCircleFilled />{" "}
+                {latestText ? <span>{latestText}</span> : t("dialogue.history.waitingEvents")}
+              </li>
+              <li className="muted">{t("dialogue.history.taskId", { id: task.id })}</li>
+            </ul>
+          </div>
+          {task.status === "plan_review" && task.plan ? <PlanReviewMessage task={task} /> : null}
+          {task.status === "plan_review" ? null : <TaskRuntimePanel task={task} />}
+          {task.status === "plan_review" ? null : <FluidProgressPanel task={task} />}
+        </>
+      )}
       {task.stalledSince ? (
         <div className="message ai-message stalled-hint" style={{ borderLeft: "3px solid #fa8c16" }}>
           <div className="message-author">
@@ -1126,6 +1342,20 @@ function ActiveTaskRound({ task, onForceCancel }: {
       ) : null}
       <ReportIssueDialog open={reportOpen} taskId={task.id} onClose={() => setReportOpen(false)} />
     </>
+  );
+}
+
+function ThinkingMessage() {
+  const t = useT();
+  return (
+    <div className="message ai-message thinking-message" role="status" aria-live="polite">
+      <span>{t("dialogue.history.thinking")}</span>
+      <span className="thinking-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </div>
   );
 }
 
@@ -1779,6 +2009,7 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
         await officecli.respond({
           taskId: task.id,
           questionId: responseQuestionId,
+          ...(optionId ? { optionId, answer } : { answer }),
           answers: responseAnswers,
         });
       } else {
@@ -2451,7 +2682,7 @@ function supportsOfflinePreview(artifact: Artifact) {
 }
 
 function makePasteHandler(attachments: ReturnType<typeof useAttachments>, t: Translator) {
-  return (event: ClipboardEvent<HTMLTextAreaElement>) => {
+  return (event: ClipboardEvent<HTMLElement>) => {
     const items = event.clipboardData?.files;
     if (!items || items.length === 0) return;
     const images = imageFilesFrom(items);
@@ -2530,38 +2761,106 @@ function ReferenceImageStrip({
   maxCount,
   onRemove,
   onAdd,
+  showHeader = false,
+  showBadge = false,
 }: {
   items: string[];
   maxCount: number;
   onRemove: (path: string) => void;
-  onAdd: () => void;
+  onAdd?: () => void;
+  showHeader?: boolean;
+  showBadge?: boolean;
 }) {
   const t = useT();
-  return (
-    <div className="reference-image-strip" aria-label={t("dialogue.attach.referenceImages.aria.strip")}>
+  const cards = (
+    <>
       {items.map((path) => (
-        <ReferenceImageChip key={path} path={path} onRemove={() => onRemove(path)} />
+        <ReferenceImageChip key={path} path={path} onRemove={() => onRemove(path)} showBadge={showBadge} />
       ))}
-      {items.length < maxCount ? (
+      {onAdd && items.length < maxCount ? (
         <button type="button" className="reference-image-add" onClick={onAdd} aria-label={t("dialogue.attach.referenceImages.aria")}>
           <MaterialSymbol name="add_photo_alternate" />
           <span>{items.length === 0 ? t("dialogue.attach.referenceImages.add") : t("dialogue.attach.referenceImages.addMore")}</span>
         </button>
       ) : null}
+    </>
+  );
+
+  if (showHeader) {
+    return (
+      <div className="reference-image-strip reference-image-strip-with-header" aria-label={t("dialogue.attach.referenceImages.aria.strip")}>
+        <div className="reference-image-strip-header">
+          <div className="reference-image-strip-title-block">
+            <div className="reference-image-strip-title">
+              <MaterialSymbol name="photo_library" />
+              <strong>{t("dialogue.attach.referenceImages.title")}</strong>
+            </div>
+            <span>{t("dialogue.attach.referenceImages.helper")}</span>
+          </div>
+          <span className="reference-image-strip-count">{items.length} / {maxCount}</span>
+        </div>
+        <div className="reference-image-strip-grid">
+          {cards}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="reference-image-strip" aria-label={t("dialogue.attach.referenceImages.aria.strip")}>
+      {cards}
     </div>
   );
 }
 
-function ReferenceImageChip({ path, onRemove }: { path: string; onRemove: () => void }) {
+function ReferenceImageChip({ path, onRemove, showBadge = false }: { path: string; onRemove: () => void; showBadge?: boolean }) {
   const t = useT();
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const fileName = path.split(/[/\\]/).pop() || path;
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    setError(null);
+    const cacheKey = `ref:${path}`;
+    acquireBlob(cacheKey, async () => {
+      const { data, mime } = await officecli.readLocalImage(path);
+      const arrayBuf = data instanceof ArrayBuffer ? data : new Uint8Array(data as Uint8Array).buffer;
+      return new Blob([new Uint8Array(arrayBuf as ArrayBuffer)], { type: mime || "application/octet-stream" });
+    }).then((url) => {
+      if (!cancelled) setSrc(url);
+      else releaseBlob(cacheKey);
+    }).catch((err) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+    });
+    return () => {
+      cancelled = true;
+      releaseBlob(cacheKey);
+    };
+  }, [path]);
+
   return (
     <div className="reference-image-chip" title={path}>
-      <MaterialSymbol name="image" />
-      <span className="reference-image-name">{fileName}</span>
-      <button type="button" className="reference-image-remove" onClick={onRemove} aria-label={t("dialogue.attach.referenceImages.remove", { name: fileName })}>
-        <CloseCircleFilled />
-      </button>
+      <div className="reference-image-preview">
+        {showBadge ? <span className="reference-image-badge">{t("dialogue.attach.referenceImages.badge")}</span> : null}
+        {src ? (
+          <img src={src} alt={fileName} />
+        ) : error ? (
+          <div className="reference-image-preview-fallback" title={`${fileName}: ${error}`}>
+            <MaterialSymbol name="broken_image" />
+            <span>{t("dialogue.attach.referenceImages.previewUnavailable")}</span>
+          </div>
+        ) : (
+          <div className="reference-image-preview-loading" aria-label={t("dialogue.attach.referenceImages.loading", { name: fileName })} />
+        )}
+      </div>
+      <div className="reference-image-card-footer">
+        <span className="reference-image-name">{fileName}</span>
+        <button type="button" className="reference-image-remove" onClick={onRemove} aria-label={t("dialogue.attach.referenceImages.remove", { name: fileName })}>
+          <CloseCircleFilled />
+        </button>
+      </div>
     </div>
   );
 }

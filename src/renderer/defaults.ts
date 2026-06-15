@@ -5,6 +5,7 @@ export type NavKey = "dialogue" | "tasks" | "settings" | "login";
 
 export const defaultGenerateInput: Partial<GenerateInput> = {
   documentType: "pptx",
+  generationMode: "plan",
   enableImages: true,
   imageRatio: "square",
   fps: 16,
@@ -21,7 +22,7 @@ export function isValidProxyUrl(url: string): boolean {
   return PROXY_URL_PATTERN.test(url.trim());
 }
 
-export const newGenerationDocumentTypes: DocumentType[] = DOCUMENT_TYPES.filter((type) => type !== "gif");
+export const newGenerationDocumentTypes: DocumentType[] = DOCUMENT_TYPES.slice();
 
 export function normalizeNewGenerationDocumentType(value: unknown): DocumentType {
   return newGenerationDocumentTypes.includes(value as DocumentType) ? (value as DocumentType) : "pptx";

@@ -336,6 +336,28 @@ describe("taskState", () => {
     expect(task.runtimeSnapshot!.provider).toBeUndefined();
   });
 
+  it("normalizes legacy fast generation mode from task.user_input to plan without treating it as runtime mode", () => {
+    const state = applyTaskEvent(createInitialTaskState(), {
+      event_id: "ev-user-input",
+      task_id: "task-plan",
+      type: "task.user_input",
+      payload: {
+        prompt: "Write a plan-mode memo",
+        generation_mode: "fast",
+        runtime_mode: "hosted",
+      },
+    });
+    expect(state.tasks["task-plan"].userInput).toEqual({
+      prompt: "Write a plan-mode memo",
+      generationMode: "plan",
+      sourceFile: undefined,
+      referenceImages: undefined,
+      imageRatio: undefined,
+      fps: undefined,
+    });
+    expect(state.tasks["task-plan"].userInput).not.toHaveProperty("runtimeMode");
+  });
+
   it("uses attached user prompt for a running task title before bridge topic events arrive", () => {
     const state = attachUserInput(createInitialTaskState(), "task-bridge-123", {
       prompt: "Create a board update deck from the latest revenue notes",

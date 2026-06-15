@@ -426,7 +426,10 @@ func TestInvokeGenerateOpensSessionFirst(t *testing.T) {
 		t.Errorf("document_type = %v, want pptx", args["document_type"])
 	}
 	if args["mode"] != "best" {
-		t.Errorf("mode = %v, want best for office documents", args["mode"])
+		t.Errorf("mode = %v, want best for default office generation", args["mode"])
+	}
+	if params["interactive"] != true {
+		t.Errorf("interactive = %v, want true for default office generation", params["interactive"])
 	}
 	if args["local_preview"] != true {
 		t.Errorf("local_preview = %v, want true", args["local_preview"])
@@ -476,6 +479,113 @@ func TestInvokeGenerateSendsPromptTemplateID(t *testing.T) {
 	}
 	fake.writeResponse(t, second.idString(), map[string]any{
 		"task_id":    "task-img",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateNormalizesLegacyFastGenerationModeToBestInteractiveRequest(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType:   types.DocDOCX,
+			Topic:          "Memo",
+			Prompt:         "write a memo",
+			GenerationMode: "fast",
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(second.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if args["mode"] != "best" {
+		t.Fatalf("mode = %v, want best", args["mode"])
+	}
+	if params["interactive"] != true {
+		t.Fatalf("interactive = %v, want true for legacy fast generation", params["interactive"])
+	}
+	if _, ok := args["runtime_mode"]; ok {
+		t.Fatalf("runtime_mode should not carry generation mode: %#v", args["runtime_mode"])
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"task_id":    "task-docx",
+		"session_id": "sess-1",
+		"status":     "starting",
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("InvokeGenerate: %v", err)
+	}
+}
+
+func TestInvokeGenerateRejectsUnknownGenerationMode(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+		DocumentType:   types.DocDOCX,
+		Topic:          "Memo",
+		Prompt:         "write a memo",
+		GenerationMode: "draft",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported generation mode") {
+		t.Fatalf("InvokeGenerate error = %v, want unsupported generation mode", err)
+	}
+	fake.stdin.mu.Lock()
+	if got := len(fake.stdin.data); got != 0 {
+		fake.stdin.mu.Unlock()
+		t.Fatalf("expected no bridge request for invalid generation mode, got %d bytes", got)
+	}
+	fake.stdin.mu.Unlock()
+}
+
+func TestInvokeGenerateMapsPlanGenerationModeToBestInteractiveRequest(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.InvokeGenerate(context.Background(), types.GenerateInput{
+			DocumentType:   types.DocPPTX,
+			Topic:          "Deck",
+			Prompt:         "make a deck",
+			GenerationMode: "plan",
+		})
+		done <- err
+	}()
+
+	first := fake.readRequest(t)
+	fake.writeResponse(t, first.idString(), map[string]any{"id": "sess-1"}, nil)
+
+	second := fake.readRequest(t)
+	var params map[string]any
+	if err := json.Unmarshal(second.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	args, _ := params["args"].(map[string]any)
+	if args["mode"] != "best" {
+		t.Fatalf("mode = %v, want best", args["mode"])
+	}
+	if params["interactive"] != true {
+		t.Fatalf("interactive = %v, want true for plan generation", params["interactive"])
+	}
+	if _, ok := args["runtime_mode"]; ok {
+		t.Fatalf("runtime_mode should not carry generation mode: %#v", args["runtime_mode"])
+	}
+	fake.writeResponse(t, second.idString(), map[string]any{
+		"task_id":    "task-pptx",
 		"session_id": "sess-1",
 		"status":     "starting",
 	}, nil)

@@ -37,7 +37,7 @@ import { defaultProxySettings } from "./defaults";
 // include them. Imports are static so the build picks them up; calls only
 // fire when window.go is available.
 import * as WailsApp from "./generated/wailsjs/go/main/App";
-import { EventsOn } from "./generated/wailsjs/runtime";
+import { EventsOn, OnFileDrop, OnFileDropOff } from "./generated/wailsjs/runtime";
 import type { settings as settingsNS } from "./generated/wailsjs/go/models";
 
 // toWails coerces a renderer-side typed value into the `never`-shaped argument
@@ -214,6 +214,7 @@ function createBrowserPreviewAPI(): DesktopAPI {
     },
     onAuthEvent: () => () => undefined,
     onBridgeEvent: () => () => undefined,
+    onFileDrop: () => () => undefined,
     getAppVersion: async () => "0.0.0-browser",
     getAppUpdateStatus: async () => ({
       currentVersion: "0.0.0-browser",
@@ -605,6 +606,10 @@ function createWailsAPI(): DesktopAPI {
       EventsOn("auth:event", (payload: unknown) => callback(payload as AuthEvent)),
     onBridgeEvent: (callback: (event: BridgeEvent) => void) =>
       EventsOn("bridge:event", (payload: unknown) => callback(payload as BridgeEvent)),
+    onFileDrop: (callback: (paths: string[]) => void) => {
+      OnFileDrop((_x: number, _y: number, paths: string[]) => callback(Array.isArray(paths) ? paths : []), true);
+      return () => OnFileDropOff();
+    },
     getAppVersion: () => WailsApp.GetAppVersion(),
     getAppUpdateStatus: async () => normaliseAppUpdateStatus(await WailsApp.GetAppUpdateStatus()),
     checkAppUpdate: async () => {
@@ -653,6 +658,177 @@ function createWailsAPI(): DesktopAPI {
       };
     },
   };
+}
+
+function createRealE2EAPI(endpoint: string): DesktopAPI {
+  const base = endpoint.replace(/\/+$/, "");
+  const rpc = async <T,>(method: string, input?: unknown): Promise<T> => {
+    const response = await fetch(`${base}/rpc/${encodeURIComponent(method)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input ?? null),
+    });
+    const text = await response.text();
+    const body = text ? JSON.parse(text) : null;
+    if (!response.ok || body?.ok === false) {
+      throw new Error(body?.error || `Real E2E bridge RPC ${method} failed with ${response.status}`);
+    }
+    return body?.result as T;
+  };
+  const subscribe = <T,>(channel: string, callback: (event: T) => void): (() => void) => {
+    const source = new EventSource(`${base}/events?channel=${encodeURIComponent(channel)}`);
+    const handle = (message: MessageEvent) => {
+      if (!message.data) return;
+      const envelope = JSON.parse(message.data) as { channel?: string; payload?: unknown };
+      callback(envelope.payload as T);
+    };
+    source.addEventListener(channel, handle as EventListener);
+    source.onmessage = handle;
+    return () => source.close();
+  };
+  return {
+    initialize: async () => decodeRealE2ERawBytes(await rpc<unknown>("Initialize")),
+    getCapabilities: async () => decodeRealE2ERawBytes(await rpc<unknown>("GetCapabilities")),
+    listImageTemplates: () => rpc<ImagePromptTemplate[]>("ListImageTemplates"),
+    createImageTemplate: (input: CreateUserImageTemplateInput) =>
+      rpc<ImagePromptTemplate>("CreateImageTemplate", input),
+    createImageTemplatePublishRequest: (input: CreateImageTemplatePublishRequestInput) =>
+      rpc<ImageTemplatePublishRequest>("CreateImageTemplatePublishRequest", input),
+    generate: (input: GenerateInput) =>
+      rpc<{ taskId: string; sessionId: string; status: string }>("Generate", input),
+    modify: (input: ModifyInput) =>
+      rpc<{ taskId: string; sessionId: string; status: string }>("Modify", input),
+    respond: async (input) => decodeRealE2ERawBytes(await rpc<unknown>("Respond", input)),
+    cancel: async (taskId: string) => decodeRealE2ERawBytes(await rpc<unknown>("Cancel", taskId)),
+    openPath: (filePath: string) => rpc<void>("OpenPath", filePath),
+    showItemInFolder: (filePath: string) => rpc<void>("ShowItemInFolder", filePath),
+    openExternal: (url: string) => rpc<void>("OpenExternal", url),
+    openFileDialog: async (options) => {
+      const result = await rpc<string>("OpenFileDialog", options ?? { filters: [] });
+      return result ? result : null;
+    },
+    openDirectoryDialog: async () => {
+      const result = await rpc<string>("OpenDirectoryDialog");
+      return result ? result : null;
+    },
+    openMultiFileDialog: async (options) => {
+      const result = await rpc<string[]>("OpenMultiFileDialog", options ?? { filters: [] });
+      return result && result.length > 0 ? result : null;
+    },
+    savePastedImage: (data: Uint8Array, ext: string) =>
+      rpc<string>("SavePastedImage", { dataBase64: uint8ArrayToBase64(data), ext }),
+    previewArtifact: (artifact: Artifact) => rpc<void>("PreviewArtifact", artifact),
+    issuePreviewToken: (artifact: Artifact) => rpc<PreviewGrant>("IssuePreviewToken", artifact),
+    revokePreviewToken: (token: string) => rpc<void>("RevokePreviewToken", token),
+    readArtifactFile: async (previewToken: string) => {
+      const result = await rpc<{ data?: unknown }>("ReadArtifactFile", previewToken);
+      return { data: decodeArtifactBytes(result?.data) };
+    },
+    readLocalImage: async (filePath: string) => {
+      const result = await rpc<{ data?: unknown; mime?: unknown }>("ReadLocalImage", filePath);
+      return {
+        data: decodeArtifactBytes(result?.data),
+        mime: typeof result?.mime === "string" ? result.mime : "application/octet-stream",
+      };
+    },
+    copyImageToClipboard: (filePath: string) => rpc<void>("CopyImageToClipboard", filePath),
+    renderPreviewHtml: async (previewToken: string) => {
+      const result = await rpc<{ html?: unknown } | null>("RenderPreviewHtml", previewToken);
+      if (!result || typeof result.html !== "string") return null;
+      return { html: result.html };
+    },
+    setPreviewMode: (active: boolean) => rpc<void>("SetPreviewMode", active),
+    login: () => rpc<{ url: string }>("Login"),
+    cancelLogin: () => rpc<void>("CancelLogin"),
+    whoami: async (): Promise<WhoAmIResult> => {
+      const result = await rpc<Partial<WhoAmIResult>>("WhoAmI");
+      return {
+        mode: (result.mode as WhoAmIResult["mode"]) ?? "anonymous",
+        ...(result.userId ? { userId: result.userId } : {}),
+        ...(result.email ? { email: result.email } : {}),
+        ...(result.session ? { session: result.session } : {}),
+        ...(result.expiresAt ? { expiresAt: result.expiresAt } : {}),
+      };
+    },
+    logout: () => rpc<void>("Logout"),
+    getCreditStatus: async () => normaliseCreditStatus(await rpc<Partial<CreditStatus> | null>("GetCreditStatus")),
+    redeem: async (code: string): Promise<RedeemResult> => {
+      const result = await rpc<Partial<RedeemResult> | null>("Redeem", code);
+      return {
+        code: result?.code ?? "",
+        credit_amount: result?.credit_amount ?? 0,
+        new_balance: result?.new_balance ?? 0,
+        redeemed_at: result?.redeemed_at ?? "",
+        expires_at: result?.expires_at ?? null,
+      };
+    },
+    getSettings: async () => normaliseUserSettings(await rpc<unknown>("GetSettings")),
+    updateSettings: async (patch: Partial<UserSettings>) =>
+      normaliseUserSettings(await rpc<unknown>("UpdateSettings", adaptSettingsPatch(patch))),
+    getDefaultWorkspaceDir: () => rpc<string>("GetDefaultWorkspaceDir"),
+    listWorkspaces: async () => normaliseWorkspaceSummaries(await rpc<unknown>("ListWorkspaces")),
+    listChats: async () => normaliseConversationSummaries(await rpc<unknown>("ListChats")),
+    deleteConversation: (conversationId: string) => rpc<void>("DeleteConversation", conversationId),
+    addWorkspace: async (path: string) => normaliseWorkspaceSummaries([await rpc<unknown>("AddWorkspace", path)])[0],
+    selectWorkspace: async (workspaceId: string) => normaliseWorkspaceSummaries([await rpc<unknown>("SelectWorkspace", workspaceId)])[0],
+    removeWorkspace: (workspaceId: string) => rpc<void>("RemoveWorkspace", workspaceId),
+    onAuthEvent: (callback: (event: AuthEvent) => void) => subscribe<AuthEvent>("auth", callback),
+    onBridgeEvent: (callback: (event: BridgeEvent) => void) => subscribe<BridgeEvent>("bridge", callback),
+    onFileDrop: (callback: (paths: string[]) => void) => subscribe<string[]>("filedrop", (paths) => callback(Array.isArray(paths) ? paths : [])),
+    getAppVersion: () => rpc<string>("GetAppVersion"),
+    getAppUpdateStatus: async () => normaliseAppUpdateStatus(await rpc<unknown>("GetAppUpdateStatus")),
+    checkAppUpdate: async () => normaliseAppUpdateCheckResult(await rpc<unknown>("CheckAppUpdate")),
+    downloadAppUpdate: () => rpc<string>("DownloadAppUpdate"),
+    installAppUpdate: () => rpc<void>("InstallAppUpdate"),
+    cancelAppUpdate: () => rpc<void>("CancelAppUpdate"),
+    onAppUpdateEvent: (callback: (event: AppUpdateEvent) => void) => subscribe<AppUpdateEvent>("appupdate", callback),
+    exportLogs: (input?: import("../shared/types").ExportLogsInput) =>
+      rpc<{ path: string; manifest: import("../shared/types").BundleManifest }>("ExportLogs", input ?? {}),
+    submitReport: (input: SubmitReportInput) =>
+      rpc<SubmitReportResult>("SubmitReport", input),
+    getReportCapability: () =>
+      rpc<ReportCapabilityResult>("GetReportCapability"),
+    peekReportContext: (taskId: string) =>
+      rpc<PeekReportContextResult>("PeekReportContext", taskId),
+    getTaskHistory: async (limit?: number): Promise<TaskHistoryEntry[]> =>
+      normaliseTaskHistory(await rpc<unknown>("GetTaskHistory", limit ?? 50)),
+    getBridgeRuntimeSnapshot: async () =>
+      normaliseBridgeRuntimeSnapshot(await rpc<Partial<BridgeRuntimeSnapshot> | null>("GetBridgeRuntimeSnapshot")),
+    sendDesktopNotification: (input: { title: string; body: string }) =>
+      rpc<void>("SendDesktopNotification", input),
+    testProvider: async (input?: ProviderTestInput): Promise<ProviderTestResult> => {
+      const raw = await rpc<Partial<ProviderTestResult> | null>("TestProvider", input ?? null);
+      return {
+        ok: Boolean(raw?.ok),
+        httpStatus: typeof raw?.httpStatus === "number" ? raw.httpStatus : 0,
+        latencyMs: typeof raw?.latencyMs === "number" ? raw.latencyMs : 0,
+        url: typeof raw?.url === "string" ? raw.url : "",
+        ...(raw?.error ? { error: raw.error } : {}),
+        ...(raw?.responseMessage ? { responseMessage: raw.responseMessage } : {}),
+        ...(raw?.unavailable ? { unavailable: Boolean(raw.unavailable) } : {}),
+        ...(raw?.probeType === "officialPaid" || raw?.probeType === "http" ? { probeType: raw.probeType } : {}),
+      };
+    },
+  };
+}
+
+function decodeRealE2ERawBytes(raw: unknown): unknown {
+  if (typeof raw === "string") {
+    try {
+      const decoded = decodeArtifactBytes(raw);
+      return decodeRawBytes(Array.from(decoded));
+    } catch {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    }
+  }
+  if (Array.isArray(raw)) {
+    return decodeRawBytes(raw as number[]);
+  }
+  return raw;
 }
 
 function normaliseAppUpdateStatus(raw: unknown): AppUpdateStatus {
@@ -718,18 +894,19 @@ function selectAPI(): DesktopAPI {
   if (isWailsAvailable()) {
     return createWailsAPI();
   }
-  // window.officecli is the test-only injection point used by App.test.tsx,
-  // renderer vitest fixtures, and Playwright's dev-server bridge mock.
-  // Production desktop builds always go through Wails above; the browser
-  // preview fallback covers `npm run dev` unless the E2E mock marker exists.
+  const realE2EEndpoint = typeof import.meta.env.VITE_OFFICEDEX_REAL_E2E_ENDPOINT === "string"
+    ? import.meta.env.VITE_OFFICEDEX_REAL_E2E_ENDPOINT.trim()
+    : "";
+  if (import.meta.env.DEV && realE2EEndpoint) {
+    return createRealE2EAPI(realE2EEndpoint);
+  }
+  // Test-only injection is kept for Vitest. Dev-browser E2E uses the real
+  // endpoint transport above; production desktop builds always go through Wails.
   const injected = typeof window !== "undefined"
-    ? (window as unknown as { officecli?: DesktopAPI; __bridgeMock?: unknown })
+    ? ((window as unknown as Record<string, unknown>)["officecli"] as DesktopAPI | undefined)
     : undefined;
-  if (
-    injected?.officecli &&
-    (import.meta.env.MODE === "test" || (import.meta.env.DEV && injected.__bridgeMock))
-  ) {
-    return injected.officecli;
+  if (injected && import.meta.env.MODE === "test") {
+    return injected;
   }
   return createBrowserPreviewAPI();
 }

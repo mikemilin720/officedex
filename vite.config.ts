@@ -1,10 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const realE2E = Boolean(process.env.VITE_OFFICEDEX_REAL_E2E_ENDPOINT);
+
 export default defineConfig({
   plugins: [react()],
   root: ".",
   base: "./",
+  server: realE2E ? { hmr: false } : undefined,
   build: {
     outDir: "dist",
     emptyOutDir: true,

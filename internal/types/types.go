@@ -158,6 +158,7 @@ type GenerateInput struct {
 	ConversationID   string                         `json:"conversationId,omitempty"`
 	ParentTaskID     string                         `json:"parentTaskId,omitempty"`
 	RuntimeMode      string                         `json:"runtimeMode,omitempty"`
+	GenerationMode   string                         `json:"generationMode,omitempty"`
 	PromptTemplateID string                         `json:"promptTemplateId,omitempty"`
 	SourceFile       string                         `json:"sourceFile,omitempty"`
 	ReferenceImages  []string                       `json:"referenceImages,omitempty"`

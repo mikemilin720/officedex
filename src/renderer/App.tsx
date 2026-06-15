@@ -31,6 +31,7 @@ type PendingGenerate = {
   context?: TaskContextPatch;
   input: {
     prompt: string;
+    generationMode?: GenerateInput["generationMode"];
     sourceFile?: string;
     referenceImages?: string[];
     imageRatio?: GenerateInput["imageRatio"];
@@ -44,6 +45,25 @@ function materializePendingContext(pending: PendingGenerate, taskId: string): Ta
     return pending.context;
   }
   return { ...pending.context, conversationId: taskId };
+}
+
+function generationModeForDocumentType(documentType: string | undefined): GenerateInput["generationMode"] | undefined {
+  return documentType === "img" || documentType === "gif" ? undefined : "plan";
+}
+
+function normalizeGenerationMode(_value: unknown): GenerateInput["generationMode"] {
+  return "plan";
+}
+
+function normalizeGenerateInputForGeneration(values: GenerateInput): GenerateInput {
+  const next: GenerateInput = { ...values };
+  const generationMode = generationModeForDocumentType(next.documentType);
+  if (generationMode) {
+    next.generationMode = normalizeGenerationMode(next.generationMode);
+  } else {
+    delete next.generationMode;
+  }
+  return next;
 }
 
 export function App() {
@@ -349,7 +369,8 @@ export function App() {
     clearError();
     const topic = values.topic || summarizePrompt(values.prompt);
     const localTaskId = createLocalTaskId();
-    const submittedDraft = createNewGenerationDraft(values);
+    const submittedValues = normalizeGenerateInputForGeneration(values);
+    const submittedDraft = createNewGenerationDraft(submittedValues);
     const noProject = values.noProject === true || !values.workspaceId;
     const targetWorkspace = noProject ? undefined : workspaces.find((workspace) => workspace.id === values.workspaceId);
     const context: TaskContextPatch = {
@@ -360,11 +381,12 @@ export function App() {
       localTaskId,
       context,
       input: {
-        prompt: values.prompt,
-        sourceFile: values.sourceFile,
-        referenceImages: values.referenceImages,
-        imageRatio: values.imageRatio,
-        fps: values.fps,
+        prompt: submittedValues.prompt,
+        ...(submittedValues.generationMode ? { generationMode: submittedValues.generationMode } : {}),
+        sourceFile: submittedValues.sourceFile,
+        referenceImages: submittedValues.referenceImages,
+        imageRatio: submittedValues.imageRatio,
+        fps: submittedValues.fps,
       },
     };
     const pendingInput = pendingGenerateRef.current.input;
@@ -384,8 +406,8 @@ export function App() {
     setBusy(false);
     try {
       const generateInput: GenerateInput = noProject
-        ? { ...values, topic, noProject: true, workspaceId: undefined }
-        : { ...values, topic, workspaceId: targetWorkspace?.id };
+        ? { ...submittedValues, topic, noProject: true, workspaceId: undefined }
+        : { ...submittedValues, topic, workspaceId: targetWorkspace?.id };
       const result = await officecli.generate(generateInput);
       if (pendingGenerateRef.current?.localTaskId === localTaskId && result.taskId) {
         const pending = pendingGenerateRef.current;
@@ -419,6 +441,7 @@ export function App() {
       documentType,
       topic: task.topic || summarizePrompt(input.prompt),
       prompt: input.prompt,
+      ...(generationModeForDocumentType(documentType) ? { generationMode: normalizeGenerationMode(input.generationMode) } : {}),
       enableImages: persistedSettings.defaults.enableImages,
       imageQuality: persistedSettings.defaults.imageQuality,
       sourceFile: input.sourceFile,
@@ -538,6 +561,7 @@ export function App() {
     clearError();
     const topic = summarizePrompt(prompt);
     const localTaskId = createLocalTaskId();
+    const generationMode = generationModeForDocumentType(documentType);
     const context: TaskContextPatch = {
       conversationId,
       parentTaskId,
@@ -548,6 +572,7 @@ export function App() {
       context,
       input: {
         prompt,
+        ...(generationMode ? { generationMode } : {}),
         referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
         imageRatio,
         fps,
@@ -577,6 +602,7 @@ export function App() {
         parentTaskId,
         topic,
         prompt,
+        ...(generationMode ? { generationMode } : {}),
         enableImages: persistedSettings.defaults.enableImages,
         imageQuality: persistedSettings.defaults.imageQuality,
         referenceImages,
@@ -845,8 +871,12 @@ function summarizePrompt(prompt: string) {
 }
 
 function createNewGenerationDraft(input: Partial<GenerateInput> = {}): NewGenerationDraft {
+  const documentType = input.documentType ?? defaultGenerateInput.documentType ?? "pptx";
+  const defaultGenerationMode = generationModeForDocumentType(documentType);
+  const generationMode = defaultGenerationMode ? normalizeGenerationMode(input.generationMode ?? defaultGenerateInput.generationMode) : undefined;
   return {
-    documentType: input.documentType ?? defaultGenerateInput.documentType ?? "pptx",
+    documentType,
+    ...(generationMode ? { generationMode } : {}),
     topic: input.topic ?? "",
     prompt: input.prompt ?? "",
     sourceFile: input.sourceFile,

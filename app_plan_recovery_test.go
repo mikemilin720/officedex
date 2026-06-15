@@ -106,6 +106,8 @@ func TestRespondRecoversStalePlanQuestionTask(t *testing.T) {
 		raw, err := app.Respond(RespondInput{
 			TaskID:     oldTaskID,
 			QuestionID: "question-group",
+			OptionID:   "concise",
+			Answer:     "Concise",
 			Answers: []RespondAnswerInput{
 				{QuestionGroupID: "question-group", QuestionID: "q-audience", OptionID: "leadership", Answer: "Leadership", QuestionIndex: 0},
 				{QuestionGroupID: "question-group", QuestionID: "q-tone", OptionID: "concise", Answer: "Concise", QuestionIndex: 1},
@@ -181,6 +183,9 @@ func TestRespondRecoversStalePlanQuestionTask(t *testing.T) {
 	rawAnswers, ok := respondParams["answers"].([]any)
 	if !ok || len(rawAnswers) != 2 {
 		t.Fatalf("recovered answers = %#v, want two answers", respondParams["answers"])
+	}
+	if respondParams["option_id"] != "concise" || respondParams["answer"] != "Concise" {
+		t.Fatalf("recovered single-answer fallback = option_id:%#v answer:%#v, want concise/Concise", respondParams["option_id"], respondParams["answer"])
 	}
 	transport.writeResponse(t, req.ID, map[string]any{"accepted": true, "task_id": newTaskID})
 
@@ -277,5 +282,44 @@ func TestGenerateInputEventPayloadBackfillsTopicFromPrompt(t *testing.T) {
 	}
 	if payload["prompt"] != "Generate a recovery-safe deck" {
 		t.Fatalf("payload prompt = %#v, want original prompt; payload=%#v", payload["prompt"], payload)
+	}
+}
+
+func TestGenerateInputEventPayloadAndRecoveryPreserveGenerationMode(t *testing.T) {
+	payload := generateInputEventPayload(types.GenerateInput{
+		DocumentType:   types.DocDOCX,
+		Topic:          "Plan mode recovery",
+		Prompt:         "Write a plan-mode document",
+		GenerationMode: "plan",
+	}, localstore.TaskContext{})
+	if payload["generation_mode"] != "plan" || payload["generationMode"] != "plan" {
+		t.Fatalf("generation mode payload = %#v", payload)
+	}
+	if _, ok := payload["runtime_mode"]; ok {
+		t.Fatalf("runtime_mode should not carry generation mode: %#v", payload["runtime_mode"])
+	}
+
+	got, err := recoverGenerateInputFromEvents([]types.BridgeEvent{
+		{
+			EventID: "event-user-input",
+			TaskID:  "task-plan-recovery",
+			Type:    "task.user_input",
+			Payload: payload,
+		},
+		{
+			EventID: "event-question",
+			TaskID:  "task-plan-recovery",
+			Type:    "task.question",
+			Payload: map[string]any{"id": "question-group"},
+		},
+	}, localstore.TaskContext{})
+	if err != nil {
+		t.Fatalf("recoverGenerateInputFromEvents: %v", err)
+	}
+	if got.GenerationMode != "plan" {
+		t.Fatalf("GenerationMode = %q, want plan", got.GenerationMode)
+	}
+	if got.RuntimeMode != "" {
+		t.Fatalf("RuntimeMode = %q, want empty", got.RuntimeMode)
 	}
 }

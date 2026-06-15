@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { message as antdMessage } from "antd";
+import { getAttachmentSpec } from "../../shared/types";
 import type { DesktopAPI, DesktopTask, GenerateInput, WorkspaceSummary } from "../../shared/types";
 import { officecli } from "../bridge";
 import { LocaleProvider, type Locale } from "../i18n";
@@ -71,11 +72,14 @@ let createImageTemplateSpy: ReturnType<typeof vi.fn>;
 let createImageTemplatePublishRequestSpy: ReturnType<typeof vi.fn>;
 let issuePreviewTokenSpy: ReturnType<typeof vi.fn>;
 let readArtifactFileSpy: ReturnType<typeof vi.fn>;
+let readLocalImageSpy: ReturnType<typeof vi.fn>;
 let revokePreviewTokenSpy: ReturnType<typeof vi.fn>;
 let copyImageToClipboardSpy: ReturnType<typeof vi.fn>;
 let savePastedImageSpy: ReturnType<typeof vi.fn>;
+let onFileDropSpy: ReturnType<typeof vi.fn>;
 let writeTextSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
+let fileDropCallback: ((paths: string[]) => void) | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -89,9 +93,15 @@ beforeEach(() => {
   createImageTemplatePublishRequestSpy = vi.fn(async () => ({ id: 31, privateTemplateID: 17, provenanceID: 11, status: "pending" }));
   issuePreviewTokenSpy = vi.fn(async (artifact) => ({ token: "test-token", fileName: artifact.fileName, documentType: artifact.documentType }));
   readArtifactFileSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]) }));
+  readLocalImageSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]), mime: "image/png" }));
   revokePreviewTokenSpy = vi.fn(async () => undefined);
   copyImageToClipboardSpy = vi.fn(async () => undefined);
   savePastedImageSpy = vi.fn(async (_data: Uint8Array, ext: string) => `/tmp/dropped-template-reference.${ext}`);
+  fileDropCallback = undefined;
+  onFileDropSpy = vi.fn((callback: (paths: string[]) => void) => {
+    fileDropCallback = callback;
+    return vi.fn();
+  });
   writeTextSpy = vi.fn(async () => undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -105,9 +115,11 @@ beforeEach(() => {
     createImageTemplatePublishRequest: officecli.createImageTemplatePublishRequest,
     issuePreviewToken: officecli.issuePreviewToken,
     readArtifactFile: officecli.readArtifactFile,
+    readLocalImage: officecli.readLocalImage,
     revokePreviewToken: officecli.revokePreviewToken,
     copyImageToClipboard: officecli.copyImageToClipboard,
     savePastedImage: officecli.savePastedImage,
+    onFileDrop: officecli.onFileDrop,
   };
   officecli.respond = respondSpy as unknown as DesktopAPI["respond"];
   officecli.cancel = cancelSpy as unknown as DesktopAPI["cancel"];
@@ -116,9 +128,11 @@ beforeEach(() => {
   (officecli as unknown as { createImageTemplatePublishRequest: typeof createImageTemplatePublishRequestSpy }).createImageTemplatePublishRequest = createImageTemplatePublishRequestSpy;
   officecli.issuePreviewToken = issuePreviewTokenSpy as unknown as DesktopAPI["issuePreviewToken"];
   officecli.readArtifactFile = readArtifactFileSpy as unknown as DesktopAPI["readArtifactFile"];
+  officecli.readLocalImage = readLocalImageSpy as unknown as DesktopAPI["readLocalImage"];
   officecli.revokePreviewToken = revokePreviewTokenSpy as unknown as DesktopAPI["revokePreviewToken"];
   officecli.copyImageToClipboard = copyImageToClipboardSpy as unknown as DesktopAPI["copyImageToClipboard"];
   officecli.savePastedImage = savePastedImageSpy as unknown as DesktopAPI["savePastedImage"];
+  officecli.onFileDrop = onFileDropSpy as unknown as DesktopAPI["onFileDrop"];
 });
 
 afterEach(() => {
@@ -335,6 +349,8 @@ describe("DialogueScreen state machine", () => {
     expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
       taskId: "task-multi-q",
       questionId: "question-000009",
+      optionId: "leadership",
+      answer: "Leadership",
       answers: [
         { questionGroupId: "question-000009", questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
       ],
@@ -543,6 +559,8 @@ describe("DialogueScreen state machine", () => {
     expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
       taskId: "task-history-submit-answers",
       questionId: "question-history-submit",
+      optionId: "concise",
+      answer: "Concise",
       answers: [
         { questionGroupId: "question-history-submit", questionId: "q-audience", optionId: "leadership", answer: "Leadership", questionIndex: 0 },
         { questionGroupId: "question-history-submit", questionId: "q-tone", optionId: "concise", answer: "Concise", questionIndex: 1 },
@@ -550,16 +568,26 @@ describe("DialogueScreen state machine", () => {
     }));
   });
 
-  it("places the active question between progress and the answer controls", () => {
+  it("hides task status cards while showing the active question controls", () => {
     const task: DesktopTask = {
       id: "task-q-layout",
       conversationId: "task-q-layout",
       status: "question",
-      events: [],
+      documentType: "docx",
+      topic: "Create a crab intro document",
+      events: [
+        { task_id: "task-q-layout", type: "task.started", payload: { document_type: "docx", topic: "Create a crab intro document" } },
+        { task_id: "task-q-layout", type: "task.progress", payload: { stage: "Writing content" } },
+        { task_id: "task-q-layout", type: "task.question", payload: { question: "Who is this 10-page deck for?" } },
+      ],
       stages: [
         { id: "analyze", label: "Analyzing request", status: "completed" },
         { id: "outline", label: "Drafting outline", status: "active" },
       ],
+      runtimeSnapshot: { mode: "hosted" },
+      userInput: {
+        prompt: "Create a crab intro document",
+      },
       question: {
         id: "q-layout",
         question: "Who is this 10-page deck for?",
@@ -572,17 +600,24 @@ describe("DialogueScreen state machine", () => {
     };
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
-    const progressPanel = document.querySelector(".fluid-progress-panel")!;
     const composer = document.querySelector(".question-composer") as HTMLElement;
     const prompt = within(composer).getByText("Who is this 10-page deck for?");
     const firstOption = within(composer).getByRole("button", { name: "Newcomers" });
     const freeform = within(composer).getByPlaceholderText(/custom answer if none of the options fit/i);
 
+    expect(screen.getByText("Create a crab intro document")).toBeTruthy();
     expect(composer).toBeTruthy();
     expect(screen.getAllByText("Who is this 10-page deck for?")).toHaveLength(1);
-    expect(Boolean(progressPanel.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(prompt.compareDocumentPosition(firstOption) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(firstOption.compareDocumentPosition(freeform) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy();
+    expect(screen.queryByText(/Task received/i)).toBeNull();
+    expect(screen.queryByText(/Target type/i)).toBeNull();
+    expect(screen.queryByText("Runtime used")).toBeNull();
+    expect(screen.queryByText(/Waiting for your input/i)).toBeNull();
+    expect(screen.queryByText("Writing content")).toBeNull();
+    expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
+    expect(document.querySelector(".fluid-progress-panel")).toBeNull();
   });
 
   it("renders a question after the latest task transitions from running", async () => {
@@ -596,8 +631,14 @@ describe("DialogueScreen state machine", () => {
     const questionTask: DesktopTask = {
       ...runningTask,
       status: "question",
+      runtimeSnapshot: { mode: "hosted" },
+      stages: [
+        { id: "analyze", label: "Analyzing request", status: "completed" },
+        { id: "outline", label: "Drafting outline", status: "active" },
+      ],
       events: [
         ...runningTask.events,
+        { task_id: "task-q-transition", type: "task.progress", payload: { stage: "Drafting outline" } },
         { task_id: "task-q-transition", type: "task.question", payload: { question: "Who is the audience?" } },
       ],
       question: {
@@ -612,10 +653,47 @@ describe("DialogueScreen state machine", () => {
     rerender(<DialogueScreen {...baseProps()} tasks={[questionTask]} />);
 
     expect(screen.getByRole("button", { name: "Leadership" })).toBeTruthy();
+    expect(screen.queryByText(/Target type/i)).toBeNull();
+    expect(screen.queryByText("Runtime used")).toBeNull();
+    expect(screen.queryByText(/Waiting for your input/i)).toBeNull();
+    expect(screen.queryByText("Drafting outline")).toBeNull();
+    expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
+    expect(document.querySelector(".fluid-progress-panel")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Leadership" }));
     await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: "task-q-transition", questionId: "q-audience", optionId: "leadership" }),
     ));
+  });
+
+  it("collapses a running generation into a single thinking message", () => {
+    const task: DesktopTask = {
+      id: "task-running-thinking",
+      conversationId: "task-running-thinking",
+      status: "running",
+      documentType: "docx",
+      topic: "介绍大闸蟹",
+      events: [
+        { task_id: "task-running-thinking", type: "task.started", payload: { document_type: "docx", topic: "介绍大闸蟹" } },
+        { task_id: "task-running-thinking", type: "task.progress", payload: { stage: "Writing content" } },
+      ],
+      stages: [
+        { id: "analyze", label: "Analyzing request", status: "completed" },
+        { id: "outline", label: "Drafting outline", status: "completed" },
+        { id: "write", label: "Writing content", status: "active" },
+      ],
+      runtimeSnapshot: { mode: "hosted" },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("介绍大闸蟹")).toBeTruthy();
+    expect(screen.getByText("Thinking...")).toBeTruthy();
+    expect(screen.queryByText(/Task received/i)).toBeNull();
+    expect(screen.queryByText(/Target type/i)).toBeNull();
+    expect(screen.queryByText("Runtime used")).toBeNull();
+    expect(screen.queryByText("Writing content")).toBeNull();
+    expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
+    expect(document.querySelector(".fluid-progress-panel")).toBeNull();
   });
 
   it("Plan review state waits for explicit approval or revision after showing the execution prompt", async () => {
@@ -1170,7 +1248,7 @@ describe("DialogueScreen state machine", () => {
 
     expect(await screen.findByText("Poster")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Poster/i }));
-    expect(screen.getByRole("button", { name: /Attach reference images/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Attach reference images/i })).toBeNull();
     await waitFor(() => expect((screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement).value).toBe("Template prompt: replace PRODUCT"));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -1347,23 +1425,65 @@ describe("DialogueScreen state machine", () => {
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
   });
 
-  it("hides GIF from new generation and falls back to PPTX for GIF drafts", async () => {
+  it("keeps the non-image new generation composer fixed to the bottom", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const startRule = css.match(/\.fluid-new-task:not\(\.image-template-workspace\)\s+\.fluid-start-card\s*\{[^}]*\}/s)?.[0] ?? "";
+    const footerRule = css.match(/\.fluid-new-task:not\(\.image-template-workspace\)\s+\.fluid-command-footer\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(startRule).toContain("flex: 1 1 auto;");
+    expect(startRule).toContain("align-content: center;");
+    expect(footerRule).toContain("position: sticky;");
+    expect(footerRule).toContain("bottom: 0;");
+    expect(footerRule).toContain("flex: 0 0 auto;");
+  });
+
+  it("keeps the non-image start content scrollable above the fixed composer on mobile", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const mobileStartRule = css.match(/@media \(max-width: 760px\)[\s\S]*?\.fluid-new-task:not\(\.image-template-workspace\)\s+\.fluid-start-card\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(mobileStartRule).toContain("align-content: start;");
+    expect(mobileStartRule).toContain("overflow-y: auto;");
+  });
+
+  it("shows GIF in new generation and submits fps for GIF drafts", async () => {
     const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
     render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "gif", topic: "", prompt: "", fps: 16 }} />);
 
-    expect(screen.queryByText("GIF")).toBeNull();
-    expect(screen.queryByText("GIF FPS")).toBeNull();
+    expect(screen.getByText("GIF")).toBeTruthy();
+    expect(screen.getByText("GIF FPS")).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
-      target: { value: "Build a launch deck" },
+      target: { value: "Make a launch animation" },
     });
     fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
-      documentType: "pptx",
-      prompt: "Build a launch deck",
+      documentType: "gif",
+      prompt: "Make a launch animation",
+      fps: 16,
     }));
-    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("fps");
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
+  });
+
+  it("hides generation mode and submits plan generationMode without runtimeMode", async () => {
+    const onSubmit = vi.fn(async (_values: GenerateInput) => undefined);
+    render(<DialogueScreen {...baseProps({ onSubmit })} newGenerationDraft={{ documentType: "docx", topic: "", prompt: "", generationMode: "fast" }} />);
+
+    expect(screen.queryByText(/^Mode$/)).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Fast" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Plan" })).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/i), {
+      target: { value: "Write a plan-mode document" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      documentType: "docx",
+      prompt: "Write a plan-mode document",
+      generationMode: "plan",
+    }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("runtimeMode");
   });
 
   it("image generation confirms before replacing an existing prompt with a template", async () => {
@@ -1386,7 +1506,7 @@ describe("DialogueScreen state machine", () => {
     fireEvent.click(screen.getByRole("button", { name: /Poster/i }));
     expect((await screen.findAllByText("Replace current prompt?")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /^Replace$/i }));
-    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe("Template prompt: replace PRODUCT"));
+    await waitFor(() => expect((screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement).value).toBe("Template prompt: replace PRODUCT"));
     expect(screen.getByText(/Template text has been inserted/i)).toBeTruthy();
   });
 
@@ -1424,6 +1544,19 @@ describe("DialogueScreen state machine", () => {
     expect(picker?.firstElementChild).toBe(scratchCard);
     expect(Boolean(scratchCard.compareDocumentPosition(templateTitle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(scratchCard.classList.contains("image-template-scratch-card")).toBe(true);
+    expect(within(scratchCard).getByText("Blank prompt, no template constraints")).toBeTruthy();
+    expect(within(scratchCard).getByText("Selected")).toBeTruthy();
+    expect(screen.getByText("No reference images yet")).toBeTruthy();
+    expect(screen.getByText("Output preview will appear here")).toBeTruthy();
+    expect(document.querySelector(".image-template-reference-empty .image-template-reference-icon")).toBeTruthy();
+    expect(document.querySelector(".image-template-reference-empty .image-template-reference-slots")).toBeNull();
+    expect(screen.queryByText("Visual brief")).toBeNull();
+    expect(screen.queryByText("Style notes")).toBeNull();
+    expect(screen.queryByText("Negative prompt")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Add reference images$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Attach reference images/i })).toBeNull();
+    expect(document.querySelector(".image-template-actions-footer .reference-image-upload-button")).toBeNull();
+    expect(document.querySelector(".image-template-actions-footer .material-symbol")).toBeNull();
 
     const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
     const pickerRule = css.match(/\.image-template-workspace \.image-template-picker\s*\{[^}]*\}/s)?.[0] ?? "";
@@ -1432,11 +1565,249 @@ describe("DialogueScreen state machine", () => {
     fireEvent.click(screen.getByRole("button", { name: /Promo/i }));
     expect(document.querySelector(".image-template-form-title")?.textContent).toBe("What should we work on?");
     expect(screen.getByText("Fill in the template")).toBeTruthy();
+    expect(screen.queryByText("No reference images yet")).toBeNull();
 
-    fireEvent.click(scratchCard);
+    const selectedSummary = document.querySelector(".image-template-selected-template-card") as HTMLElement;
+    const templateComposer = document.querySelector(".image-template-template-composer");
+    expect(selectedSummary).toBeTruthy();
+    expect(templateComposer?.contains(selectedSummary)).toBe(true);
+    expect(within(selectedSummary).getByText("Promo")).toBeTruthy();
+    expect(within(selectedSummary).getByText("Template selected from the left. The form below can grow without pushing the footer away.")).toBeTruthy();
+    expect(document.querySelector(".image-template-template-form-scroll")?.contains(document.querySelector(".template-slot-form"))).toBe(true);
+
+    fireEvent.click(within(selectedSummary).getByRole("button", { name: /Start from scratch/i }));
     expect(document.querySelector(".image-template-form-title")?.textContent).toBe("What should we work on?");
     expect(screen.queryByText("Fill in the template")).toBeNull();
+    expect(screen.getByText("No reference images yet")).toBeTruthy();
     expect((screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("accepts dropped reference images on the scratch reference drop zone", async () => {
+    const onDraftChange = vi.fn();
+    render(<DialogueScreen {...baseProps({ onNewGenerationDraftChange: onDraftChange })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    const dropZone = await screen.findByRole("region", { name: /Drop reference images/i });
+    const droppedFile = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "reference.png", { type: "image/png" });
+
+    fireEvent.dragOver(dropZone, {
+      dataTransfer: {
+        files: [droppedFile],
+        items: [],
+        types: ["Files"],
+        dropEffect: "copy",
+      },
+    });
+
+    expect(dropZone.classList.contains("image-template-reference-drop-zone-active")).toBe(true);
+
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: [droppedFile],
+        items: [],
+        types: ["Files"],
+        dropEffect: "copy",
+      },
+    });
+
+    await waitFor(() => expect(savePastedImageSpy).toHaveBeenCalledWith(expect.any(Uint8Array), "png"));
+    expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: ["/tmp/dropped-template-reference.png"] });
+  });
+
+  it("accepts pasted reference images directly on the scratch reference drop zone", async () => {
+    const onDraftChange = vi.fn();
+    render(<DialogueScreen {...baseProps({ onNewGenerationDraftChange: onDraftChange })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    const dropZone = await screen.findByRole("region", { name: /Drop reference images/i });
+    const pastedFile = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "clipboard.png", { type: "image/png" });
+    firePasteWithFile(dropZone, pastedFile);
+
+    await waitFor(() => expect(savePastedImageSpy).toHaveBeenCalledWith(expect.any(Uint8Array), "png"));
+    expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: ["/tmp/dropped-template-reference.png"] });
+  });
+
+  it("shows a release hint when file drags do not expose files before drop", async () => {
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    const dropZone = await screen.findByRole("region", { name: /Drop reference images/i });
+    fireEvent.dragOver(dropZone, {
+      dataTransfer: {
+        files: [],
+        items: [],
+        types: ["Files"],
+        dropEffect: "copy",
+      },
+    });
+
+    expect(dropZone.classList.contains("image-template-reference-drop-zone-active")).toBe(true);
+    expect(screen.getByText("Release to add reference images")).toBeTruthy();
+  });
+
+  it("clears the release hint after a Wails native file drop completes", async () => {
+    const onDraftChange = vi.fn();
+    render(<DialogueScreen {...baseProps({ onNewGenerationDraftChange: onDraftChange })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    const dropZone = await screen.findByRole("region", { name: /Drop reference images/i });
+    fireEvent.dragOver(dropZone, {
+      dataTransfer: {
+        files: [],
+        items: [],
+        types: ["Files"],
+        dropEffect: "copy",
+      },
+    });
+    expect(screen.getByText("Release to add reference images")).toBeTruthy();
+
+    act(() => {
+      fileDropCallback?.(["/tmp/reference.png"]);
+    });
+
+    await waitFor(() => expect(screen.queryByText("Release to add reference images")).toBeNull());
+    expect(dropZone.classList.contains("image-template-reference-drop-zone-active")).toBe(false);
+    expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: ["/tmp/reference.png"] });
+  });
+
+  it("renders dropped reference image paths as thumbnails after the draft updates", async () => {
+    const onDraftChange = vi.fn();
+    const { rerender } = render(
+      <DialogueScreen {...baseProps({ onNewGenerationDraftChange: onDraftChange })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />,
+    );
+
+    await screen.findByRole("region", { name: /Drop reference images/i });
+    act(() => {
+      fileDropCallback?.(["/tmp/reference.png"]);
+    });
+    await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: ["/tmp/reference.png"] }));
+
+    rerender(
+      <DialogueScreen
+        {...baseProps({ onNewGenerationDraftChange: onDraftChange })}
+        newGenerationDraft={{ documentType: "img", topic: "", prompt: "", referenceImages: ["/tmp/reference.png"] }}
+      />,
+    );
+
+    await waitFor(() => expect(readLocalImageSpy).toHaveBeenCalledWith("/tmp/reference.png"));
+    expect(screen.getByRole("img", { name: "reference.png" })).toBeTruthy();
+  });
+
+  it("labels added reference image cards with a semantic panel header and card badges", async () => {
+    const maxCount = getAttachmentSpec("img", "referenceImages")?.maxCount ?? 6;
+    render(
+      <DialogueScreen
+        {...baseProps()}
+        newGenerationDraft={{
+          documentType: "img",
+          topic: "",
+          prompt: "",
+          referenceImages: ["/tmp/reference.png", "/tmp/style.png"],
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole("img", { name: "reference.png" })).toBeTruthy();
+    expect(screen.getByText("Reference images")).toBeTruthy();
+    expect(screen.getByText(`2 / ${maxCount}`)).toBeTruthy();
+    expect(screen.getByText("Used as style references")).toBeTruthy();
+    expect(screen.getAllByText("Reference")).toHaveLength(2);
+  });
+
+  it("updates the reference image count and returns to the empty state after removals", async () => {
+    const maxCount = getAttachmentSpec("img", "referenceImages")?.maxCount ?? 6;
+    const onDraftChange = vi.fn();
+    const { rerender } = render(
+      <DialogueScreen
+        {...baseProps({ onNewGenerationDraftChange: onDraftChange })}
+        newGenerationDraft={{
+          documentType: "img",
+          topic: "",
+          prompt: "",
+          referenceImages: ["/tmp/reference.png", "/tmp/style.png"],
+        }}
+      />,
+    );
+
+    expect(await screen.findByText(`2 / ${maxCount}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /remove reference.png/i }));
+    expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: ["/tmp/style.png"] });
+
+    rerender(
+      <DialogueScreen
+        {...baseProps({ onNewGenerationDraftChange: onDraftChange })}
+        newGenerationDraft={{ documentType: "img", topic: "", prompt: "", referenceImages: ["/tmp/style.png"] }}
+      />,
+    );
+
+    expect(await screen.findByText(`1 / ${maxCount}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /remove style.png/i }));
+    expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: [] });
+
+    rerender(
+      <DialogueScreen
+        {...baseProps({ onNewGenerationDraftChange: onDraftChange })}
+        newGenerationDraft={{ documentType: "img", topic: "", prompt: "", referenceImages: [] }}
+      />,
+    );
+
+    expect(screen.queryByText("Reference images")).toBeNull();
+    expect(screen.getByText("No reference images yet")).toBeTruthy();
+  });
+
+  it("keeps reference cards removable when thumbnail preview fails", async () => {
+    const onDraftChange = vi.fn();
+    readLocalImageSpy.mockRejectedValueOnce(new Error("cannot read image"));
+    render(
+      <DialogueScreen
+        {...baseProps({ onNewGenerationDraftChange: onDraftChange })}
+        newGenerationDraft={{ documentType: "img", topic: "", prompt: "", referenceImages: ["/tmp/broken.png"] }}
+      />,
+    );
+
+    expect(await screen.findByText("Preview unavailable")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /remove broken.png/i }));
+
+    expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: [] });
+  });
+
+  it("shows the reference image limit state while dragging over a full drop zone", async () => {
+    const maxCount = getAttachmentSpec("img", "referenceImages")?.maxCount ?? 6;
+    render(
+      <DialogueScreen
+        {...baseProps()}
+        newGenerationDraft={{
+          documentType: "img",
+          topic: "",
+          prompt: "",
+          referenceImages: Array.from({ length: maxCount }, (_, index) => `/tmp/reference-${index}.png`),
+        }}
+      />,
+    );
+
+    const dropZone = await screen.findByRole("region", { name: /Drop reference images/i });
+    fireEvent.dragOver(dropZone, {
+      dataTransfer: {
+        files: [],
+        items: [],
+        types: ["Files"],
+        dropEffect: "copy",
+      },
+    });
+
+    expect(screen.getByText("Reference images limit reached")).toBeTruthy();
+  });
+
+  it("adds Wails native dropped image paths to scratch reference images", async () => {
+    const onDraftChange = vi.fn();
+    render(<DialogueScreen {...baseProps({ onNewGenerationDraftChange: onDraftChange })} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    await screen.findByRole("region", { name: /Drop reference images/i });
+    expect(onFileDropSpy).toHaveBeenCalled();
+    expect(fileDropCallback).toBeTruthy();
+
+    act(() => {
+      fileDropCallback?.(["/tmp/reference.png", "/tmp/notes.txt"]);
+    });
+
+    await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith({ sourceFile: undefined, referenceImages: ["/tmp/reference.png"] }));
+    expect(savePastedImageSpy).not.toHaveBeenCalled();
   });
 
   it("lays out image templates as a 1:1 photo wall and form workspace", async () => {
@@ -1457,9 +1828,10 @@ describe("DialogueScreen state machine", () => {
     const formPane = document.querySelector(".image-template-form-pane");
     const actionsFooter = document.querySelector(".image-template-actions-footer");
     const commandBar = document.querySelector(".fluid-command-bar");
+    const templateComposer = document.querySelector(".image-template-template-composer");
+    const templateFormScroll = document.querySelector(".image-template-template-form-scroll");
     const templateGrid = document.querySelector(".image-template-grid");
     const masonryColumns = document.querySelectorAll(".image-template-masonry-column");
-    const uploadButton = screen.getByRole("button", { name: /Attach reference images/i });
     const generateButton = screen.getByRole("button", { name: /Generate$/i });
 
     expect(workspace).toBeTruthy();
@@ -1467,14 +1839,20 @@ describe("DialogueScreen state machine", () => {
     expect(formPane).toBeTruthy();
     expect(actionsFooter).toBeTruthy();
     expect(commandBar).toBeTruthy();
+    expect(templateComposer).toBeTruthy();
+    expect(templateFormScroll).toBeTruthy();
     expect(workspace?.contains(galleryPane)).toBe(true);
     expect(workspace?.contains(formPane)).toBe(true);
     expect(formPane?.contains(commandBar)).toBe(true);
     expect(formPane?.contains(actionsFooter)).toBe(true);
+    expect(commandBar?.contains(templateComposer)).toBe(true);
+    expect(templateComposer?.contains(templateFormScroll)).toBe(true);
+    expect(templateFormScroll?.contains(actionsFooter)).toBe(false);
     expect(actionsFooter?.parentElement).toBe(formPane);
-    expect(actionsFooter?.contains(uploadButton)).toBe(true);
     expect(actionsFooter?.contains(generateButton)).toBe(true);
-    expect(Boolean(uploadButton.compareDocumentPosition(generateButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.queryByRole("button", { name: /Attach reference images/i })).toBeNull();
+    expect(document.querySelector(".image-template-actions-footer .reference-image-upload-button")).toBeNull();
+    expect(document.querySelector(".image-template-actions-footer .material-symbol")).toBeNull();
     expect(templateGrid?.classList.contains("image-template-vertical-wall")).toBe(true);
     expect(masonryColumns).toHaveLength(3);
     expect(masonryColumns[0].textContent).toContain("Promo 1");
@@ -1489,12 +1867,16 @@ describe("DialogueScreen state machine", () => {
     const masonryColumnRule = css.match(/\.image-template-masonry-column\s*\{[^}]*\}/s)?.[0] ?? "";
     const actionsRule = css.match(/\.image-template-actions-footer\s*\{[^}]*\}/s)?.[0] ?? "";
     const actionsOverrideRule = css.match(/\.composer-actions\.image-template-actions-footer\s*\{[^}]*\}/s)?.[0] ?? "";
+    const templateComposerRule = css.match(/\.image-template-template-composer\s*\{[^}]*\}/s)?.[0] ?? "";
+    const formScrollRule = css.match(/\.image-template-template-form-scroll\s*\{[^}]*\}/s)?.[0] ?? "";
     expect(galleryGridRule).toContain("display: grid;");
     expect(galleryGridRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
     expect(galleryGridRule).not.toContain("column-count:");
     expect(masonryColumnRule).toContain("display: grid;");
     expect(masonryColumnRule).toContain("align-content: start;");
     expect(galleryCardRule).toContain("break-inside: avoid;");
+    expect(templateComposerRule).toContain("grid-template-rows: auto minmax(0, 1fr);");
+    expect(formScrollRule).toContain("overflow-y: auto;");
     expect(actionsRule).toContain("grid-template-columns: minmax(0, 1fr) auto;");
     expect(actionsOverrideRule).toContain("display: grid;");
   });
@@ -1633,6 +2015,18 @@ function fireDropWithFile(target: HTMLElement, file: File) {
   });
 }
 
+function firePasteWithFile(target: HTMLElement, file: File) {
+  const dataTransfer = {
+    files: [file] as unknown as FileList,
+    items: [],
+    types: ["Files"],
+    getData: () => "",
+  } as unknown as DataTransfer;
+  const event = createEvent.paste(target, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: dataTransfer });
+  fireEvent(target, event);
+}
+
 const SLOTTED_TEMPLATE = {
   id: 8,
   slug: "promo",
@@ -1720,12 +2114,14 @@ describe("Image template slots (guided fill-in)", () => {
     expect(preview.textContent).toBe("Poster for sneakers, minimalist style. Notes: NOTES_HINT");
   });
 
-  it("labels the image reference upload button with visible upload guidance", async () => {
+  it("keeps the image template footer focused on Generate without upload or advanced buttons", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([SLOTTED_TEMPLATE]);
     await selectSlottedTemplate();
 
-    const uploadButton = screen.getByRole("button", { name: /Attach reference images/i });
-    expect(within(uploadButton).getByText(/Upload reference images/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Attach reference images/i })).toBeNull();
+    expect(screen.queryByText(/Upload reference images/i)).toBeNull();
+    expect(document.querySelector(".image-template-actions-footer .reference-image-upload-button")).toBeNull();
+    expect(document.querySelector(".image-template-actions-footer .material-symbol")).toBeNull();
   });
 
   it("uses a required slot defaultValue when the user leaves it empty", async () => {

@@ -509,6 +509,10 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 	if err != nil {
 		return TaskInvokeResult{}, err
 	}
+	officeMode, interactive, err := officeGenerateModeArgs(input)
+	if err != nil {
+		return TaskInvokeResult{}, err
+	}
 	c.mu.Lock()
 	sessionID := c.sessionID
 	c.mu.Unlock()
@@ -523,7 +527,6 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		"document_type":      input.DocumentType,
 		"topic":              input.Topic,
 		"prompt":             input.Prompt,
-		"runtime_mode":       input.RuntimeMode,
 		"prompt_template_id": input.PromptTemplateID,
 		"out":                input.OutputDir,
 		"publish":            input.Publish,
@@ -542,8 +545,11 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		// for the expected sidecar contract.
 		"emit_preview": true,
 	}
-	if isOfficeDocumentType(input.DocumentType) {
-		args["mode"] = "best"
+	if input.RuntimeMode != "" {
+		args["runtime_mode"] = input.RuntimeMode
+	}
+	if officeMode != "" {
+		args["mode"] = officeMode
 	}
 	if ratio != "" {
 		args["ratio"] = ratio
@@ -560,7 +566,7 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 	raw, err := c.requestWithTimeout(ctx, "task/invoke", map[string]any{
 		"session_id":    sessionID,
 		"tool":          "office.generate",
-		"interactive":   true,
+		"interactive":   interactive,
 		"output_format": "bundle",
 		"args":          args,
 	}, c.options.TaskInvokeTimeout)
@@ -572,6 +578,18 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		return TaskInvokeResult{}, fmt.Errorf("bridge: decode task/invoke: %w", err)
 	}
 	return result, nil
+}
+
+func officeGenerateModeArgs(input types.GenerateInput) (string, bool, error) {
+	if !isOfficeDocumentType(input.DocumentType) {
+		return "", false, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(input.GenerationMode)) {
+	case "", "fast", "plan":
+		return "best", true, nil
+	default:
+		return "", false, fmt.Errorf("bridge: unsupported generation mode: %s", input.GenerationMode)
+	}
 }
 
 func isOfficeDocumentType(documentType types.DocumentType) bool {

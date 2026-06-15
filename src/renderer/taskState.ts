@@ -1,4 +1,4 @@
-import type { Artifact, BridgeEvent, DesktopTask, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskQuestionAnswer, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, GenerationMode, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskQuestionAnswer, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
 
 export interface TaskState {
   tasks: Record<string, DesktopTask>;
@@ -381,7 +381,12 @@ function userInputFromPayload(payload: BridgeEvent["payload"]): TaskUserInput | 
   const referenceImages = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : undefined;
   const imageRatio = normalizeImageRatio(payload.image_ratio) ?? normalizeImageRatio(payload.imageRatio);
   const fps = normalizeGIFFPS(payload.fps);
-  return { prompt, sourceFile, referenceImages, imageRatio, fps };
+  const generationMode = normalizeGenerationMode(payload.generation_mode) ?? normalizeGenerationMode(payload.generationMode);
+  return { prompt, generationMode, sourceFile, referenceImages, imageRatio, fps };
+}
+
+function normalizeGenerationMode(value: unknown): GenerationMode | undefined {
+  return value === "fast" || value === "plan" ? "plan" : undefined;
 }
 
 function normalizeImageRatio(value: unknown): ImageRatio | undefined {

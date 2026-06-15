@@ -113,7 +113,7 @@ func TestRealOfficeCliGenerateArtifacts(t *testing.T) {
 			topic:   "OfficeDex real E2E deck",
 			prompt:  "Create a concise two-slide editable deck for real OfficeDex E2E validation.",
 			extraArgs: []string{
-				"--mode", "fast",
+				"--mode", "best",
 				"--no-images",
 				"--no-reference-scan",
 				"--local-preview",
@@ -125,7 +125,7 @@ func TestRealOfficeCliGenerateArtifacts(t *testing.T) {
 			docType:     "docx",
 			topic:       "OfficeDex real E2E document",
 			prompt:      "Write a five sentence document for real OfficeDex E2E validation.",
-			extraArgs:   []string{"--mode", "fast", "--local-preview"},
+			extraArgs:   []string{"--mode", "best", "--local-preview"},
 			acceptedExt: []string{".docx"},
 		},
 		{
@@ -133,7 +133,7 @@ func TestRealOfficeCliGenerateArtifacts(t *testing.T) {
 			docType:     "xlsx",
 			topic:       "OfficeDex real E2E workbook",
 			prompt:      "Create a small workbook with columns Item, Owner, Status and three data rows.",
-			extraArgs:   []string{"--mode", "fast", "--local-preview"},
+			extraArgs:   []string{"--mode", "best", "--local-preview"},
 			acceptedExt: []string{".xlsx"},
 		},
 		{
@@ -228,7 +228,7 @@ func TestRealOfficeCliModifyArtifacts(t *testing.T) {
 				"--out", seedDir,
 				"--no-publish",
 				"--json",
-				"--mode", "fast",
+				"--mode", "best",
 			}
 			if tc.docType == "pptx" {
 				seedArgs = append(seedArgs, "--no-images", "--no-reference-scan")

@@ -5,6 +5,7 @@
  * Adding/removing fields requires updating all three.
  */
 export type DocumentType = "pptx" | "docx" | "xlsx" | "report" | "img" | "gif";
+export type GenerationMode = "fast" | "plan";
 export type ImageRatio = "square" | "landscape" | "portrait";
 
 export type AttachmentSlot = "sourceWorkbook" | "referenceImages";
@@ -152,6 +153,7 @@ export interface Artifact {
 
 export interface GenerateInput {
   documentType: DocumentType;
+  generationMode?: GenerationMode;
   topic: string;
   prompt: string;
   workspaceId?: string;
@@ -229,6 +231,7 @@ export interface StageState {
 
 export interface TaskUserInput {
   prompt: string;
+  generationMode?: GenerationMode;
   promptTemplateId?: string;
   sourceFile?: string;
   referenceImages?: string[];
@@ -578,6 +581,7 @@ export interface DesktopAPI {
   removeWorkspace(workspaceId: string): Promise<void>;
   onAuthEvent(callback: (event: AuthEvent) => void): () => void;
   onBridgeEvent(callback: (event: BridgeEvent) => void): () => void;
+  onFileDrop(callback: (paths: string[]) => void): () => void;
   getAppVersion(): Promise<string>;
   getAppUpdateStatus(): Promise<AppUpdateStatus>;
   checkAppUpdate(): Promise<AppUpdateCheckResult>;

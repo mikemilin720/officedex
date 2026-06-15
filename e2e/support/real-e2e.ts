@@ -1,0 +1,218 @@
+import { expect, type Page, type TestInfo } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+
+export type DocumentType = "pptx" | "docx" | "xlsx" | "report" | "img" | "gif";
+export type GenerationMode = "plan";
+
+export interface ScenarioRecord {
+  uiScenario: string;
+  documentType?: DocumentType;
+  mode?: GenerationMode;
+  taskId?: string;
+  artifactPath?: string;
+  fileSize?: number;
+  durationMs?: number;
+  credits?: unknown;
+  runtime?: unknown;
+  error?: string;
+}
+
+export function realE2EEndpoint(): string {
+  const endpoint = process.env.OFFICEDEX_REAL_E2E_ENDPOINT;
+  if (!endpoint) {
+    throw new Error("OFFICEDEX_REAL_E2E_ENDPOINT is required for real OfficeDex client E2E.");
+  }
+  return endpoint.replace(/\/+$/, "");
+}
+
+export async function hostControl<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${realE2EEndpoint()}${path}`, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(body?.error || `control ${path} failed with ${response.status}`);
+  }
+  return body as T;
+}
+
+export async function recordScenario(record: ScenarioRecord): Promise<void> {
+  await hostControl("/control/records", {
+    method: "POST",
+    body: JSON.stringify(record),
+  });
+}
+
+export async function attachHostReport(testInfo: TestInfo): Promise<void> {
+  const report = await hostControl("/control/report");
+  await testInfo.attach("real-e2e-host-report", {
+    body: JSON.stringify(report, null, 2),
+    contentType: "application/json",
+  });
+}
+
+export async function preparePage(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("officedex.locale", "en");
+  });
+  page.on("pageerror", (error) => {
+    if (/Failed to fetch/i.test(error.message)) {
+      return;
+    }
+    throw error;
+  });
+  await page.goto("/");
+  await expect(page.getByText("OfficeDex").first()).toBeVisible({ timeout: 60_000 });
+  await dismissOnboarding(page);
+}
+
+export async function dismissOnboarding(page: Page): Promise<void> {
+  const skip = page.getByRole("button", { name: /Skip for now/i });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await skip.isVisible().catch(() => false))) {
+      return;
+    }
+    await skip.click();
+    await page.waitForTimeout(1_000);
+    if ((await page.getByText("Welcome to OfficeDex").count()) === 0) {
+      return;
+    }
+  }
+  await expect(page.getByText("Welcome to OfficeDex")).toHaveCount(0);
+}
+
+export async function queueFileDialog(paths: string | string[]): Promise<void> {
+  await hostControl("/control/file-dialog", {
+    method: "POST",
+    body: JSON.stringify({ paths: Array.isArray(paths) ? paths : [paths] }),
+  });
+}
+
+export async function fixturePath(name: string): Promise<string> {
+  const result = await hostControl<{ path: string }>(`/control/fixture/${encodeURIComponent(name)}`);
+  return result.path;
+}
+
+export async function selectDocumentType(page: Page, documentType: DocumentType): Promise<void> {
+  const labels: Record<DocumentType, string> = {
+    pptx: "PPTX",
+    docx: "DOCX",
+    xlsx: "XLSX",
+    report: "Report",
+    img: "Image",
+    gif: "GIF",
+  };
+  await clickAntRadioButton(page, labels[documentType]);
+}
+
+export async function openNewGeneration(page: Page): Promise<void> {
+  const prompt = page.getByPlaceholder(/Enter what you want to generate/i);
+  if (await prompt.isVisible().catch(() => false)) {
+    return;
+  }
+  await page.getByRole("button", { name: /New chat/i }).first().click({ timeout: 60_000 });
+  await expect(prompt).toBeVisible({ timeout: 60_000 });
+}
+
+async function clickAntRadioButton(page: Page, label: string): Promise<void> {
+  await page.locator("label.ant-radio-button-wrapper").filter({ hasText: new RegExp(`^${escapeRegExp(label)}$`, "i") }).first().click();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export async function submitGeneration(page: Page, input: {
+  documentType: DocumentType;
+  mode?: GenerationMode;
+  prompt: string;
+  sourceFile?: string;
+}): Promise<void> {
+  await openNewGeneration(page);
+  await selectDocumentType(page, input.documentType);
+  if (input.sourceFile) {
+    await queueFileDialog(input.sourceFile);
+    await page.getByRole("button", { name: /Attach source file/i }).click();
+    await expect(page.getByText(input.sourceFile.split(/[\\/]/).pop() ?? input.sourceFile)).toBeVisible();
+  }
+  await page.getByPlaceholder(/Enter what you want to generate/i).fill(input.prompt);
+  await page.locator(".fluid-command-footer button").filter({ hasText: /Generate/i }).last().click();
+}
+
+export async function waitForCompletedArtifact(page: Page, documentType: DocumentType): Promise<{ taskId: string; artifactPath: string; fileSize: number }> {
+  const deadline = Date.now() + 45 * 60_000;
+  while (Date.now() < deadline) {
+    if (await page.getByText("Generation Complete").first().isVisible().catch(() => false)) {
+      break;
+    }
+    await assertNoResponseContractError(page);
+    if (await answerVisibleInteraction(page)) {
+      continue;
+    }
+    await page.waitForTimeout(1_000);
+  }
+  await expect(page.getByText("Generation Complete").first()).toBeVisible({ timeout: 1_000 });
+  const artifact = await hostControl<{ taskId: string; path: string; size: number; documentType: string }>("/control/artifacts/latest");
+  expect(artifact.documentType).toBe(documentType);
+  if (documentType !== "img" && documentType !== "report") {
+    expect(artifact.path.toLowerCase()).toContain(`.${documentType}`);
+  }
+  expect(artifact.size).toBeGreaterThan(0);
+  return { taskId: artifact.taskId, artifactPath: artifact.path, fileSize: artifact.size };
+}
+
+export async function answerPlanUntilCompleted(page: Page, documentType: DocumentType): Promise<{ taskId: string; artifactPath: string; fileSize: number }> {
+  const deadline = Date.now() + 45 * 60_000;
+  while (Date.now() < deadline) {
+    if (await page.getByText("Generation Complete").first().isVisible().catch(() => false)) {
+      return waitForCompletedArtifact(page, documentType);
+    }
+    await assertNoResponseContractError(page);
+
+    if (await answerVisibleInteraction(page)) {
+      continue;
+    }
+
+    await page.waitForTimeout(1_000);
+  }
+  throw new Error(`Timed out waiting for ${documentType} plan generation to complete`);
+}
+
+async function answerVisibleInteraction(page: Page): Promise<boolean> {
+  const approve = page.locator("button.plan-review-approve").first();
+  if (await approve.isVisible().catch(() => false)) {
+    await approve.click();
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  const option = page.locator(".question-composer-option").first();
+  if (await option.isVisible().catch(() => false)) {
+    await option.click();
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  const freeform = page.getByPlaceholder(/Type a custom answer/i).first();
+  if (await freeform.isVisible().catch(() => false)) {
+    await freeform.fill("Use the recommended concise default for this real E2E run.");
+    await page.locator(".question-composer button").last().click();
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  return false;
+}
+
+export async function assertNoResponseContractError(page: Page): Promise<void> {
+  await expect(page.getByText(/either option_id or answer is required/i)).toHaveCount(0);
+}
+
+export async function readTextFixture(name: string): Promise<string> {
+  return readFile(await fixturePath(name), "utf8");
+}

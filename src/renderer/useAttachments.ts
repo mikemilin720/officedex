@@ -23,6 +23,7 @@ export interface UseAttachmentsResult {
   clearSourceFile: () => void;
   pickReferenceImages: () => Promise<void>;
   removeReferenceImage: (path: string) => void;
+  addReferenceImagePaths: (paths: string[]) => number;
   isReferenceLimitReached: boolean;
   supportsPaste: boolean;
   handlePastedFiles: (files: File[]) => Promise<number>;
@@ -107,6 +108,18 @@ export function useAttachments(documentType: DocumentType, options: UseAttachmen
     updateReferenceImages(referenceImagesRef.current.filter((entry) => entry !== path));
   }, [updateReferenceImages]);
 
+  const addReferenceImagePaths = useCallback((paths: string[]): number => {
+    if (!referenceImagesSpec) return 0;
+    const allowedExtensions = new Set(referenceImagesSpec.extensions.map((ext) => ext.toLowerCase()));
+    const incoming = paths.filter((path) => hasAllowedImageExtension(path, allowedExtensions));
+    if (incoming.length === 0) return 0;
+    const current = referenceImagesRef.current;
+    const next = mergeUnique(current, incoming, referenceImagesSpec.maxCount);
+    if (next.length === current.length) return 0;
+    updateReferenceImages(next);
+    return next.length - current.length;
+  }, [referenceImagesSpec, updateReferenceImages]);
+
   const isReferenceLimitReached = referenceImagesSpec ? referenceImages.length >= referenceImagesSpec.maxCount : false;
 
   const supportsPaste = Boolean(referenceImagesSpec);
@@ -173,12 +186,18 @@ export function useAttachments(documentType: DocumentType, options: UseAttachmen
     clearSourceFile,
     pickReferenceImages,
     removeReferenceImage,
+    addReferenceImagePaths,
     isReferenceLimitReached,
     supportsPaste,
     handlePastedFiles,
     collect,
     validateForSubmit,
   };
+}
+
+function hasAllowedImageExtension(path: string, allowed: Set<string>): boolean {
+  const extension = path.includes(".") ? path.split(".").pop()?.toLowerCase() : undefined;
+  return Boolean(extension && allowed.has(extension));
 }
 
 function inferImageExtension(file: File, allowed: Set<string>): string | undefined {

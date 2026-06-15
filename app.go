@@ -67,6 +67,31 @@ type DesktopNotificationInput struct {
 	Body  string `json:"body"`
 }
 
+type desktopNotificationRuntime interface {
+	IsNotificationAvailable(context.Context) bool
+	CheckNotificationAuthorization(context.Context) (bool, error)
+	RequestNotificationAuthorization(context.Context) (bool, error)
+	SendNotification(context.Context, wailsruntime.NotificationOptions) error
+}
+
+type wailsDesktopNotificationRuntime struct{}
+
+func (wailsDesktopNotificationRuntime) IsNotificationAvailable(ctx context.Context) bool {
+	return wailsruntime.IsNotificationAvailable(ctx)
+}
+
+func (wailsDesktopNotificationRuntime) CheckNotificationAuthorization(ctx context.Context) (bool, error) {
+	return wailsruntime.CheckNotificationAuthorization(ctx)
+}
+
+func (wailsDesktopNotificationRuntime) RequestNotificationAuthorization(ctx context.Context) (bool, error) {
+	return wailsruntime.RequestNotificationAuthorization(ctx)
+}
+
+func (wailsDesktopNotificationRuntime) SendNotification(ctx context.Context, options wailsruntime.NotificationOptions) error {
+	return wailsruntime.SendNotification(ctx, options)
+}
+
 // App is the Wails-bound object surfaced to the renderer.
 type App struct {
 	ctx context.Context
@@ -99,6 +124,9 @@ type App struct {
 	resolvedBinaryPath string
 	resolvedBinaryEnv  []string
 	binaryResolvedAt   time.Time
+
+	notificationMu                   sync.Mutex
+	notificationAuthorizationGranted bool
 }
 
 // NewApp resolves user-scoped paths and constructs the per-user services
@@ -255,6 +283,10 @@ func (a *App) GetCapabilities() ([]byte, error) {
 }
 
 func (a *App) SendDesktopNotification(input DesktopNotificationInput) error {
+	return a.sendDesktopNotificationWithRuntime(wailsDesktopNotificationRuntime{}, input)
+}
+
+func (a *App) sendDesktopNotificationWithRuntime(notificationRuntime desktopNotificationRuntime, input DesktopNotificationInput) error {
 	ctx := a.ctx
 	if ctx == nil {
 		return errors.New("desktop notification runtime is unavailable")
@@ -266,15 +298,34 @@ func (a *App) SendDesktopNotification(input DesktopNotificationInput) error {
 	}
 	body := strings.TrimSpace(input.Body)
 
-	if !wailsruntime.IsNotificationAvailable(ctx) {
+	if !notificationRuntime.IsNotificationAvailable(ctx) {
 		return errors.New("desktop notifications are unavailable on this platform")
 	}
-	authorized, err := wailsruntime.CheckNotificationAuthorization(ctx)
+	if err := a.ensureDesktopNotificationAuthorization(ctx, notificationRuntime); err != nil {
+		return err
+	}
+
+	return notificationRuntime.SendNotification(ctx, wailsruntime.NotificationOptions{
+		ID:    fmt.Sprintf("officedex-%d", time.Now().UnixNano()),
+		Title: title,
+		Body:  body,
+	})
+}
+
+func (a *App) ensureDesktopNotificationAuthorization(ctx context.Context, notificationRuntime desktopNotificationRuntime) error {
+	a.notificationMu.Lock()
+	defer a.notificationMu.Unlock()
+
+	if a.notificationAuthorizationGranted {
+		return nil
+	}
+
+	authorized, err := notificationRuntime.CheckNotificationAuthorization(ctx)
 	if err != nil {
 		return fmt.Errorf("check notification authorization: %w", err)
 	}
 	if !authorized {
-		authorized, err = wailsruntime.RequestNotificationAuthorization(ctx)
+		authorized, err = notificationRuntime.RequestNotificationAuthorization(ctx)
 		if err != nil {
 			return fmt.Errorf("request notification authorization: %w", err)
 		}
@@ -282,12 +333,8 @@ func (a *App) SendDesktopNotification(input DesktopNotificationInput) error {
 			return errors.New("desktop notification permission denied")
 		}
 	}
-
-	return wailsruntime.SendNotification(ctx, wailsruntime.NotificationOptions{
-		ID:    fmt.Sprintf("officedex-%d", time.Now().UnixNano()),
-		Title: title,
-		Body:  body,
-	})
+	a.notificationAuthorizationGranted = true
+	return nil
 }
 
 // ListImageTemplates returns server-managed image prompt templates exposed by
@@ -584,6 +631,8 @@ func (a *App) recoverStaleInteractiveRespond(input RespondInput, originalErr err
 	}
 	params := bridge.RespondParams{TaskID: result.TaskID, QuestionID: input.QuestionID}
 	if len(answers) > 0 {
+		params.OptionID = input.OptionID
+		params.Answer = input.Answer
 		params.Answers = make([]bridge.RespondAnswer, 0, len(answers))
 		for _, item := range answers {
 			params.Answers = append(params.Answers, bridge.RespondAnswer{
@@ -673,6 +722,7 @@ func recoverGenerateInputFromEvents(events []types.BridgeEvent, taskCtx localsto
 		ConversationID:   taskCtx.ConversationID,
 		ParentTaskID:     taskCtx.ParentTaskID,
 		RuntimeMode:      stringField(userInput, "runtime_mode", "runtimeMode"),
+		GenerationMode:   stringField(userInput, "generation_mode", "generationMode"),
 		PromptTemplateID: stringField(userInput, "prompt_template_id", "promptTemplateId"),
 		SourceFile:       stringField(userInput, "source_file", "sourceFile"),
 		ReferenceImages:  stringSliceField(userInput, "reference_images", "referenceImages"),
@@ -957,7 +1007,7 @@ func (a *App) PreviewArtifact(artifact types.Artifact) error {
 		return err
 	}
 	if a.ctx != nil {
-		wailsruntime.EventsEmit(a.ctx, previewEventChannel, grant)
+		emit(a.ctx, previewEventChannel, grant)
 	}
 	return nil
 }
@@ -1248,7 +1298,7 @@ func (a *App) Login() (LoginURLResult, error) {
 	a.mu.Unlock()
 
 	if a.ctx != nil {
-		wailsruntime.EventsEmit(a.ctx, authEventChannel, types.AuthEvent{Type: types.AuthEventURL, URL: url})
+		emit(a.ctx, authEventChannel, types.AuthEvent{Type: types.AuthEventURL, URL: url})
 	}
 	return LoginURLResult{URL: url}, nil
 }
@@ -2698,8 +2748,8 @@ func stringSliceField(payload map[string]any, keys ...string) []string {
 func generateInputEventPayload(input types.GenerateInput, taskCtx localstore.TaskContext) map[string]any {
 	input = normalizeGenerateInputText(input)
 	payload := map[string]any{
-		"document_type": input.DocumentType,
-		"documentType":  input.DocumentType,
+		"document_type": string(input.DocumentType),
+		"documentType":  string(input.DocumentType),
 		"topic":         input.Topic,
 		"prompt":        input.Prompt,
 		"noProject":     input.NoProject,
@@ -2733,6 +2783,10 @@ func generateInputEventPayload(input types.GenerateInput, taskCtx localstore.Tas
 	if input.RuntimeMode != "" {
 		payload["runtime_mode"] = input.RuntimeMode
 		payload["runtimeMode"] = input.RuntimeMode
+	}
+	if input.GenerationMode != "" {
+		payload["generation_mode"] = input.GenerationMode
+		payload["generationMode"] = input.GenerationMode
 	}
 	if input.PromptTemplateID != "" {
 		payload["prompt_template_id"] = input.PromptTemplateID
@@ -2830,7 +2884,7 @@ func (a *App) ensureBridgeForCwd(cwd string) (*bridge.Client, error) {
 	if resolved.Source == binresolver.SourceFallback {
 		message := "OfficeCLI binary is not configured. Install it or set a Bridge binary path in Settings."
 		if a.ctx != nil {
-			wailsruntime.EventsEmit(a.ctx, bridgeEventChannel, types.BridgeEvent{
+			emit(a.ctx, bridgeEventChannel, types.BridgeEvent{
 				Type:    "bridge.unconfigured",
 				Payload: map[string]any{"message": message},
 			})
@@ -3599,7 +3653,7 @@ func revealOSPath(filePath string) error {
 }
 
 func emit(ctx context.Context, channel string, payload any) {
-	if ctx == nil {
+	if !canEmitWailsEvent(ctx) {
 		return
 	}
 	wailsruntime.EventsEmit(ctx, channel, payload)

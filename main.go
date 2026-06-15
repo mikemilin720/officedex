@@ -17,7 +17,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("init: %v", err)
 	}
-	if err := wails.Run(&options.App{
+	if err := wails.Run(newWailsAppOptions(app)); err != nil {
+		log.Fatalf("wails run: %v", err)
+	}
+}
+
+func newWailsAppOptions(app *App) *options.App {
+	return &options.App{
 		Title:     "OfficeDex",
 		Width:     1320,
 		Height:    860,
@@ -26,11 +32,13 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop:     true,
+			DisableWebViewDrop: true,
+		},
 		BackgroundColour: &options.RGBA{R: 246, G: 245, B: 244, A: 255},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind:             []any{app},
-	}); err != nil {
-		log.Fatalf("wails run: %v", err)
 	}
 }
