@@ -318,6 +318,12 @@ func (h *realClientE2EHost) call(method string, raw json.RawMessage) (any, error
 		h.recordAction("setPreviewMode", fmt.Sprintf("%t", active))
 		return nil, nil
 	case "Login":
+		var input LoginInput
+		if len(raw) > 0 && string(raw) != "null" {
+			if err := decodeRealClientInput(raw, &input); err != nil {
+				return nil, err
+			}
+		}
 		url := "http://127.0.0.1/oauth/local-real-e2e"
 		event := types.AuthEvent{Type: types.AuthEventURL, URL: url}
 		h.broadcast("auth", event)
@@ -331,6 +337,8 @@ func (h *realClientE2EHost) call(method string, raw json.RawMessage) (any, error
 		return nil, h.app.Logout()
 	case "GetCreditStatus":
 		return h.app.GetCreditStatus()
+	case "GetInviteInfo":
+		return h.app.GetInviteInfo()
 	case "Redeem":
 		code, err := decodeRealClientString(raw)
 		if err != nil {

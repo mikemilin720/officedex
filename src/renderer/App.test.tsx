@@ -1534,6 +1534,7 @@ function installBridgeMock() {
       paidEntitlement: false,
       raw: "",
     })),
+    getInviteInfo: vi.fn(async () => ({ invite_code: "invite-test" })),
     redeem: vi.fn(async () => ({
       code: "",
       credit_amount: 0,

@@ -98,7 +98,7 @@ func TestStartReturnsURLWhenEmittedOnStdout(t *testing.T) {
 		err error
 	}, 1)
 	go func() {
-		u, e := mgr.Start(context.Background())
+		u, e := mgr.Start(context.Background(), "")
 		done <- struct {
 			url string
 			err error
@@ -125,6 +125,37 @@ func TestStartReturnsURLWhenEmittedOnStdout(t *testing.T) {
 	waitForEvent(t, events, EventSuccess)
 }
 
+func TestStartPassesInviteCodeToOfficeCLI(t *testing.T) {
+	ft := newFakeTransport()
+	var gotArgs []string
+	mgr := New(ManagerOptions{
+		URLTimeout: 2 * time.Second,
+		SpawnTransport: func(args []string) (Transport, error) {
+			gotArgs = append([]string(nil), args...)
+			return ft, nil
+		},
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.Start(context.Background(), " invite-abc ")
+		done <- err
+	}()
+
+	if _, err := ft.stdoutW.Write([]byte("Please visit https://example.com/auth?code=abc to continue.\n")); err != nil {
+		t.Fatalf("write stdout: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	ft.finish(0, nil)
+
+	want := []string{"login", "--invite", "invite-abc"}
+	if strings.Join(gotArgs, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("spawn args = %v, want %v", gotArgs, want)
+	}
+}
+
 func TestStartTimesOutWhenNoURL(t *testing.T) {
 	ft := newFakeTransport()
 	mgr := New(ManagerOptions{
@@ -137,7 +168,7 @@ func TestStartTimesOutWhenNoURL(t *testing.T) {
 		ft.finish(0, syscall.SIGTERM)
 	}()
 
-	_, err := mgr.Start(context.Background())
+	_, err := mgr.Start(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -164,7 +195,7 @@ func TestStartUsesFallbackRegexAfterExit(t *testing.T) {
 		ft.finish(0, nil)
 	}()
 
-	url, err := mgr.Start(context.Background())
+	url, err := mgr.Start(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -188,7 +219,7 @@ func TestStartReturnsQueuedURLWhenNonZeroExitWinsRace(t *testing.T) {
 		})
 		events := captureEvents(mgr)
 
-		url, err := mgr.Start(context.Background())
+		url, err := mgr.Start(context.Background(), "")
 		if err != nil {
 			t.Fatalf("iteration %d: Start: %v", i, err)
 		}
@@ -218,7 +249,7 @@ func TestStartEmitsFailureOnNonZeroExit(t *testing.T) {
 		ft.finish(2, nil)
 	}()
 
-	if _, err := mgr.Start(context.Background()); err != nil {
+	if _, err := mgr.Start(context.Background(), ""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -240,7 +271,7 @@ func TestCancelSendsSIGTERM(t *testing.T) {
 
 	startDone := make(chan error, 1)
 	go func() {
-		_, err := mgr.Start(context.Background())
+		_, err := mgr.Start(context.Background(), "")
 		startDone <- err
 	}()
 
@@ -404,6 +435,30 @@ func TestBuildBridgeEnvExtraBeatsProxySupplier(t *testing.T) {
 	}
 }
 
+func TestGetInviteInfoParsesOfficeCLIJSON(t *testing.T) {
+	var gotArgs []string
+	result, err := GetInviteInfo(context.Background(), ManagerOptions{
+		SpawnTransport: func(args []string) (Transport, error) {
+			gotArgs = append([]string(nil), args...)
+			return instantExitTransport{
+				stdout: strings.NewReader(`{"invite_code":"invite-json"}`),
+				stderr: strings.NewReader(""),
+				code:   0,
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetInviteInfo: %v", err)
+	}
+	if result.InviteCode != "invite-json" {
+		t.Fatalf("InviteCode = %q", result.InviteCode)
+	}
+	want := []string{"invite", "--json"}
+	if strings.Join(gotArgs, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("spawn args = %v, want %v", gotArgs, want)
+	}
+}
+
 func clearProcessProxyEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
@@ -470,7 +525,7 @@ func TestStartReportsSpawnError(t *testing.T) {
 			return nil, errors.New("boom")
 		},
 	})
-	if _, err := mgr.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
+	if _, err := mgr.Start(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected spawn error, got %v", err)
 	}
 }

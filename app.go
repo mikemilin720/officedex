@@ -1277,9 +1277,13 @@ type LoginURLResult struct {
 	URL string `json:"url"`
 }
 
+type LoginInput struct {
+	InviteCode string `json:"inviteCode,omitempty"`
+}
+
 // Login starts an OAuth flow if one is not already in progress, returns the
 // verification URL the renderer can show / open in the browser.
-func (a *App) Login() (LoginURLResult, error) {
+func (a *App) Login(input LoginInput) (LoginURLResult, error) {
 	a.mu.Lock()
 	if a.pendingLoginURL != "" {
 		url := a.pendingLoginURL
@@ -1289,7 +1293,7 @@ func (a *App) Login() (LoginURLResult, error) {
 	manager := a.ensureLoginManagerLocked()
 	a.mu.Unlock()
 
-	url, err := manager.Start(a.ctx)
+	url, err := manager.Start(a.ctx, input.InviteCode)
 	if err != nil {
 		return LoginURLResult{}, err
 	}
@@ -1327,6 +1331,13 @@ func (a *App) WhoAmI() (types.WhoAmIResult, error) {
 func (a *App) GetCreditStatus() (types.CreditStatus, error) {
 	opts := a.runCommandOptions()
 	return login.GetCreditStatus(a.ctx, opts)
+}
+
+// GetInviteInfo runs `officecli invite --json` and returns the current user's
+// invite code.
+func (a *App) GetInviteInfo() (types.InviteInfo, error) {
+	opts := a.runCommandOptions()
+	return login.GetInviteInfo(a.ctx, opts)
 }
 
 // Logout runs `officecli logout`.

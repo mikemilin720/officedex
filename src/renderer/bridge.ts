@@ -14,7 +14,9 @@ import type {
   GenerateInput,
   ImageTemplatePublishRequest,
   ImagePromptTemplate,
+  InviteInfo,
   LlmProvider,
+  LoginInput,
   ModifyInput,
   PeekReportContextResult,
   PreviewGrant,
@@ -160,6 +162,9 @@ function createBrowserPreviewAPI(): DesktopAPI {
     whoami: async () => ({ mode: "anonymous" }),
     logout: async () => undefined,
     getCreditStatus: async () => normaliseCreditStatus(null),
+    getInviteInfo: async () => {
+      throw new Error("Invite code is only available inside the desktop app.");
+    },
     redeem: async () => {
       throw new Error("Redemption is only available inside the desktop app.");
     },
@@ -541,7 +546,7 @@ function createWailsAPI(): DesktopAPI {
       return { html: result.html };
     },
     setPreviewMode: (active: boolean) => WailsApp.SetPreviewMode(active),
-    login: async () => WailsApp.Login(),
+    login: async (input?: LoginInput) => WailsApp.Login(toWails(input ?? {})),
     cancelLogin: async () => WailsApp.CancelLogin(),
     whoami: async (): Promise<WhoAmIResult> => {
       const result = await WailsApp.WhoAmI();
@@ -557,6 +562,12 @@ function createWailsAPI(): DesktopAPI {
     getCreditStatus: async (): Promise<CreditStatus> => {
       const raw = (await WailsApp.GetCreditStatus()) as Partial<CreditStatus> | null | undefined;
       return normaliseCreditStatus(raw);
+    },
+    getInviteInfo: async (): Promise<InviteInfo> => {
+      const fn = optionalWailsFunction<(arg1?: never) => Promise<InviteInfo>>("GetInviteInfo");
+      if (!fn) throw new Error("Invite code requires a newer OfficeDex runtime.");
+      const result = await fn();
+      return { invite_code: typeof result?.invite_code === "string" ? result.invite_code : "" };
     },
     redeem: async (code: string): Promise<RedeemResult> => {
       const result = await WailsApp.Redeem(code);
@@ -738,7 +749,7 @@ function createRealE2EAPI(endpoint: string): DesktopAPI {
       return { html: result.html };
     },
     setPreviewMode: (active: boolean) => rpc<void>("SetPreviewMode", active),
-    login: () => rpc<{ url: string }>("Login"),
+    login: (input?: LoginInput) => rpc<{ url: string }>("Login", input ?? {}),
     cancelLogin: () => rpc<void>("CancelLogin"),
     whoami: async (): Promise<WhoAmIResult> => {
       const result = await rpc<Partial<WhoAmIResult>>("WhoAmI");
@@ -752,6 +763,10 @@ function createRealE2EAPI(endpoint: string): DesktopAPI {
     },
     logout: () => rpc<void>("Logout"),
     getCreditStatus: async () => normaliseCreditStatus(await rpc<Partial<CreditStatus> | null>("GetCreditStatus")),
+    getInviteInfo: async (): Promise<InviteInfo> => {
+      const result = await rpc<Partial<InviteInfo> | null>("GetInviteInfo");
+      return { invite_code: typeof result?.invite_code === "string" ? result.invite_code : "" };
+    },
     redeem: async (code: string): Promise<RedeemResult> => {
       const result = await rpc<Partial<RedeemResult> | null>("Redeem", code);
       return {

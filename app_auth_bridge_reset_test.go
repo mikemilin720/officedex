@@ -74,7 +74,7 @@ func TestLoginSuccessResetsBridgeRuntime(t *testing.T) {
 	}))
 
 	manager := appAuthResetLoginManager(app)
-	url, err := manager.Start(context.Background())
+	url, err := manager.Start(context.Background(), "")
 	if err != nil {
 		t.Fatalf("login start: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestLoginFailureKeepsBridgeRuntime(t *testing.T) {
 	}))
 
 	manager := appAuthResetLoginManager(app)
-	if _, err := manager.Start(context.Background()); err != nil {
+	if _, err := manager.Start(context.Background(), ""); err != nil {
 		t.Fatalf("login start: %v", err)
 	}
 
@@ -104,6 +104,30 @@ func TestLoginFailureKeepsBridgeRuntime(t *testing.T) {
 	assertAuthResetRuntimePresent(t, app)
 	if transport.kills.Load() != 0 {
 		t.Fatal("bridge client should not be closed after login failure")
+	}
+}
+
+func TestLoginPassesInviteCodeToOfficeCLI(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "officecli-args.log")
+	app, _ := newAuthResetAppWithBridge(t, writeAuthResetOfficeCLI(t, authResetScript{
+		loginURL: "https://platform.officecli.io/verify/test",
+		argsPath: argsPath,
+	}))
+	app.ctx = context.Background()
+
+	result, err := app.Login(LoginInput{InviteCode: " invite-app "})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if result.URL == "" {
+		t.Fatal("Login URL should be populated")
+	}
+	raw, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "login --invite invite-app" {
+		t.Fatalf("officecli args = %q", got)
 	}
 }
 
@@ -179,6 +203,21 @@ func TestRedeemFailureKeepsBridgeRuntime(t *testing.T) {
 	}
 }
 
+func TestGetInviteInfoParsesOfficeCLIJSON(t *testing.T) {
+	app, _ := newAuthResetAppWithBridge(t, writeAuthResetOfficeCLI(t, authResetScript{
+		inviteJSON: map[string]any{"invite_code": "invite-app"},
+	}))
+	app.ctx = context.Background()
+
+	result, err := app.GetInviteInfo()
+	if err != nil {
+		t.Fatalf("GetInviteInfo: %v", err)
+	}
+	if result.InviteCode != "invite-app" {
+		t.Fatalf("InviteCode = %q", result.InviteCode)
+	}
+}
+
 func newAuthResetAppWithBridge(t *testing.T, binary string) (*App, *authResetBridgeTransport) {
 	t.Helper()
 	transport := newAuthResetBridgeTransport()
@@ -209,7 +248,7 @@ func newAuthResetAppWithBridge(t *testing.T, binary string) (*App, *authResetBri
 }
 
 func appAuthResetLoginManager(app *App) interface {
-	Start(context.Context) (string, error)
+	Start(context.Context, string) (string, error)
 } {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -295,6 +334,8 @@ type authResetScript struct {
 	redeemCode int
 	redeemErr  string
 	redeemJSON map[string]any
+	inviteJSON map[string]any
+	argsPath   string
 }
 
 func writeAuthResetOfficeCLI(t *testing.T, script authResetScript) string {
@@ -315,7 +356,19 @@ func writeAuthResetOfficeCLI(t *testing.T, script authResetScript) string {
 	if err != nil {
 		t.Fatalf("marshal redeem payload: %v", err)
 	}
+	invitePayload := script.inviteJSON
+	if invitePayload == nil {
+		invitePayload = map[string]any{"invite_code": "invite-default"}
+	}
+	rawInvite, err := json.Marshal(invitePayload)
+	if err != nil {
+		t.Fatalf("marshal invite payload: %v", err)
+	}
 	body := fmt.Sprintf(`#!/bin/sh
+ARGS_PATH=%s
+if [ -n "$ARGS_PATH" ]; then
+  printf '%%s\n' "$*" >> "$ARGS_PATH"
+fi
 case "$1" in
   login)
     printf 'Open this URL: %s\n'
@@ -343,10 +396,16 @@ case "$1" in
 OFFICEDEX_REDEEM_JSON
     exit 0
     ;;
+  invite)
+    cat <<'OFFICEDEX_INVITE_JSON'
+%s
+OFFICEDEX_INVITE_JSON
+    exit 0
+    ;;
 esac
 printf 'unexpected command: %s\n' "$1" >&2
 exit 64
-`, shellSingleQuote(script.loginURL), script.loginCode, shellSingleQuote(script.loginErr), script.loginCode, script.logoutCode, shellSingleQuote(script.logoutErr), script.logoutCode, script.redeemCode, shellSingleQuote(script.redeemErr), script.redeemCode, string(rawRedeem), "%s")
+`, shellSingleQuote(script.argsPath), shellSingleQuote(script.loginURL), script.loginCode, shellSingleQuote(script.loginErr), script.loginCode, script.logoutCode, shellSingleQuote(script.logoutErr), script.logoutCode, script.redeemCode, shellSingleQuote(script.redeemErr), script.redeemCode, string(rawRedeem), string(rawInvite), "%s")
 	path := filepath.Join(t.TempDir(), "officecli-auth-reset")
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatalf("write fake officecli: %v", err)

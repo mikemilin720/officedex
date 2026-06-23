@@ -24,7 +24,7 @@ import { formatTestResult, ProviderForm } from "../components/ProviderForm";
 import { useT, useLocale, useSetLocale, type Locale } from "../i18n";
 import { defaultProxySettings, isValidProxyUrl } from "../defaults";
 import { readNotificationsEnabled, setNotificationsEnabled as persistNotificationsEnabled } from "../notifications";
-import type { AuthEvent, CreditStatus, DocumentType, GenerateDefaults, ImagePromptTemplate, LlmProvider, ProviderTestResult, ProxySettings, WhoAmIResult } from "../../shared/types";
+import type { AuthEvent, CreditStatus, DocumentType, GenerateDefaults, ImagePromptTemplate, InviteInfo, LlmProvider, ProviderTestResult, ProxySettings, WhoAmIResult } from "../../shared/types";
 import { exportLocalImageTemplatesJSON, importLocalImageTemplatesJSON, loadLocalImageTemplates, saveLocalImageTemplates } from "../localImageTemplates";
 
 export function SettingsScreen({
@@ -780,6 +780,10 @@ export function LoginScreen() {
   const [phase, setPhase] = useState<LoginPhase>("loading");
   const [whoami, setWhoami] = useState<WhoAmIResult | null>(null);
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mountedRef = useRef(true);
@@ -788,6 +792,35 @@ export function LoginScreen() {
 
   useEffect(() => {
     phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "success") {
+      setInviteInfo(null);
+      setInviteError(null);
+      setInviteLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setInviteLoading(true);
+    setInviteError(null);
+    officecli
+      .getInviteInfo()
+      .then((result) => {
+        if (cancelled || !mountedRef.current) return;
+        setInviteInfo(result);
+      })
+      .catch((error) => {
+        if (cancelled || !mountedRef.current) return;
+        setInviteError(errorMessage(error));
+      })
+      .finally(() => {
+        if (cancelled || !mountedRef.current) return;
+        setInviteLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [phase]);
 
   const refreshWhoami = useCallback(async () => {
@@ -834,7 +867,8 @@ export function LoginScreen() {
     setBusy(true);
     setErrorText(null);
     try {
-      const result = await officecli.login();
+      const trimmedInvite = inviteCode.trim();
+      const result = await officecli.login(trimmedInvite ? { inviteCode: trimmedInvite } : {});
       setLoginUrl(result.url);
       setPhase("awaiting");
     } catch (error) {
@@ -843,7 +877,7 @@ export function LoginScreen() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [inviteCode]);
 
   const cancelLogin = useCallback(async () => {
     await officecli.cancelLogin().catch(() => undefined);
@@ -865,6 +899,17 @@ export function LoginScreen() {
       void message.error(t("login.url.copyFailed"));
     }
   }, [loginUrl, t]);
+
+  const copyInviteCode = useCallback(async () => {
+    const code = inviteInfo?.invite_code?.trim();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      void message.success(t("login.invite.copied"));
+    } catch {
+      void message.error(t("login.invite.copyFailed"));
+    }
+  }, [inviteInfo, t]);
 
   const doLogout = useCallback(async () => {
     setBusy(true);
@@ -899,6 +944,16 @@ export function LoginScreen() {
 
         {phase === "anonymous" ? (
           <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 16 }}>
+            <Input
+              value={inviteCode}
+              onChange={(event) => setInviteCode(event.target.value)}
+              onPressEnter={startLogin}
+              placeholder={t("login.invite.placeholder")}
+              autoComplete="off"
+              maxLength={64}
+              disabled={busy}
+              allowClear
+            />
             <Button type="primary" icon={<GlobalOutlined />} block loading={busy} onClick={startLogin}>
               {t("login.button.signIn")}
             </Button>
@@ -927,6 +982,27 @@ export function LoginScreen() {
 
         {phase === "success" && whoami ? (
           <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 16 }}>
+            <div className="login-url-box">
+              <Space direction="vertical" size={2} style={{ minWidth: 0, flex: 1 }}>
+                <span className="copyright">{t("login.invite.title")}</span>
+                <span className="login-url-text" title={inviteInfo?.invite_code || inviteError || ""}>
+                  {inviteLoading
+                    ? t("login.invite.loading")
+                    : inviteError
+                      ? inviteError
+                      : inviteInfo?.invite_code || t("login.invite.unavailable")}
+                </span>
+              </Space>
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                aria-label={t("login.invite.copy")}
+                disabled={!inviteInfo?.invite_code}
+                onClick={copyInviteCode}
+              >
+                {t("login.url.copy")}
+              </Button>
+            </div>
             <Button block icon={<LogoutOutlined />} loading={busy} onClick={doLogout}>
               {t("login.button.signOut")}
             </Button>

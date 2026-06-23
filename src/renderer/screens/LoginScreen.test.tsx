@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthEvent, DesktopAPI, WhoAmIResult } from "../../shared/types";
+import type { AuthEvent, DesktopAPI, InviteInfo, WhoAmIResult } from "../../shared/types";
 import { officecli } from "../bridge";
 
 function installDomStubs() {
@@ -33,6 +33,7 @@ let loginSpy: ReturnType<typeof vi.fn>;
 let cancelLoginSpy: ReturnType<typeof vi.fn>;
 let logoutSpy: ReturnType<typeof vi.fn>;
 let openExternalSpy: ReturnType<typeof vi.fn>;
+let getInviteInfoSpy: ReturnType<typeof vi.fn>;
 let authListener: ((event: AuthEvent) => void) | null = null;
 let originals: Partial<DesktopAPI>;
 
@@ -44,12 +45,14 @@ beforeEach(() => {
   cancelLoginSpy = vi.fn(async () => undefined);
   logoutSpy = vi.fn(async () => undefined);
   openExternalSpy = vi.fn(async () => undefined);
+  getInviteInfoSpy = vi.fn(async (): Promise<InviteInfo> => ({ invite_code: "invite-user" }));
   originals = {
     whoami: officecli.whoami,
     login: officecli.login,
     cancelLogin: officecli.cancelLogin,
     logout: officecli.logout,
     openExternal: officecli.openExternal,
+    getInviteInfo: officecli.getInviteInfo,
     onAuthEvent: officecli.onAuthEvent,
   };
   officecli.whoami = whoamiSpy as unknown as DesktopAPI["whoami"];
@@ -57,6 +60,7 @@ beforeEach(() => {
   officecli.cancelLogin = cancelLoginSpy as unknown as DesktopAPI["cancelLogin"];
   officecli.logout = logoutSpy as unknown as DesktopAPI["logout"];
   officecli.openExternal = openExternalSpy as unknown as DesktopAPI["openExternal"];
+  officecli.getInviteInfo = getInviteInfoSpy as unknown as DesktopAPI["getInviteInfo"];
   officecli.onAuthEvent = ((callback: (event: AuthEvent) => void) => {
     authListener = callback;
     return () => {
@@ -89,6 +93,17 @@ describe("LoginScreen", () => {
     expect(screen.getByText("https://example.com/login")).toBeTruthy();
   });
 
+  it("passes the entered invite code when starting sign-in", async () => {
+    const { LoginScreen } = await import("./SettingsScreens");
+    render(<LoginScreen />);
+    await waitFor(() => expect(whoamiSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(await screen.findByPlaceholderText(/invite code/i), { target: { value: " invite-abc " } });
+    fireEvent.click(await screen.findByRole("button", { name: /sign in via browser/i }));
+
+    await waitFor(() => expect(loginSpy).toHaveBeenCalledWith({ inviteCode: "invite-abc" }));
+  });
+
   it("auth url event flips the screen into awaiting state", async () => {
     const { LoginScreen } = await import("./SettingsScreens");
     render(<LoginScreen />);
@@ -114,6 +129,23 @@ describe("LoginScreen", () => {
     await waitFor(() => expect(whoamiSpy).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(/user-123/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeTruthy();
+  });
+
+  it("loads the signed-in user's invite code and copies it", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    whoamiSpy.mockResolvedValueOnce({ mode: "logged_in", userId: "user-123" });
+    const { LoginScreen } = await import("./SettingsScreens");
+    render(<LoginScreen />);
+
+    expect(await screen.findByText("invite-user")).toBeTruthy();
+    await waitFor(() => expect(getInviteInfoSpy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: /copy invite code/i }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("invite-user"));
   });
 
   it("Sign out calls logout and returns to anonymous state", async () => {

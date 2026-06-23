@@ -531,6 +531,14 @@ export interface PeekReportContextResult {
   errorMessage: string;
 }
 
+export interface LoginInput {
+  inviteCode?: string;
+}
+
+export interface InviteInfo {
+  invite_code: string;
+}
+
 export interface ReportCapabilityResult {
   enabled: boolean;
   reason?: string;
@@ -563,11 +571,12 @@ export interface DesktopAPI {
   copyImageToClipboard(filePath: string): Promise<void>;
   renderPreviewHtml(previewToken: string): Promise<{ html: string } | null>;
   setPreviewMode(active: boolean): Promise<void>;
-  login(): Promise<{ url: string }>;
+  login(input?: LoginInput): Promise<{ url: string }>;
   cancelLogin(): Promise<void>;
   whoami(): Promise<WhoAmIResult>;
   logout(): Promise<void>;
   getCreditStatus(): Promise<CreditStatus>;
+  getInviteInfo(): Promise<InviteInfo>;
   sendDesktopNotification?(input: { title: string; body: string }): Promise<void>;
   redeem(code: string): Promise<RedeemResult>;
   getSettings(): Promise<UserSettings>;

@@ -2,6 +2,10 @@ package types
 
 type DocumentType string
 
+type InviteInfo struct {
+	InviteCode string `json:"invite_code"`
+}
+
 const (
 	DocPPTX   DocumentType = "pptx"
 	DocDOCX   DocumentType = "docx"

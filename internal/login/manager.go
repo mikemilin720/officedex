@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -121,7 +122,7 @@ func (m *Manager) Running() bool {
 // process is killed and an error is returned. The subprocess continues
 // running after Start returns; subscribe via OnEvent for url/success/failure
 // /exit events.
-func (m *Manager) Start(ctx context.Context) (string, error) {
+func (m *Manager) Start(ctx context.Context, inviteCode string) (string, error) {
 	m.mu.Lock()
 	if m.transport != nil && !m.exited {
 		m.mu.Unlock()
@@ -134,7 +135,11 @@ func (m *Manager) Start(ctx context.Context) (string, error) {
 	m.exitCode = 0
 	m.exitSignal = nil
 
-	transport, err := m.spawn([]string{"login"})
+	args := []string{"login"}
+	if inviteCode = strings.TrimSpace(inviteCode); inviteCode != "" {
+		args = append(args, "--invite", inviteCode)
+	}
+	transport, err := m.spawn(args)
 	if err != nil {
 		m.mu.Unlock()
 		return "", fmt.Errorf("login: spawn: %w", err)
