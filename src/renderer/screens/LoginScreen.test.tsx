@@ -93,15 +93,15 @@ describe("LoginScreen", () => {
     expect(screen.getByText("https://example.com/login")).toBeTruthy();
   });
 
-  it("passes the entered invite code when starting sign-in", async () => {
+  it("starts sign-in without showing an invite code field", async () => {
     const { LoginScreen } = await import("./SettingsScreens");
     render(<LoginScreen />);
     await waitFor(() => expect(whoamiSpy).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(await screen.findByPlaceholderText(/invite code/i), { target: { value: " invite-abc " } });
+    expect(screen.queryByPlaceholderText(/invite code/i)).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: /sign in via browser/i }));
 
-    await waitFor(() => expect(loginSpy).toHaveBeenCalledWith({ inviteCode: "invite-abc" }));
+    await waitFor(() => expect(loginSpy).toHaveBeenCalledWith({}));
   });
 
   it("auth url event flips the screen into awaiting state", async () => {
@@ -131,21 +131,15 @@ describe("LoginScreen", () => {
     expect(screen.getByRole("button", { name: /sign out/i })).toBeTruthy();
   });
 
-  it("loads the signed-in user's invite code and copies it", async () => {
-    const writeText = vi.fn(async () => undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
+  it("does not load or show invite code in the signed-in login screen", async () => {
     whoamiSpy.mockResolvedValueOnce({ mode: "logged_in", userId: "user-123" });
     const { LoginScreen } = await import("./SettingsScreens");
     render(<LoginScreen />);
 
-    expect(await screen.findByText("invite-user")).toBeTruthy();
-    await waitFor(() => expect(getInviteInfoSpy).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: /copy invite code/i }));
-
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("invite-user"));
+    await screen.findByRole("button", { name: /sign out/i });
+    expect(screen.queryByText(/my invite code/i)).toBeNull();
+    expect(screen.queryByText("invite-user")).toBeNull();
+    expect(getInviteInfoSpy).not.toHaveBeenCalled();
   });
 
   it("Sign out calls logout and returns to anonymous state", async () => {

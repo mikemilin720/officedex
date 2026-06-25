@@ -376,6 +376,7 @@ export const en: Record<string, string> = {
   "settings.group.subscription": "Subscription",
   "settings.row.redeem.title": "Redeem code",
   "settings.row.redeem.desc": "Apply a promo code to top up your credit balance.",
+  "settings.row.invite.desc": "View and copy your invite code here. It is no longer shown on the login screen.",
   "settings.redeem.placeholder": "PROMO2026",
   "settings.redeem.submit": "Redeem",
   "settings.redeem.empty": "Please enter a redeem code",

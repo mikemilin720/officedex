@@ -41,6 +41,9 @@ export function SettingsScreen({
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => readNotificationsEnabled());
   const [whoami, setWhoami] = useState<WhoAmIResult | null>(null);
   const [creditStatus, setCreditStatus] = useState<CreditStatus | null>(null);
+  const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [localTemplates, setLocalTemplates] = useState<ImagePromptTemplate[]>(() => loadLocalImageTemplates());
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [pasteTemplateJSON, setPasteTemplateJSON] = useState("");
@@ -61,6 +64,32 @@ export function SettingsScreen({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (whoami?.mode !== "logged_in") {
+      setInviteInfo(null);
+      setInviteError(null);
+      setInviteLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setInviteLoading(true);
+    setInviteError(null);
+    officecli
+      .getInviteInfo()
+      .then((result) => {
+        if (!cancelled) setInviteInfo(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setInviteError(errorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setInviteLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [whoami]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +242,17 @@ export function SettingsScreen({
   const selectSettingsSection = useCallback((section: string) => {
     setActiveSettingsSection(section);
   }, []);
+
+  const copyInviteCode = useCallback(async () => {
+    const code = inviteInfo?.invite_code?.trim();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      void message.success(t("login.invite.copied"));
+    } catch {
+      void message.error(t("login.invite.copyFailed"));
+    }
+  }, [inviteInfo, t]);
 
   const settingsSections = [
     { key: "generation", label: t("settings.group.generation"), icon: "auto_awesome" },
@@ -410,6 +450,28 @@ export function SettingsScreen({
               <SettingRow title={t("settings.row.redeem.title")} desc={t("settings.row.redeem.desc")}>
                 <RedeemCodeCard onCreditRefresh={onCreditRefresh} />
               </SettingRow>
+              {whoami?.mode === "logged_in" ? (
+                <SettingRow title={t("login.invite.title")} desc={t("settings.row.invite.desc")}>
+                  <div className="login-url-box">
+                    <span className="login-url-text" title={inviteInfo?.invite_code || inviteError || ""}>
+                      {inviteLoading
+                        ? t("login.invite.loading")
+                        : inviteError
+                          ? inviteError
+                          : inviteInfo?.invite_code || t("login.invite.unavailable")}
+                    </span>
+                    <Button
+                      size="small"
+                      icon={<CopyOutlined />}
+                      aria-label={t("login.invite.copy")}
+                      disabled={!inviteInfo?.invite_code}
+                      onClick={copyInviteCode}
+                    >
+                      {t("login.url.copy")}
+                    </Button>
+                  </div>
+                </SettingRow>
+              ) : null}
             </div>
             ) : null}
             {activeSettingsSection === "diagnostics" ? (
@@ -780,10 +842,6 @@ export function LoginScreen() {
   const [phase, setPhase] = useState<LoginPhase>("loading");
   const [whoami, setWhoami] = useState<WhoAmIResult | null>(null);
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
-  const [inviteCode, setInviteCode] = useState("");
-  const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteLoading, setInviteLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mountedRef = useRef(true);
@@ -792,35 +850,6 @@ export function LoginScreen() {
 
   useEffect(() => {
     phaseRef.current = phase;
-  }, [phase]);
-
-  useEffect(() => {
-    if (phase !== "success") {
-      setInviteInfo(null);
-      setInviteError(null);
-      setInviteLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setInviteLoading(true);
-    setInviteError(null);
-    officecli
-      .getInviteInfo()
-      .then((result) => {
-        if (cancelled || !mountedRef.current) return;
-        setInviteInfo(result);
-      })
-      .catch((error) => {
-        if (cancelled || !mountedRef.current) return;
-        setInviteError(errorMessage(error));
-      })
-      .finally(() => {
-        if (cancelled || !mountedRef.current) return;
-        setInviteLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [phase]);
 
   const refreshWhoami = useCallback(async () => {
@@ -867,8 +896,7 @@ export function LoginScreen() {
     setBusy(true);
     setErrorText(null);
     try {
-      const trimmedInvite = inviteCode.trim();
-      const result = await officecli.login(trimmedInvite ? { inviteCode: trimmedInvite } : {});
+      const result = await officecli.login({});
       setLoginUrl(result.url);
       setPhase("awaiting");
     } catch (error) {
@@ -877,7 +905,7 @@ export function LoginScreen() {
     } finally {
       setBusy(false);
     }
-  }, [inviteCode]);
+  }, []);
 
   const cancelLogin = useCallback(async () => {
     await officecli.cancelLogin().catch(() => undefined);
@@ -899,17 +927,6 @@ export function LoginScreen() {
       void message.error(t("login.url.copyFailed"));
     }
   }, [loginUrl, t]);
-
-  const copyInviteCode = useCallback(async () => {
-    const code = inviteInfo?.invite_code?.trim();
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      void message.success(t("login.invite.copied"));
-    } catch {
-      void message.error(t("login.invite.copyFailed"));
-    }
-  }, [inviteInfo, t]);
 
   const doLogout = useCallback(async () => {
     setBusy(true);
@@ -944,16 +961,6 @@ export function LoginScreen() {
 
         {phase === "anonymous" ? (
           <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 16 }}>
-            <Input
-              value={inviteCode}
-              onChange={(event) => setInviteCode(event.target.value)}
-              onPressEnter={startLogin}
-              placeholder={t("login.invite.placeholder")}
-              autoComplete="off"
-              maxLength={64}
-              disabled={busy}
-              allowClear
-            />
             <Button type="primary" icon={<GlobalOutlined />} block loading={busy} onClick={startLogin}>
               {t("login.button.signIn")}
             </Button>
@@ -982,27 +989,6 @@ export function LoginScreen() {
 
         {phase === "success" && whoami ? (
           <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 16 }}>
-            <div className="login-url-box">
-              <Space direction="vertical" size={2} style={{ minWidth: 0, flex: 1 }}>
-                <span className="copyright">{t("login.invite.title")}</span>
-                <span className="login-url-text" title={inviteInfo?.invite_code || inviteError || ""}>
-                  {inviteLoading
-                    ? t("login.invite.loading")
-                    : inviteError
-                      ? inviteError
-                      : inviteInfo?.invite_code || t("login.invite.unavailable")}
-                </span>
-              </Space>
-              <Button
-                size="small"
-                icon={<CopyOutlined />}
-                aria-label={t("login.invite.copy")}
-                disabled={!inviteInfo?.invite_code}
-                onClick={copyInviteCode}
-              >
-                {t("login.url.copy")}
-              </Button>
-            </div>
             <Button block icon={<LogoutOutlined />} loading={busy} onClick={doLogout}>
               {t("login.button.signOut")}
             </Button>

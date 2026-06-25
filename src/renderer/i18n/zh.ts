@@ -396,6 +396,7 @@ export const zh: Record<string, string> = {
   "settings.group.subscription": "订阅",
   "settings.row.redeem.title": "兑换码",
   "settings.row.redeem.desc": "使用兑换码为账户充值 credits 余额。",
+  "settings.row.invite.desc": "在这里查看和复制你的邀请码。登录页不再显示邀请码。",
   "settings.redeem.placeholder": "PROMO2026",
   "settings.redeem.submit": "兑换",
   "settings.redeem.empty": "请输入兑换码",
