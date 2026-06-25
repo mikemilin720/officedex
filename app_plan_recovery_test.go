@@ -211,6 +211,545 @@ func TestRespondRecoversStalePlanQuestionTask(t *testing.T) {
 	}
 }
 
+// TestRespondRecoveryUsesLivePendingQuestionID reproduces the restart bug where
+// the re-created bridge task re-mints the question ID from a per-process counter,
+// so the renderer's replayed (stale) question ID no longer matches. The recovery
+// path must answer with the live pending ID, not the stale one, or the bridge
+// rejects it with "question mismatch".
+func TestRespondRecoveryUsesLivePendingQuestionID(t *testing.T) {
+	ctx := context.Background()
+	oldTaskID := "task-stale-idea"
+	newTaskID := "task-recovered-idea"
+	staleQuestionID := "question-000016"
+	liveQuestionID := "question-000006"
+	workspaceDir := t.TempDir()
+
+	store := localstore.New(filepath.Join(t.TempDir(), "officedex.db"))
+	if err := store.Open(ctx); err != nil {
+		t.Fatalf("open local store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	workspace, err := store.EnsureWorkspace(ctx, workspaceDir)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.EnsureConversation(ctx, workspace.ID, "conversation-idea", "Introduce Shimo Docs"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, oldTaskID, localstore.TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conversation-idea",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-user-input",
+		TaskID:  oldTaskID,
+		Type:    "task.user_input",
+		Payload: map[string]any{
+			"document_type": "pptx",
+			"topic":         "Introduce Shimo Docs",
+			"prompt":        "Introduce Shimo Docs",
+			"local_preview": true,
+		},
+	}); err != nil {
+		t.Fatalf("RecordEvent user input: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-question",
+		TaskID:  oldTaskID,
+		Type:    "task.question",
+		Payload: map[string]any{
+			"id":       staleQuestionID,
+			"question": "Confirm the Idea",
+		},
+	}); err != nil {
+		t.Fatalf("RecordEvent question: %v", err)
+	}
+
+	transport := newCancelPersistTransport()
+	client := bridge.New(bridge.Options{
+		RequestTimeout: 500 * time.Millisecond,
+		CreateTransport: func(opts bridge.Options) (bridge.Transport, error) {
+			return transport, nil
+		},
+		DisableAutoReconnect: true,
+	})
+	if err := client.Start(ctx); err != nil {
+		t.Fatalf("start bridge client: %v", err)
+	}
+	t.Cleanup(client.Stop)
+
+	app := &App{
+		ctx:          ctx,
+		userDataDir:  t.TempDir(),
+		workspaceDir: workspaceDir,
+		localStore:   store,
+		bridgeClient: client,
+		bridgeCwd:    workspaceDir,
+	}
+
+	done := make(chan struct {
+		raw []byte
+		err error
+	}, 1)
+	go func() {
+		// The renderer confirms with the stale, replayed question ID.
+		raw, err := app.Respond(RespondInput{
+			TaskID:     oldTaskID,
+			QuestionID: staleQuestionID,
+			OptionID:   "confirm",
+			Answer:     "Confirm",
+		})
+		done <- struct {
+			raw []byte
+			err error
+		}{raw: raw, err: err}
+	}()
+
+	req := transport.readRequest(t)
+	if req.Method != "task/respond" {
+		t.Fatalf("bridge request method = %q, want task/respond", req.Method)
+	}
+	transport.writeError(t, req.ID, "task not found: "+oldTaskID)
+
+	req = transport.readRequest(t)
+	if req.Method != "session/open" {
+		t.Fatalf("bridge request method = %q, want session/open", req.Method)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"id": "session-recovered"})
+
+	req = transport.readRequest(t)
+	if req.Method != "task/invoke" {
+		t.Fatalf("bridge request method = %q, want task/invoke", req.Method)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"task_id": newTaskID, "session_id": "session-recovered", "status": "running"})
+
+	req = transport.readRequest(t)
+	if req.Method != "task/status" {
+		t.Fatalf("bridge request method = %q, want task/status", req.Method)
+	}
+	// The re-created task is waiting on a freshly minted question ID.
+	transport.writeResponse(t, req.ID, map[string]any{
+		"task_id":    newTaskID,
+		"session_id": "session-recovered",
+		"status":     "question",
+		"current_question": map[string]any{
+			"id":       liveQuestionID,
+			"question": "Confirm the Idea",
+		},
+	})
+
+	req = transport.readRequest(t)
+	if req.Method != "task/respond" {
+		t.Fatalf("bridge request method = %q, want recovered task/respond", req.Method)
+	}
+	var respondParams map[string]any
+	if err := json.Unmarshal(req.Params, &respondParams); err != nil {
+		t.Fatalf("decode recovered task/respond params: %v", err)
+	}
+	if respondParams["task_id"] != newTaskID {
+		t.Fatalf("recovered task_id = %q, want %q", respondParams["task_id"], newTaskID)
+	}
+	if respondParams["question_id"] != liveQuestionID {
+		t.Fatalf("recovered question_id = %#v, want live %q (not stale %q)", respondParams["question_id"], liveQuestionID, staleQuestionID)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"accepted": true, "task_id": newTaskID})
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("Respond: %v", out.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Respond did not return")
+	}
+
+	// The next step still answers against the stale (renderer-held) id, but it
+	// must now route straight to the live recovered task — a single task/respond
+	// to newTaskID, with no second from-scratch recovery (session/open +
+	// task/invoke) that would replay an empty answer into the idea gate.
+	done2 := make(chan struct {
+		raw []byte
+		err error
+	}, 1)
+	go func() {
+		raw, err := app.Respond(RespondInput{
+			TaskID:     oldTaskID,
+			QuestionID: "vibe_story_ready",
+			OptionID:   "generate_chapters",
+		})
+		done2 <- struct {
+			raw []byte
+			err error
+		}{raw: raw, err: err}
+	}()
+
+	req = transport.readRequest(t)
+	if req.Method != "task/respond" {
+		t.Fatalf("follow-up request method = %q, want task/respond (no re-recovery)", req.Method)
+	}
+	var followParams map[string]any
+	if err := json.Unmarshal(req.Params, &followParams); err != nil {
+		t.Fatalf("decode follow-up task/respond params: %v", err)
+	}
+	if followParams["task_id"] != newTaskID {
+		t.Fatalf("follow-up task_id = %#v, want live %q", followParams["task_id"], newTaskID)
+	}
+	if followParams["option_id"] != "generate_chapters" {
+		t.Fatalf("follow-up option_id = %#v, want generate_chapters", followParams["option_id"])
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"accepted": true, "task_id": newTaskID})
+
+	select {
+	case out := <-done2:
+		if out.err != nil {
+			t.Fatalf("follow-up Respond: %v", out.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follow-up Respond did not return")
+	}
+}
+
+// TestRespondRecoveryReplaysFullAnswerHistory covers a restart at a LATER step:
+// the recovered task re-runs from the idea gate, so recovery must replay every
+// prior confirmation in order (idea confirm -> generate chapters -> current
+// step) instead of delivering the current step's empty-bodied action to the
+// idea gate (which would fail with "idea confirmation is required").
+func TestRespondRecoveryReplaysFullAnswerHistory(t *testing.T) {
+	ctx := context.Background()
+	oldTaskID := "task-stale-later-step"
+	newTaskID := "task-recovered-later-step"
+	ideaAnswer := `{"kind":"vibe_node_confirmed","nodeId":"root"}`
+	workspaceDir := t.TempDir()
+
+	store := localstore.New(filepath.Join(t.TempDir(), "officedex.db"))
+	if err := store.Open(ctx); err != nil {
+		t.Fatalf("open local store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	workspace, err := store.EnsureWorkspace(ctx, workspaceDir)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.EnsureConversation(ctx, workspace.ID, "conversation-later", "Introduce Shimo Docs"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, oldTaskID, localstore.TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conversation-later",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-user-input",
+		TaskID:  oldTaskID,
+		Type:    "task.user_input",
+		Payload: map[string]any{
+			"document_type": "pptx",
+			"topic":         "Introduce Shimo Docs",
+			"prompt":        "Introduce Shimo Docs",
+			"local_preview": true,
+		},
+	}); err != nil {
+		t.Fatalf("RecordEvent user input: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-question",
+		TaskID:  oldTaskID,
+		Type:    "task.question",
+		Payload: map[string]any{"id": "question-old-outline", "question": "Chapter 已生成"},
+	}); err != nil {
+		t.Fatalf("RecordEvent question: %v", err)
+	}
+	// Prior confirmations made before the restart: idea gate, then story_ready.
+	if err := store.RecordTaskAnswers(ctx, oldTaskID, []localstore.TaskAnswer{
+		{QuestionID: "q-idea", Answer: ideaAnswer, QuestionIndex: -1},
+		{QuestionID: "q-story", OptionID: "generate_chapters", QuestionIndex: -1},
+	}); err != nil {
+		t.Fatalf("RecordTaskAnswers prior: %v", err)
+	}
+
+	transport := newCancelPersistTransport()
+	client := bridge.New(bridge.Options{
+		RequestTimeout: 500 * time.Millisecond,
+		CreateTransport: func(opts bridge.Options) (bridge.Transport, error) {
+			return transport, nil
+		},
+		DisableAutoReconnect: true,
+	})
+	if err := client.Start(ctx); err != nil {
+		t.Fatalf("start bridge client: %v", err)
+	}
+	t.Cleanup(client.Stop)
+
+	app := &App{
+		ctx:          ctx,
+		userDataDir:  t.TempDir(),
+		workspaceDir: workspaceDir,
+		localStore:   store,
+		bridgeClient: client,
+		bridgeCwd:    workspaceDir,
+	}
+
+	done := make(chan struct {
+		raw []byte
+		err error
+	}, 1)
+	go func() {
+		// The current (post-restart) step is the next action; its answer body is
+		// empty — exactly the input that previously misfired into the idea gate.
+		raw, err := app.Respond(RespondInput{
+			TaskID:     oldTaskID,
+			QuestionID: "question-old-outline",
+			OptionID:   "generate_outline",
+		})
+		done <- struct {
+			raw []byte
+			err error
+		}{raw: raw, err: err}
+	}()
+
+	req := transport.readRequest(t)
+	if req.Method != "task/respond" {
+		t.Fatalf("bridge request method = %q, want task/respond", req.Method)
+	}
+	transport.writeError(t, req.ID, "task not found: "+oldTaskID)
+
+	req = transport.readRequest(t)
+	if req.Method != "session/open" {
+		t.Fatalf("bridge request method = %q, want session/open", req.Method)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"id": "session-recovered"})
+
+	req = transport.readRequest(t)
+	if req.Method != "task/invoke" {
+		t.Fatalf("bridge request method = %q, want task/invoke", req.Method)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"task_id": newTaskID, "session_id": "session-recovered", "status": "running"})
+
+	// Each stage replays in order against its own live (re-minted) question id.
+	type expectStage struct {
+		liveQuestionID string
+		wantOption     string
+		wantAnswer     string
+	}
+	stages := []expectStage{
+		{liveQuestionID: "question-000003", wantOption: "", wantAnswer: ideaAnswer},
+		{liveQuestionID: "question-000007", wantOption: "generate_chapters", wantAnswer: ""},
+		{liveQuestionID: "question-000011", wantOption: "generate_outline", wantAnswer: ""},
+	}
+	for i, stage := range stages {
+		req = transport.readRequest(t)
+		if req.Method != "task/status" {
+			t.Fatalf("stage %d method = %q, want task/status", i, req.Method)
+		}
+		transport.writeResponse(t, req.ID, map[string]any{
+			"task_id":          newTaskID,
+			"session_id":       "session-recovered",
+			"status":           "question",
+			"current_question": map[string]any{"id": stage.liveQuestionID, "question": "stage"},
+		})
+
+		req = transport.readRequest(t)
+		if req.Method != "task/respond" {
+			t.Fatalf("stage %d method = %q, want task/respond", i, req.Method)
+		}
+		var p map[string]any
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			t.Fatalf("stage %d decode params: %v", i, err)
+		}
+		if p["task_id"] != newTaskID {
+			t.Fatalf("stage %d task_id = %#v, want %q", i, p["task_id"], newTaskID)
+		}
+		if p["question_id"] != stage.liveQuestionID {
+			t.Fatalf("stage %d question_id = %#v, want live %q", i, p["question_id"], stage.liveQuestionID)
+		}
+		if p["option_id"] != stage.wantOption {
+			t.Fatalf("stage %d option_id = %#v, want %q", i, p["option_id"], stage.wantOption)
+		}
+		if p["answer"] != stage.wantAnswer {
+			t.Fatalf("stage %d answer = %#v, want %q", i, p["answer"], stage.wantAnswer)
+		}
+		transport.writeResponse(t, req.ID, map[string]any{"accepted": true, "task_id": newTaskID})
+	}
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("Respond: %v", out.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Respond did not return")
+	}
+}
+
+// TestRespondRecoverySkipsStalePerNodeFeedback ensures a per-node revision in
+// the saved history is dropped during replay (its node id won't exist in the
+// regenerated tree, which would crash the recovered task) while the surrounding
+// stage-advancing answers still replay in order.
+func TestRespondRecoverySkipsStalePerNodeFeedback(t *testing.T) {
+	ctx := context.Background()
+	oldTaskID := "task-stale-feedback"
+	newTaskID := "task-recovered-feedback"
+	ideaAnswer := `{"kind":"vibe_node_confirmed","nodeId":"root"}`
+	feedbackAnswer := `{"kind":"vibe_node_feedback","nodeId":"branch-old","feedback":"punchier"}`
+	workspaceDir := t.TempDir()
+
+	store := localstore.New(filepath.Join(t.TempDir(), "officedex.db"))
+	if err := store.Open(ctx); err != nil {
+		t.Fatalf("open local store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	workspace, err := store.EnsureWorkspace(ctx, workspaceDir)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := store.EnsureConversation(ctx, workspace.ID, "conversation-fb", "Introduce Shimo Docs"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if err := store.RecordTaskContext(ctx, oldTaskID, localstore.TaskContext{
+		WorkspaceID:    workspace.ID,
+		ConversationID: "conversation-fb",
+	}); err != nil {
+		t.Fatalf("RecordTaskContext: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-user-input",
+		TaskID:  oldTaskID,
+		Type:    "task.user_input",
+		Payload: map[string]any{"document_type": "pptx", "topic": "Introduce Shimo Docs", "prompt": "Introduce Shimo Docs", "local_preview": true},
+	}); err != nil {
+		t.Fatalf("RecordEvent user input: %v", err)
+	}
+	if err := store.RecordEvent(types.BridgeEvent{
+		EventID: "event-question",
+		TaskID:  oldTaskID,
+		Type:    "task.question",
+		Payload: map[string]any{"id": "question-old-story", "question": "Project Map 已生成"},
+	}); err != nil {
+		t.Fatalf("RecordEvent question: %v", err)
+	}
+	// Prior history: idea confirm, then a per-node feedback at the story stage.
+	if err := store.RecordTaskAnswers(ctx, oldTaskID, []localstore.TaskAnswer{
+		{QuestionID: "q-a-idea", Answer: ideaAnswer, QuestionIndex: -1},
+		{QuestionID: "q-b-feedback", Answer: feedbackAnswer, QuestionIndex: -1},
+	}); err != nil {
+		t.Fatalf("RecordTaskAnswers prior: %v", err)
+	}
+
+	transport := newCancelPersistTransport()
+	client := bridge.New(bridge.Options{
+		RequestTimeout: 500 * time.Millisecond,
+		CreateTransport: func(opts bridge.Options) (bridge.Transport, error) { return transport, nil },
+		DisableAutoReconnect: true,
+	})
+	if err := client.Start(ctx); err != nil {
+		t.Fatalf("start bridge client: %v", err)
+	}
+	t.Cleanup(client.Stop)
+
+	app := &App{
+		ctx:          ctx,
+		userDataDir:  t.TempDir(),
+		workspaceDir: workspaceDir,
+		localStore:   store,
+		bridgeClient: client,
+		bridgeCwd:    workspaceDir,
+	}
+
+	done := make(chan struct {
+		raw []byte
+		err error
+	}, 1)
+	go func() {
+		raw, err := app.Respond(RespondInput{
+			TaskID:     oldTaskID,
+			QuestionID: "question-old-story",
+			OptionID:   "generate_chapters",
+		})
+		done <- struct {
+			raw []byte
+			err error
+		}{raw: raw, err: err}
+	}()
+
+	req := transport.readRequest(t)
+	if req.Method != "task/respond" {
+		t.Fatalf("method = %q, want task/respond", req.Method)
+	}
+	transport.writeError(t, req.ID, "task not found: "+oldTaskID)
+
+	req = transport.readRequest(t)
+	if req.Method != "session/open" {
+		t.Fatalf("method = %q, want session/open", req.Method)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"id": "session-recovered"})
+
+	req = transport.readRequest(t)
+	if req.Method != "task/invoke" {
+		t.Fatalf("method = %q, want task/invoke", req.Method)
+	}
+	transport.writeResponse(t, req.ID, map[string]any{"task_id": newTaskID, "session_id": "session-recovered", "status": "running"})
+
+	// Only two responds: idea confirm then the generate_chapters action. The
+	// per-node feedback must NOT be replayed.
+	type expectStage struct {
+		liveQuestionID string
+		wantOption     string
+		wantAnswer     string
+	}
+	stages := []expectStage{
+		{liveQuestionID: "question-000003", wantOption: "", wantAnswer: ideaAnswer},
+		{liveQuestionID: "question-000007", wantOption: "generate_chapters", wantAnswer: ""},
+	}
+	for i, stage := range stages {
+		req = transport.readRequest(t)
+		if req.Method != "task/status" {
+			t.Fatalf("stage %d method = %q, want task/status", i, req.Method)
+		}
+		transport.writeResponse(t, req.ID, map[string]any{
+			"task_id":          newTaskID,
+			"session_id":       "session-recovered",
+			"status":           "question",
+			"current_question": map[string]any{"id": stage.liveQuestionID, "question": "stage"},
+		})
+
+		req = transport.readRequest(t)
+		if req.Method != "task/respond" {
+			t.Fatalf("stage %d method = %q, want task/respond", i, req.Method)
+		}
+		var p map[string]any
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			t.Fatalf("stage %d decode: %v", i, err)
+		}
+		if p["question_id"] != stage.liveQuestionID {
+			t.Fatalf("stage %d question_id = %#v, want %q", i, p["question_id"], stage.liveQuestionID)
+		}
+		if p["answer"] != stage.wantAnswer {
+			t.Fatalf("stage %d answer = %#v, want %q (feedback must be skipped)", i, p["answer"], stage.wantAnswer)
+		}
+		if p["option_id"] != stage.wantOption {
+			t.Fatalf("stage %d option_id = %#v, want %q", i, p["option_id"], stage.wantOption)
+		}
+		transport.writeResponse(t, req.ID, map[string]any{"accepted": true, "task_id": newTaskID})
+	}
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("Respond: %v", out.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Respond did not return")
+	}
+}
+
 func TestRecoverGenerateInputFromEventsFillsMissingTopicFromPrompt(t *testing.T) {
 	got, err := recoverGenerateInputFromEvents([]types.BridgeEvent{
 		{

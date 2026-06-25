@@ -125,6 +125,13 @@ type App struct {
 	resolvedBinaryEnv  []string
 	binaryResolvedAt   time.Time
 
+	// recoveredTaskIDs maps an interrupted task id (the one the renderer keeps
+	// using after an app restart) to the live replacement task created during
+	// stale-respond recovery. Subsequent answers for the old id are routed to
+	// the live task so recovery runs once instead of re-running generation from
+	// the idea gate on every step.
+	recoveredTaskIDs map[string]string
+
 	notificationMu                   sync.Mutex
 	notificationAuthorizationGranted bool
 }
@@ -501,12 +508,50 @@ type RespondAnswerInput struct {
 	QuestionIndex   int    `json:"questionIndex,omitempty"`
 }
 
+// liveTaskID follows the recovered-task chain so answers for an interrupted
+// task id reach the live replacement created by a prior recovery. Returns the
+// input id unchanged when no mapping exists.
+func (a *App) liveTaskID(taskID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// Follow the chain (an old id may have been recovered more than once),
+	// guarding against accidental cycles.
+	for hops := 0; hops < 16; hops++ {
+		next, ok := a.recoveredTaskIDs[taskID]
+		if !ok || next == "" || next == taskID {
+			break
+		}
+		taskID = next
+	}
+	return taskID
+}
+
+// registerRecoveredTask records that oldID was replaced by a live newID during
+// recovery so future answers for oldID are routed to newID.
+func (a *App) registerRecoveredTask(oldID, newID string) {
+	oldID = strings.TrimSpace(oldID)
+	newID = strings.TrimSpace(newID)
+	if oldID == "" || newID == "" || oldID == newID {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.recoveredTaskIDs == nil {
+		a.recoveredTaskIDs = make(map[string]string)
+	}
+	a.recoveredTaskIDs[oldID] = newID
+}
+
 // Respond forwards a user answer back to the running task.
 func (a *App) Respond(input RespondInput) ([]byte, error) {
 	if err := a.recordRespondAnswers(input); err != nil {
 		return nil, err
 	}
-	client, err := a.ensureBridgeForTask(input.TaskID)
+	// Route to the live replacement task if this id was recovered earlier, so
+	// the answer reaches the task at its real position instead of re-triggering
+	// a from-scratch recovery.
+	taskID := a.liveTaskID(input.TaskID)
+	client, err := a.ensureBridgeForTask(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +564,7 @@ func (a *App) Respond(input RespondInput) ([]byte, error) {
 		})
 	}
 	raw, err := client.RespondTask(a.ctx, bridge.RespondParams{
-		TaskID:     input.TaskID,
+		TaskID:     taskID,
 		QuestionID: input.QuestionID,
 		OptionID:   input.OptionID,
 		Answer:     input.Answer,
@@ -622,38 +667,51 @@ func (a *App) recoverStaleInteractiveRespond(input RespondInput, originalErr err
 	if canEmitWailsEvent(ctx) {
 		emit(ctx, bridgeEventChannel, recoveredInputEvent)
 	}
-	if err := waitForRecoverablePendingInput(ctx, client, result.TaskID); err != nil {
-		return nil, err
-	}
 	answers, err := a.localStore.QueryTaskAnswers(ctx, input.TaskID)
 	if err != nil {
 		return nil, err
 	}
-	params := bridge.RespondParams{TaskID: result.TaskID, QuestionID: input.QuestionID}
-	if len(answers) > 0 {
-		params.OptionID = input.OptionID
-		params.Answer = input.Answer
-		params.Answers = make([]bridge.RespondAnswer, 0, len(answers))
-		for _, item := range answers {
-			params.Answers = append(params.Answers, bridge.RespondAnswer{
-				QuestionID: item.QuestionID,
-				OptionID:   item.OptionID,
-				Answer:     item.Answer,
-			})
-			if params.QuestionID == "" && item.QuestionGroupID != "" {
-				params.QuestionID = item.QuestionGroupID
-			}
-		}
-	} else {
-		params.OptionID = input.OptionID
-		params.Answer = input.Answer
-	}
-	if len(params.Answers) == 0 && strings.TrimSpace(params.OptionID) == "" && strings.TrimSpace(params.Answer) == "" {
+	// The fresh bridge run always restarts at the first interactive gate (for
+	// the vibe flow, idea confirmation). Replaying only the current answer works
+	// when the user was interrupted at that first gate, but breaks when they had
+	// already advanced — the current step's answer (often an action with an
+	// empty answer body) would be delivered to the idea gate and rejected with
+	// "idea confirmation is required". Replay the full saved-answer history in
+	// order so the re-created task fast-forwards to the user's real position.
+	groups, skippedRevisions := buildRecoveryReplayGroups(answers, input)
+	if len(groups) == 0 && !skippedRevisions {
 		return nil, fmt.Errorf("task was interrupted and cannot be resumed; missing saved answers")
 	}
-	if _, err := client.RespondTask(ctx, params); err != nil {
-		return nil, err
+	// When every saved answer was an unreplayable per-node revision, the
+	// recovered task is already at its first gate with nothing to fast-forward;
+	// fall through to register the mapping and report success.
+	for _, group := range groups {
+		// Each replayed answer targets the live question/plan the re-created task
+		// is currently waiting on. IDs are re-minted per bridge process, so we
+		// must use the live pending ID rather than any ID persisted from the
+		// previous run; otherwise the bridge rejects it with "question mismatch".
+		pendingID, err := waitForRecoverablePendingInput(ctx, client, result.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		params := bridge.RespondParams{
+			TaskID:     result.TaskID,
+			QuestionID: pendingID,
+			OptionID:   strings.TrimSpace(group.OptionID),
+			Answer:     strings.TrimSpace(group.Answer),
+			Answers:    group.Answers,
+		}
+		if len(params.Answers) == 0 && params.OptionID == "" && params.Answer == "" {
+			return nil, fmt.Errorf("task was interrupted and cannot be resumed; missing saved answers")
+		}
+		if _, err := client.RespondTask(ctx, params); err != nil {
+			return nil, err
+		}
 	}
+	// Route future answers for the interrupted id to this live task so the
+	// renderer (which keeps using the original id) no longer re-triggers a
+	// from-scratch recovery on every subsequent step.
+	a.registerRecoveredTask(input.TaskID, result.TaskID)
 	a.recordLocalTaskCancelled(input.TaskID, "Task was recovered after the application restarted")
 	payload, err := json.Marshal(map[string]any{
 		"accepted":      true,
@@ -665,6 +723,105 @@ func (a *App) recoverStaleInteractiveRespond(input RespondInput, originalErr err
 		return nil, err
 	}
 	return payload, nil
+}
+
+// recoveryReplayGroup is one answer to replay against one pending question of a
+// recovered task. A multi-question group (shared question_group_id) collapses
+// into a single respond carrying every sub-answer; a standalone answer is its
+// own group.
+type recoveryReplayGroup struct {
+	OptionID string
+	Answer   string
+	Answers  []bridge.RespondAnswer
+}
+
+// isUnreplayableVibeRevision reports whether a saved answer is a per-node vibe
+// revision (feedback on a specific node, or an undo) that cannot be safely
+// replayed against a recovered task. Recovery re-runs generation from scratch,
+// producing a fresh tree with new node IDs, so these answers reference nodes
+// that no longer exist — RewriteNode would error and fail the whole task. They
+// only ever trigger a same-stage re-ask (never a stage advance), so dropping
+// them during replay preserves stage alignment while losing only fine-grained
+// edits that the regenerated tree wouldn't have reproduced anyway.
+func isUnreplayableVibeRevision(answer string) bool {
+	trimmed := strings.TrimSpace(answer)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var probe struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+		return false
+	}
+	switch probe.Kind {
+	case "vibe_node_feedback", "vibe_undo_last_revision":
+		return true
+	}
+	return false
+}
+
+// buildRecoveryReplayGroups turns the chronological saved answers into the
+// ordered sequence of responds needed to fast-forward a recovered task to the
+// user's current position. Answers sharing a non-empty question_group_id are
+// merged into one group (preserving first-seen order); answers without a group
+// id each become their own group. The final group represents the in-flight
+// answer, so its representative option/answer is taken from the live input
+// (matching the non-recovery respond payload) when present.
+//
+// skipped reports whether any per-node revision was dropped (see
+// isUnreplayableVibeRevision); the caller uses it to distinguish "nothing to
+// replay because nothing was answered" from "all answers were unreplayable
+// revisions, leaving the task correctly at its current gate".
+func buildRecoveryReplayGroups(answers []localstore.TaskAnswer, input RespondInput) (groups []recoveryReplayGroup, skipped bool) {
+	groups = make([]recoveryReplayGroup, 0, len(answers))
+	indexByGroupID := make(map[string]int)
+	for _, item := range answers {
+		if isUnreplayableVibeRevision(item.Answer) {
+			skipped = true
+			continue
+		}
+		groupID := strings.TrimSpace(item.QuestionGroupID)
+		sub := bridge.RespondAnswer{
+			QuestionID: strings.TrimSpace(item.QuestionID),
+			OptionID:   strings.TrimSpace(item.OptionID),
+			Answer:     strings.TrimSpace(item.Answer),
+		}
+		if groupID != "" {
+			if idx, ok := indexByGroupID[groupID]; ok {
+				groups[idx].Answers = append(groups[idx].Answers, sub)
+				// Track the latest sub-answer as the representative; the final
+				// group is overridden by the live input below.
+				groups[idx].OptionID = sub.OptionID
+				groups[idx].Answer = sub.Answer
+				continue
+			}
+			indexByGroupID[groupID] = len(groups)
+		}
+		groups = append(groups, recoveryReplayGroup{
+			OptionID: sub.OptionID,
+			Answer:   sub.Answer,
+			Answers:  []bridge.RespondAnswer{sub},
+		})
+	}
+	// Prefer the live input's representative option/answer for the final group
+	// (or as a standalone group when nothing replayable was persisted) so the
+	// replayed payload matches what a normal respond would have sent — but never
+	// when the live input is itself an unreplayable revision.
+	inputHasContent := strings.TrimSpace(input.OptionID) != "" || strings.TrimSpace(input.Answer) != ""
+	inputReplayable := inputHasContent && !isUnreplayableVibeRevision(input.Answer)
+	if len(groups) == 0 {
+		if inputReplayable {
+			return []recoveryReplayGroup{{OptionID: input.OptionID, Answer: input.Answer}}, skipped
+		}
+		return nil, skipped
+	}
+	if inputReplayable {
+		last := &groups[len(groups)-1]
+		last.OptionID = input.OptionID
+		last.Answer = input.Answer
+	}
+	return groups, skipped
 }
 
 func latestTaskStateRecoverable(events []types.BridgeEvent) bool {
@@ -739,28 +896,63 @@ func recoverGenerateInputFromEvents(events []types.BridgeEvent, taskCtx localsto
 	return input, nil
 }
 
-func waitForRecoverablePendingInput(ctx context.Context, client *bridge.Client, taskID string) error {
-	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+// recoveryPendingInputTimeout bounds how long each replayed stage may take to
+// produce its next pending question (a generation step can run an LLM call).
+const recoveryPendingInputTimeout = 3 * time.Minute
+
+// waitForRecoverablePendingInput blocks until the recovered task is waiting on
+// fresh input, returning the ID the bridge expects the answer to reference. The
+// ID is re-minted per bridge process, so callers must use this value rather than
+// any ID replayed from persisted events.
+func waitForRecoverablePendingInput(ctx context.Context, client *bridge.Client, taskID string) (string, error) {
+	// Recovery replays answers stage by stage; between responds the re-created
+	// task runs a generation step (often an LLM call), so allow well beyond the
+	// few seconds a single idle gate would need. The loop still returns early
+	// once the task reaches a pending question or a terminal state.
+	waitCtx, cancel := context.WithTimeout(ctx, recoveryPendingInputTimeout)
 	defer cancel()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		status, err := client.TaskStatus(waitCtx, taskID)
 		if err != nil {
-			return err
+			return "", err
 		}
-		if len(status.CurrentQuestion) > 0 || len(status.CurrentPlan) > 0 {
-			return nil
+		if len(status.CurrentQuestion) > 0 {
+			return pendingInputID(status.CurrentQuestion), nil
+		}
+		if len(status.CurrentPlan) > 0 {
+			return pendingInputID(status.CurrentPlan), nil
 		}
 		if status.Status == "failed" || status.Status == "completed" || status.Status == "cancelled" {
-			return fmt.Errorf("task recovery failed before input was requested: %s", status.Status)
+			return "", fmt.Errorf("task recovery failed before input was requested: %s", status.Status)
 		}
 		select {
 		case <-waitCtx.Done():
-			return fmt.Errorf("task recovery timed out waiting for pending input")
+			return "", fmt.Errorf("task recovery timed out waiting for pending input")
 		case <-ticker.C:
 		}
 	}
+}
+
+// pendingInputID extracts the question/plan identifier from a bridge
+// current_question or current_plan payload. The bridge accepts either the "id"
+// or, for plans, the "plan_id" field; "id" is preferred when present.
+func pendingInputID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var fields struct {
+		ID     string `json:"id"`
+		PlanID string `json:"plan_id"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return ""
+	}
+	if fields.ID != "" {
+		return fields.ID
+	}
+	return fields.PlanID
 }
 
 // Cancel asks the bridge to cancel a running task.
