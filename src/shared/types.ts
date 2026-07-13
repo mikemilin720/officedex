@@ -4,6 +4,8 @@
  *   - src/renderer/generated/wailsjs/go/models.ts (Wails auto-generated)
  * Adding/removing fields requires updating all three.
  */
+import type { PptistDeckSnapshot, PptistEditOp, PptistSlide } from "./pptistProtocol";
+
 export type DocumentType = "pptx" | "docx" | "xlsx" | "report" | "img" | "gif";
 export type GenerationMode = "fast" | "plan";
 export type ImageRatio = "square" | "landscape" | "portrait";
@@ -219,6 +221,92 @@ export interface TaskQuestion {
   answers?: TaskQuestionAnswer[];
 }
 
+export type VibeTreeStage = "story_ready" | "outline_ready" | "refined_ready" | "slides_ready" | "rendering" | "completed";
+
+export interface VibeVisualAsset {
+  kind: "image" | "chart" | string;
+  description: string;
+}
+
+export interface VibeSection {
+  heading: string;
+  detail?: string;
+}
+
+export interface VibeMetric {
+  label: string;
+  value: string;
+  note?: string;
+}
+
+export interface VibeChart {
+  type?: "bar" | "pie" | "line" | string;
+  title?: string;
+  categories?: string[];
+  values?: number[];
+  /** When true the values are representative, not sourced, and are labelled as illustrative. */
+  illustrative?: boolean;
+}
+
+export type VibeSlideLayout =
+  | "title"
+  | "content"
+  | "chart"
+  | "dashboard"
+  | "toc"
+  | "chapter"
+  | "gallery"
+  | "comparison"
+  | "timeline"
+  | "closing";
+
+export interface VibeProjectTreeNode {
+  id: string;
+  parentId?: string;
+  kind: "root" | "branch" | "slide_group" | "slide" | string;
+  title: string;
+  beatType?: string;
+  summary?: string;
+  status?: string;
+  intent?: string;
+  materials?: string[];
+  slideRange?: string;
+  slideNumber?: number;
+  outline?: string[];
+  visualAssets?: VibeVisualAsset[];
+  layout?: VibeSlideLayout | string;
+  role?: string;
+  sections?: VibeSection[];
+  metrics?: VibeMetric[];
+  chart?: VibeChart;
+  trace?: string[];
+}
+
+export interface VibeProjectTree {
+  id: string;
+  rootId: string;
+  title: string;
+  direction?: string;
+  nodes: VibeProjectTreeNode[];
+}
+
+export interface VibeTreeAction {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface VibeTreeConfirmation {
+  nodeIds: string[];
+}
+
+export interface VibeTreeSnapshot {
+  stage: VibeTreeStage;
+  tree: VibeProjectTree;
+  actions: VibeTreeAction[];
+  confirmation?: VibeTreeConfirmation;
+}
+
 export type StageStatus = "pending" | "active" | "completed" | "failed";
 
 export interface StageState {
@@ -307,6 +395,9 @@ export interface DesktopTask {
   events: BridgeEvent[];
   question?: TaskQuestion;
   plan?: TaskPlan;
+  vibeTree?: VibeTreeSnapshot;
+  /** Per-slide PptistSlide data streamed from the backend (vibe flow), ordered by index. */
+  vibeSlides?: PptistSlide[];
   artifact?: Artifact;
   error?: string;
   stages?: StageState[];
@@ -317,6 +408,7 @@ export interface DesktopTask {
   imageWatermark?: ImageWatermarkTaskMetadata;
   lastProgressAt?: number;
   stalledSince?: number;
+  assembleProgress?: { step: string; status: string; content: string };
   runtimeSnapshot?: TaskRuntimeSnapshot;
 }
 
@@ -435,6 +527,7 @@ export interface UserSettings {
   onboardingCompletedAt: string | null;
   proxy: ProxySettings | null;
   imageWatermark: ImageWatermarkSettings;
+  waiting2048Enabled: boolean;
 }
 
 export interface AppUpdateAsset {
@@ -546,6 +639,34 @@ export interface ReportCapabilityResult {
 
 export type BinaryFileData = ArrayBuffer | Uint8Array;
 
+export interface SavePptxOptions {
+  targetFilePath?: string;
+}
+
+export interface ModifyPptistDeckInput {
+  prompt: string;
+  snapshot: PptistDeckSnapshot;
+  selectedSlideId?: string;
+  selectedElementIds?: string[];
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  pptxDataBase64?: string;
+}
+
+export interface ModifyPptistDeckResult {
+  summary: string;
+  ops: PptistEditOp[];
+  confidence?: "high" | "medium" | "low";
+  requiresConfirmation?: boolean;
+  confirmation?: {
+    title?: string;
+    message?: string;
+    target?: string;
+    changes?: string[];
+    preserved?: string[];
+  };
+  warnings?: string[];
+}
+
 export interface DesktopAPI {
   initialize(): Promise<unknown>;
   getCapabilities(): Promise<unknown>;
@@ -563,13 +684,15 @@ export interface DesktopAPI {
   openDirectoryDialog(): Promise<string | null>;
   openMultiFileDialog(options?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string[] | null>;
   savePastedImage(data: Uint8Array, ext: string): Promise<string>;
+  savePptx(data: Uint8Array, fileName: string, options?: SavePptxOptions): Promise<string>;
+  exportVibeTreePptx(tree: VibeProjectTree, fileName: string): Promise<string>;
+  modifyPptistDeck(input: ModifyPptistDeckInput): Promise<ModifyPptistDeckResult>;
   previewArtifact(artifact: Artifact): Promise<void>;
   issuePreviewToken(artifact: Artifact): Promise<PreviewGrant>;
   revokePreviewToken(token: string): Promise<void>;
   readArtifactFile(previewToken: string): Promise<{ data: BinaryFileData }>;
   readLocalImage(filePath: string): Promise<{ data: BinaryFileData; mime: string }>;
   copyImageToClipboard(filePath: string): Promise<void>;
-  renderPreviewHtml(previewToken: string): Promise<{ html: string } | null>;
   setPreviewMode(active: boolean): Promise<void>;
   login(input?: LoginInput): Promise<{ url: string }>;
   cancelLogin(): Promise<void>;
@@ -604,7 +727,15 @@ export interface DesktopAPI {
   peekReportContext(taskId: string): Promise<PeekReportContextResult>;
   getTaskHistory(limit?: number): Promise<TaskHistoryEntry[]>;
   getBridgeRuntimeSnapshot(): Promise<BridgeRuntimeSnapshot>;
+  recordRendererLog(input: RendererLogInput): Promise<void>;
   testProvider(input?: ProviderTestInput): Promise<ProviderTestResult>;
+}
+
+export interface RendererLogInput {
+  source: string;
+  event: string;
+  atMs?: number;
+  details?: Record<string, unknown>;
 }
 
 export interface ProviderSnapshot {

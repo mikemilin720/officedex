@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OfficeDex PPT 完成态布局方案</title>
+  <style>
+    :root {
+      --bg: #f5f3ee;
+      --surface: #fffefa;
+      --panel: #f9f8f4;
+      --line: #ddd8cd;
+      --line-strong: #beb6a8;
+      --text: #1f252b;
+      --muted: #72767c;
+      --soft: #eef4f4;
+      --accent: #157a6e;
+      --accent-2: #2d6cdf;
+      --warn: #a05b12;
+      --shadow: 0 18px 40px rgba(31, 37, 43, .10);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0f1113;
+      color: var(--text);
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .window {
+      width: min(1800px, calc(100vw - 44px));
+      height: min(1050px, calc(100vh - 44px));
+      margin: 22px auto;
+      background: var(--bg);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .45);
+      display: grid;
+      grid-template-rows: 44px 68px 1fr;
+    }
+    .traffic {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 18px;
+      background: #fbfbfa;
+      border-bottom: 1px solid #e7e4dc;
+      color: #5a5d62;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .dot { width: 14px; height: 14px; border-radius: 99px; }
+    .red { background: #ff5c5c; }
+    .yellow { background: #ffbd2e; }
+    .gray { background: #d2d2d2; margin-right: 10px; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      background: var(--surface);
+      border-bottom: 1px solid #e4dfd4;
+    }
+    .crumb {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .crumb strong { color: var(--text); }
+    .official {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 7px;
+      color: #1a9b47;
+      background: #ddf3de;
+      font-weight: 700;
+    }
+    .workspace {
+      min-height: 0;
+      padding: 20px 28px 28px;
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 16px;
+    }
+    .chooser {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .chooser h1 {
+      font-size: 16px;
+      margin: 0 0 8px;
+      letter-spacing: 0;
+    }
+    .chooser p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .option-button {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 7px;
+      padding: 11px;
+      text-align: left;
+      margin-bottom: 10px;
+      display: grid;
+      gap: 4px;
+      color: var(--text);
+    }
+    .option-button strong { font-size: 13px; }
+    .option-button span { color: var(--muted); font-size: 12px; }
+    .option-button.active {
+      border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+      box-shadow: inset 3px 0 0 var(--accent);
+      background: color-mix(in srgb, #fff 84%, #d6f0e9);
+    }
+    .notes {
+      margin-top: auto;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .stage {
+      min-width: 0;
+      min-height: 0;
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .mock {
+      display: none;
+      height: 100%;
+      min-height: 0;
+      grid-template-rows: 58px 1fr;
+      background: #f6f4ef;
+    }
+    .mock.active { display: grid; }
+    .mock-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .78);
+    }
+    .title-block {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .title-block h2 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .status-pill {
+      border: 1px solid #b8dfbf;
+      color: #238443;
+      background: #eef8ef;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .icon-btn, .text-btn, .primary-btn {
+      height: 34px;
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 11px;
+      white-space: nowrap;
+    }
+    .icon-btn {
+      width: 34px;
+      padding: 0;
+      font-size: 16px;
+    }
+    .primary-btn {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+      font-weight: 700;
+    }
+    .body { min-height: 0; overflow: hidden; }
+
+    .thumbs {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: #fbfaf7;
+      border-right: 1px solid var(--line);
+      padding: 12px;
+    }
+    .thumb {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 7px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 8px;
+      align-items: center;
+      text-align: left;
+      width: 100%;
+      color: var(--text);
+    }
+    .thumb.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    .thumb-index {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .thumb-card {
+      aspect-ratio: 16 / 9;
+      border-radius: 5px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.12), rgba(255,255,255,0)),
+        #1e2633;
+      position: relative;
+      overflow: hidden;
+    }
+    .thumb-card::before,
+    .slide::before {
+      content: "";
+      position: absolute;
+      width: 22%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      right: 8%;
+      top: 10%;
+      background: rgba(41, 115, 117, .42);
+    }
+    .thumb-card::after,
+    .slide::after {
+      content: "";
+      position: absolute;
+      left: 13%;
+      top: 48%;
+      width: 66%;
+      height: 18%;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, .13);
+    }
+    .slide-area {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      overflow: hidden;
+    }
+    .slide-frame {
+      width: min(100%, 960px);
+      display: grid;
+      gap: 12px;
+    }
+    .slide {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      background: #202734;
+      border: 1px solid #111720;
+      box-shadow: 0 15px 34px rgba(31, 37, 43, .20);
+      color: #e9edf3;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      padding: 8%;
+      text-align: center;
+    }
+    .slide-content {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 24px;
+      justify-items: center;
+      width: 78%;
+    }
+    .slide h3 { margin: 0; font-size: clamp(20px, 2.4vw, 34px); letter-spacing: 0; }
+    .slide ul {
+      width: 84%;
+      margin: 0;
+      text-align: left;
+      padding: 22px 34px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .12);
+      font-size: clamp(12px, 1.08vw, 18px);
+    }
+    .slide-meta {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .ai-panel {
+      min-width: 0;
+      min-height: 0;
+      border-left: 1px solid var(--line);
+      background: #fffdfa;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+    .ai-head {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .ai-head strong { font-size: 14px; }
+    .ai-log {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      max-width: 92%;
+      border-radius: 8px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .msg.user {
+      margin-left: auto;
+      background: #eaf1ff;
+      border-color: #cbdaf8;
+    }
+    .composer {
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 1fr 36px;
+      gap: 8px;
+    }
+    .composer input {
+      min-width: 0;
+      height: 36px;
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      padding: 0 11px;
+      background: #fff;
+    }
+    .send {
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      background: var(--accent);
+      color: #fff;
+      font-size: 18px;
+    }
+
+    .layout-a .body {
+      display: grid;
+      grid-template-columns: 190px minmax(420px, 1fr) minmax(310px, 25%);
+    }
+
+    .layout-b .body {
+      display: grid;
+      grid-template-columns: 210px minmax(420px, 1fr);
+      grid-template-rows: minmax(0, 1fr) 132px;
+    }
+    .layout-b .thumbs { grid-row: 1 / 3; }
+    .bottom-ai {
+      border-top: 1px solid var(--line);
+      background: #fffdfa;
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 12px;
+      padding: 12px 16px;
+      min-width: 0;
+    }
+    .quick-log {
+      min-width: 0;
+      display: flex;
+      gap: 10px;
+      overflow: hidden;
+      align-items: center;
+    }
+    .quick-log .msg {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 46%;
+    }
+    .compact-composer {
+      display: grid;
+      grid-template-columns: 1fr 36px;
+      gap: 8px;
+      align-items: center;
+    }
+    .compact-composer input {
+      min-width: 0;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 0 10px;
+    }
+
+    .layout-c .body {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr) 360px;
+    }
+    .rail-thumbs {
+      min-height: 0;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: #fbfaf7;
+      padding: 10px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .rail-thumb {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      min-height: 58px;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+    }
+    .rail-thumb.active {
+      border-color: var(--accent-2);
+      background: #eef4ff;
+    }
+    .review-panel {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      overflow: hidden;
+    }
+    .filmstrip {
+      border-top: 1px solid var(--line);
+      padding: 10px;
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      background: #fbfaf7;
+    }
+    .mini {
+      flex: 0 0 128px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 5px;
+      background: #fff;
+    }
+    .mini.active { border-color: var(--accent-2); }
+    .mini .thumb-card { width: 100%; }
+
+    .layout-d .body {
+      display: grid;
+      grid-template-columns: minmax(250px, 25%) minmax(460px, 1fr) minmax(300px, 23%);
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .outline-list {
+      min-height: 0;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: #fbfaf7;
+      padding: 14px;
+    }
+    .outline-card {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 11px;
+      margin-bottom: 10px;
+    }
+    .outline-card.active { border-color: var(--accent); }
+    .outline-card strong { display: block; margin-bottom: 5px; }
+    .outline-card p { margin: 0; color: var(--muted); font-size: 12px; }
+    .side-stack {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 40% 60%;
+      border-left: 1px solid var(--line);
+      background: #fffdfa;
+    }
+    .metadata {
+      border-bottom: 1px solid var(--line);
+      padding: 14px;
+      overflow: auto;
+    }
+    .metadata dl {
+      display: grid;
+      grid-template-columns: 86px 1fr;
+      gap: 8px;
+      margin: 12px 0 0;
+      color: var(--muted);
+    }
+    .metadata dt { color: var(--text); font-weight: 700; }
+    .metadata dd { margin: 0; }
+    .side-stack .ai-panel {
+      border-left: 0;
+    }
+
+    .tree-layer {
+      position: absolute;
+      inset: 0;
+      display: none;
+      background: rgba(23, 26, 29, .42);
+      z-index: 5;
+      padding: 24px;
+    }
+    .tree-layer.open { display: grid; }
+    .tree-card {
+      width: min(1020px, 92%);
+      height: min(680px, 92%);
+      margin: auto;
+      background: #fffefa;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 30px 70px rgba(0, 0, 0, .35);
+      display: grid;
+      grid-template-rows: 54px 1fr;
+      overflow: hidden;
+    }
+    .tree-head {
+      border-bottom: 1px solid var(--line);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .tree-canvas {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(#edf1ee 1px, transparent 1px),
+        linear-gradient(90deg, #edf1ee 1px, transparent 1px),
+        #fbfaf7;
+      background-size: 38px 38px;
+    }
+    .node {
+      position: absolute;
+      width: 168px;
+      min-height: 74px;
+      border: 1px solid #b8cfd0;
+      background: rgba(255,255,255,.86);
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 8px 20px rgba(26, 42, 48, .10);
+    }
+    .node strong { display: block; margin-bottom: 5px; }
+    .node span { color: var(--muted); font-size: 12px; }
+    .node.deck {
+      border-color: #eea58c;
+      background: #fff7f1;
+    }
+    .n1 { left: 60px; top: 72px; }
+    .n2 { left: 300px; top: 66px; }
+    .n3 { left: 540px; top: 150px; }
+    .n4 { left: 300px; top: 284px; }
+    .n5 { left: 740px; top: 258px; }
+    .edge {
+      position: absolute;
+      height: 2px;
+      background: #a9c6c8;
+      transform-origin: left center;
+    }
+    .e1 { left: 228px; top: 110px; width: 72px; }
+    .e2 { left: 466px; top: 116px; width: 94px; transform: rotate(26deg); }
+    .e3 { left: 466px; top: 326px; width: 300px; transform: rotate(-12deg); }
+    .e4 { left: 690px; top: 188px; width: 116px; transform: rotate(34deg); }
+    .toast {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      z-index: 8;
+      background: #1f252b;
+      color: #fff;
+      border-radius: 7px;
+      padding: 10px 12px;
+      opacity: 0;
+      transform: translateY(10px);
+      pointer-events: none;
+      transition: .18s ease;
+      box-shadow: 0 16px 40px rgba(0,0,0,.22);
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 1180px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      .chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .chooser h1, .chooser p, .notes { grid-column: 1 / -1; }
+      .option-button { margin: 0; }
+      .layout-a .body,
+      .layout-d .body { grid-template-columns: 150px minmax(0, 1fr); }
+      .layout-a .ai-panel,
+      .layout-d .side-stack { display: none; }
+      .layout-b .body { grid-template-columns: 150px minmax(0, 1fr); }
+      .layout-c .body { grid-template-columns: 60px minmax(0, 1fr); }
+      .layout-c .ai-panel { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="window">
+    <div class="traffic">
+      <span class="dot red"></span><span class="dot yellow"></span><span class="dot gray"></span>
+      <span>OfficeDex</span>
+    </div>
+    <div class="topbar">
+      <div class="crumb">
+        <span>OfficeDex</span><span>/</span><strong>OfficeDex Workspace</strong>
+      </div>
+      <span class="official">☁ Official</span>
+    </div>
+    <section class="workspace">
+      <aside class="chooser">
+        <h1>PPT 完成态布局方案</h1>
+        <p>点击方案切换。每个方案都可点缩略图、发送 AI 消息、Show in folder，并唤出 canvas tree。</p>
+        <button class="option-button active" data-option="a">
+          <strong>A. 三栏编辑器默认态</strong>
+          <span>左缩略图 / 中预览 / 右 AI 对话</span>
+        </button>
+        <button class="option-button" data-option="b">
+          <strong>B. PPT 优先 + 底部 AI</strong>
+          <span>右侧给当前页更大空间</span>
+        </button>
+        <button class="option-button" data-option="c">
+          <strong>C. 轻缩略栏 + 右侧对话</strong>
+          <span>接近桌面审阅软件</span>
+        </button>
+        <button class="option-button" data-option="d">
+          <strong>D. 大纲缩略 + 详情栈</strong>
+          <span>适合边看结构边改稿</span>
+        </button>
+        <div class="notes">
+          推荐初稿：A。它最直接满足 5 个默认元素，认知成本最低；B 更沉浸，适合演示；C 更省横向空间；D 更适合复杂稿件二次编辑。
+        </div>
+      </aside>
+
+      <section class="stage">
+        <article class="mock layout-a active" data-mock="a">
+          <header class="mock-header">
+            <div class="title-block">
+              <span class="status-pill">10/10 pages generated</span>
+              <h2>介绍石墨文档，十页</h2>
+            </div>
+            <div class="actions">
+              <button class="icon-btn tree-open" title="打开 canvas tree">⌘</button>
+              <button class="text-btn show-folder">▣ Show in folder</button>
+              <button class="primary-btn">Open Preview</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="thumbs"></div>
+            <div class="slide-area"></div>
+            <aside class="ai-panel"></aside>
+          </div>
+        </article>
+
+        <article class="mock layout-b" data-mock="b">
+          <header class="mock-header">
+            <div class="title-block">
+              <span class="status-pill">Saved locally</span>
+              <h2>PPT 审阅模式</h2>
+            </div>
+            <div class="actions">
+              <button class="text-btn tree-open">Canvas tree</button>
+              <button class="text-btn show-folder">▣ Show in folder</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="thumbs"></div>
+            <div class="slide-area"></div>
+            <div class="bottom-ai">
+              <div class="quick-log">
+                <div class="msg">AI：已生成 10 页，可继续要求统一风格、补图或改标题。</div>
+                <div class="msg user">我想让第 3 页更像产品介绍。</div>
+              </div>
+              <div class="compact-composer">
+                <input class="ai-input" placeholder="Ask to modify this PPT..." />
+                <button class="send ai-send">›</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="mock layout-c" data-mock="c">
+          <header class="mock-header">
+            <div class="title-block">
+              <span class="status-pill">Ready to edit</span>
+              <h2>当前页：在线协作与高效办公的实践工具</h2>
+            </div>
+            <div class="actions">
+              <button class="icon-btn tree-open" title="Canvas tree">☷</button>
+              <button class="icon-btn show-folder" title="Show in folder">▣</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="rail-thumbs"></div>
+            <div class="review-panel">
+              <div class="slide-area"></div>
+              <div class="filmstrip"></div>
+            </div>
+            <aside class="ai-panel"></aside>
+          </div>
+        </article>
+
+        <article class="mock layout-d" data-mock="d">
+          <header class="mock-header">
+            <div class="title-block">
+              <span class="status-pill">Completed</span>
+              <h2>结构化修改模式</h2>
+            </div>
+            <div class="actions">
+              <button class="text-btn tree-open">查看生成树</button>
+              <button class="text-btn show-folder">▣ Show in folder</button>
+              <button class="primary-btn">Export again</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="outline-list"></div>
+            <div class="slide-area"></div>
+            <aside class="side-stack">
+              <div class="metadata">
+                <strong>当前页信息</strong>
+                <dl>
+                  <dt>页码</dt><dd class="meta-page">01 / 10</dd>
+                  <dt>主题</dt><dd>在线协作价值</dd>
+                  <dt>来源节点</dt><dd>Chapter 1 · 协作痛点</dd>
+                  <dt>建议</dt><dd>可要求 AI 加强产品能力示例。</dd>
+                </dl>
+              </div>
+              <aside class="ai-panel"></aside>
+            </aside>
+          </div>
+        </article>
+
+        <div class="tree-layer" id="treeLayer">
+          <div class="tree-card">
+            <div class="tree-head">
+              <strong>Canvas tree · 原 Living Tree Cockpit</strong>
+              <div class="actions">
+                <button class="text-btn">定位当前页节点</button>
+                <button class="icon-btn" id="closeTree" title="关闭">×</button>
+              </div>
+            </div>
+            <div class="tree-canvas">
+              <span class="edge e1"></span><span class="edge e2"></span><span class="edge e3"></span><span class="edge e4"></span>
+              <div class="node n1"><strong>Idea</strong><span>介绍石墨文档，十页</span></div>
+              <div class="node n2"><strong>Story Beat</strong><span>协作痛点 / 解决方案 / 价值</span></div>
+              <div class="node n3"><strong>Chapter</strong><span>在线协作实践</span></div>
+              <div class="node n4"><strong>Outline</strong><span>10 页结构已确认</span></div>
+              <div class="node n5 deck"><strong>PPTX</strong><span>Deck 已完成，可回到审阅态继续编辑</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="toast" id="toast">已调用 Show in folder</div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const slides = [
+      "在线协作与高效办公的实践工具",
+      "什么是石墨文档",
+      "多人协作的常见痛点",
+      "实时编辑与评论",
+      "权限、模板与团队空间",
+      "知识沉淀与文档流转",
+      "典型业务场景",
+      "团队管理价值",
+      "落地建议",
+      "总结与下一步"
+    ];
+
+    let activeSlide = 0;
+
+    function slideMarkup() {
+      const n = String(activeSlide + 1).padStart(2, "0");
+      return `
+        <div class="slide-frame">
+          <div class="slide">
+            <div class="slide-content">
+              <h3>${slides[activeSlide]}</h3>
+              <ul>
+                <li>围绕当前页主题保留真实 PPT 的版式预览</li>
+                <li>点击左侧缩略图时，中间内容和 AI 修改上下文同步切换</li>
+                <li>右侧对话记录默认保留，继续修改时不丢上下文</li>
+              </ul>
+            </div>
+          </div>
+          <div class="slide-meta"><span>Slide ${n}</span><span>${n}/10</span></div>
+        </div>
+      `;
+    }
+
+    function thumbList(compact = false) {
+      return slides.map((title, index) => `
+        <button class="${compact ? "rail-thumb" : "thumb"} ${index === activeSlide ? "active" : ""}" data-slide="${index}">
+          ${compact ? String(index + 1).padStart(2, "0") : `<span class="thumb-index">${String(index + 1).padStart(2, "0")}</span><span class="thumb-card"></span>`}
+        </button>
+      `).join("");
+    }
+
+    function miniList() {
+      return slides.map((_, index) => `
+        <button class="mini ${index === activeSlide ? "active" : ""}" data-slide="${index}">
+          <span class="thumb-card"></span>
+        </button>
+      `).join("");
+    }
+
+    function outlineList() {
+      return slides.map((title, index) => `
+        <button class="outline-card ${index === activeSlide ? "active" : ""}" data-slide="${index}">
+          <strong>${String(index + 1).padStart(2, "0")} ${title}</strong>
+          <p>${index === activeSlide ? "当前页，AI 修改会优先作用于这里。" : "点击切换当前页内容。"}</p>
+        </button>
+      `).join("");
+    }
+
+    function aiPanel() {
+      return `
+        <div class="ai-head">
+          <strong>AI 对话</strong>
+          <span class="status-pill">Context kept</span>
+        </div>
+        <div class="ai-log">
+          <div class="msg">AI：PPTX 已生成。你可以点左侧页面，然后告诉我要改标题、结构、配色或内容。</div>
+          <div class="msg user">保持石墨文档介绍不变，把语气改得更适合销售演示。</div>
+          <div class="msg">AI：明白。我会保留事实信息，增强价值表达，并优先修改当前页。</div>
+        </div>
+        <div class="composer">
+          <input class="ai-input" placeholder="Ask to modify this PPT..." />
+          <button class="send ai-send">›</button>
+        </div>
+      `;
+    }
+
+    function render() {
+      document.querySelectorAll(".slide-area").forEach((el) => { el.innerHTML = slideMarkup(); });
+      document.querySelectorAll(".thumbs").forEach((el) => { el.innerHTML = thumbList(false); });
+      document.querySelectorAll(".rail-thumbs").forEach((el) => { el.innerHTML = thumbList(true); });
+      document.querySelectorAll(".filmstrip").forEach((el) => { el.innerHTML = miniList(); });
+      document.querySelectorAll(".outline-list").forEach((el) => { el.innerHTML = outlineList(); });
+      document.querySelectorAll(".ai-panel").forEach((el) => { el.innerHTML = aiPanel(); });
+      document.querySelectorAll(".meta-page").forEach((el) => { el.textContent = `${String(activeSlide + 1).padStart(2, "0")} / 10`; });
+      bindDynamic();
+    }
+
+    function bindDynamic() {
+      document.querySelectorAll("[data-slide]").forEach((button) => {
+        button.onclick = () => {
+          activeSlide = Number(button.dataset.slide);
+          render();
+        };
+      });
+      document.querySelectorAll(".ai-send").forEach((button) => {
+        button.onclick = () => {
+          const input = button.parentElement.querySelector(".ai-input");
+          const text = input.value.trim() || `帮我优化第 ${activeSlide + 1} 页`;
+          const panel = button.closest(".ai-panel") || button.closest(".bottom-ai");
+          const log = panel.querySelector(".ai-log") || panel.querySelector(".quick-log");
+          const user = document.createElement("div");
+          user.className = "msg user";
+          user.textContent = text;
+          log.appendChild(user);
+          const ai = document.createElement("div");
+          ai.className = "msg";
+          ai.textContent = `AI：已把这条修改请求绑定到第 ${activeSlide + 1} 页。`;
+          log.appendChild(ai);
+          input.value = "";
+          log.scrollTop = log.scrollHeight;
+        };
+      });
+    }
+
+    document.querySelectorAll(".option-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".option-button").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".mock").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.querySelector(`[data-mock="${button.dataset.option}"]`).classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".tree-open").forEach((button) => {
+      button.addEventListener("click", () => document.getElementById("treeLayer").classList.add("open"));
+    });
+    document.getElementById("closeTree").addEventListener("click", () => {
+      document.getElementById("treeLayer").classList.remove("open");
+    });
+    document.querySelectorAll(".show-folder").forEach((button) => {
+      button.addEventListener("click", () => {
+        const toast = document.getElementById("toast");
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 1400);
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>

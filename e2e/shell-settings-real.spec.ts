@@ -16,8 +16,14 @@ test.describe("OfficeDex real client shell, account, settings, diagnostics, and 
   test("drives shell navigation, workspace actions, settings, diagnostics, login events, and update states through the real bridge", async ({ page }) => {
     await preparePage(page);
 
-    await page.getByRole("button", { name: /Collapse sidebar/i }).click();
-    await expect(page.locator(".app-shell.sidebar-collapsed")).toBeVisible();
+    const collapseSidebar = page.getByRole("button", { name: /Collapse sidebar/i });
+    const expandSidebar = page.getByRole("button", { name: /Expand sidebar/i });
+    if (await collapseSidebar.isVisible().catch(() => false)) {
+      await collapseSidebar.click();
+      await expect(page.locator(".app-shell.sidebar-collapsed")).toBeVisible();
+    } else {
+      await expect(expandSidebar).toBeVisible();
+    }
     await page.getByRole("button", { name: /Expand sidebar/i }).click();
     await expect(page.locator(".app-shell.sidebar-collapsed")).toHaveCount(0);
 
@@ -55,7 +61,7 @@ test.describe("OfficeDex real client shell, account, settings, diagnostics, and 
     await expect(page.getByRole("button", { name: /Exported/i })).toBeVisible({ timeout: 60_000 });
 
     await page.getByRole("navigation", { name: /Settings sections/i }).getByRole("button", { name: /About/i }).click();
-    await page.getByRole("button", { name: /Check/i }).click();
+    await page.getByRole("button", { name: /Check for updates/i }).click();
     await expect(page.getByText(/New version|Up to date|Last error/i)).toBeVisible({ timeout: 60_000 });
 
     await page.getByRole("button", { name: /Profile/i }).click();

@@ -141,36 +141,6 @@ jobs:
             }
           done
 
-      - name: Bundle extrender (macOS)
-        if: runner.os == 'macOS'
-        env:
-          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
-        run: |
-          resDir="build/bin/OfficeDex.app/Contents/Resources/extrender"
-          mkdir -p "$resDir"
-          cp build/extrender/mac-universal/extrender "$resDir/extrender"
-          chmod +x "$resDir/extrender"
-          codesign --force --sign "$APPLE_DEVELOPER_ID" \
-            --options runtime --timestamp "$resDir/extrender"
-
-      - name: Verify bundled extrender is universal2 (macOS)
-        if: runner.os == 'macOS'
-        # The .app is darwin/universal; an arch-specific extrender would crash on
-        # the other architecture with "bad CPU type in executable", silently
-        # degrading rich previews to the low-fidelity sidecar. Fail the release
-        # rather than ship a binary that bricks Intel (or Apple Silicon).
-        run: |
-          set -euo pipefail
-          bin="build/bin/OfficeDex.app/Contents/Resources/extrender/extrender"
-          archs="$(lipo -archs "$bin")"
-          echo "bundled extrender archs: $archs"
-          for required in x86_64 arm64; do
-            echo "$archs" | grep -qw "$required" || {
-              echo "::error::bundled extrender is missing the $required slice (got: $archs)"
-              exit 1
-            }
-          done
-
       - name: Notarize .app (macOS)
         if: runner.os == 'macOS'
         env:
@@ -193,14 +163,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path $resDir | Out-Null
           Copy-Item "build\officecli\officecli.exe" -Destination "$resDir\officecli.exe" -Force
           Copy-Item "build\officecli\version.json" -Destination "$resDir\version.json" -Force
-
-      - name: Bundle extrender (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $resDir = "build\bin\extrender"
-          New-Item -ItemType Directory -Force -Path $resDir | Out-Null
-          Copy-Item "build\extrender\win-x64\extrender.exe" -Destination "$resDir\extrender.exe" -Force
 
       - name: Archive (macOS)
         if: runner.os == 'macOS'

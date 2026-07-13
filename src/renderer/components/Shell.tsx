@@ -1,5 +1,5 @@
 import { Button, Progress, Space, Spin, Tooltip } from "antd";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AppstoreOutlined,
   AudioOutlined,
@@ -65,6 +65,7 @@ interface ShellProps {
   errorKind?: "connection" | "auth" | "task" | "setup" | "other";
   children: React.ReactNode;
   inspector?: React.ReactNode;
+  autoCollapseSidebarKey?: string;
   credit?: CreditInfo;
   hasCustomProvider?: boolean;
   workspaces: WorkspaceSummary[];
@@ -104,6 +105,7 @@ export function Shell({
   errorKind,
   children,
   inspector,
+  autoCollapseSidebarKey,
   credit,
   hasCustomProvider,
   workspaces,
@@ -122,14 +124,26 @@ export function Shell({
 }: ShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [sidebarPreview, setSidebarPreview] = useState(false);
+  const lastAutoCollapseSidebarKey = useRef<string | undefined>(undefined);
   const t = useT();
   const sidebarToggleLabel = collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse");
   const SidebarToggleIcon = collapsed ? (sidebarPreview ? PanelLeftClose : PanelLeftOpen) : PanelLeft;
   const sidebarContentsCollapsed = collapsed && !sidebarPreview;
 
+  useEffect(() => {
+    if (!autoCollapseSidebarKey) {
+      lastAutoCollapseSidebarKey.current = undefined;
+      return;
+    }
+    if (lastAutoCollapseSidebarKey.current === autoCollapseSidebarKey) return;
+    lastAutoCollapseSidebarKey.current = autoCollapseSidebarKey;
+    setCollapsed(true);
+    setSidebarPreview(false);
+  }, [autoCollapseSidebarKey]);
+
   return (
     <div
-      className={`app-shell fluid-shell ${inspector ? "preview-active sidebar-collapsed" : ""} ${collapsed ? "sidebar-collapsed" : ""} ${sidebarPreview ? "sidebar-preview" : ""}`}
+      className={`app-shell fluid-shell ${collapsed ? "sidebar-collapsed" : ""} ${sidebarPreview ? "sidebar-preview" : ""}`}
     >
       <div
         className="sidebar-hover-zone"

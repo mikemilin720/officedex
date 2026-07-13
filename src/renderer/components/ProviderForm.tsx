@@ -1,7 +1,8 @@
-import { Input, Select, Space } from "antd";
+import { Select, Space } from "antd";
 import { providerPresets } from "../providerPresets";
 import { useT } from "../i18n";
 import type { LlmProvider, ProviderTestResult } from "../../shared/types";
+import { ImeInput, ImePasswordInput } from "./ImeInput";
 
 export function ProviderForm({
   provider,
@@ -42,30 +43,30 @@ export function ProviderForm({
       />
       {isCustom ? (
         <>
-          <Input
+          <ImeInput
             placeholder={preset.defaultBaseUrl || t("onboarding.provider.baseUrlPlaceholder")}
             value={provider.baseUrl}
-            onChange={(event) => onChange({ baseUrl: event.target.value })}
+            onValueChange={(value) => onChange({ baseUrl: value })}
             disabled={!customProviderEnabled}
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
           />
           <span className="provider-hint">{t("onboarding.provider.customEndpointHint")}</span>
-          <Input.Password
+          <ImePasswordInput
             placeholder={t("onboarding.provider.apiKeyPlaceholder")}
             value={provider.apiKey}
-            onChange={(event) => onChange({ apiKey: event.target.value })}
+            onValueChange={(value) => onChange({ apiKey: value })}
             disabled={!customProviderEnabled}
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
           />
-          <Input
+          <ImeInput
             placeholder={preset.defaultModel || t("onboarding.provider.modelPlaceholder")}
             value={provider.model}
-            onChange={(event) => onChange({ model: event.target.value })}
+            onValueChange={(value) => onChange({ model: value })}
             disabled={!customProviderEnabled}
             autoCapitalize="off"
             autoCorrect="off"

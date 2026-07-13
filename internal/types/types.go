@@ -174,6 +174,7 @@ type GenerateInput struct {
 	EnableImages     *bool                          `json:"enableImages,omitempty"`
 	ImageQuality     string                         `json:"imageQuality,omitempty"`
 	LocalPreview     bool                           `json:"localPreview,omitempty"`
+	PPTXBackend      string                         `json:"pptxBackend,omitempty"`
 }
 
 // ModifyInput is the renderer payload for the office.modify ("继续修改") flow:
@@ -488,6 +489,7 @@ type UserSettings struct {
 	SupportReportToken    *string                `json:"supportReportToken"`
 	Proxy                 *ProxySettings         `json:"proxy,omitempty"`
 	ImageWatermark        ImageWatermarkSettings `json:"imageWatermark"`
+	Waiting2048Enabled    bool                   `json:"waiting2048Enabled"`
 }
 
 // RuntimeStatus mirrors the renderer-facing status object emitted by the

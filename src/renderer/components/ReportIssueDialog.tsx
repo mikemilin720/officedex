@@ -1,9 +1,10 @@
-import { Button, Form, Input, Modal, message } from "antd";
+import { Button, Form, Modal, message } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
 import { useEffect, useState } from "react";
 import type { PeekReportContextResult, SubmitReportInput } from "../../shared/types";
 import { officecli } from "../bridge";
 import { useT } from "../i18n";
+import { ImeInput, ImeTextArea } from "./ImeInput";
 
 interface ReportIssueDialogProps {
   open: boolean;
@@ -133,7 +134,7 @@ export function ReportIssueDialog({ open, taskId, onClose }: ReportIssueDialogPr
             { max: 500 },
           ]}
         >
-          <Input.TextArea
+          <ImeTextArea
             rows={4}
             placeholder={t("report.dialog.description.placeholder")}
             showCount
@@ -148,7 +149,7 @@ export function ReportIssueDialog({ open, taskId, onClose }: ReportIssueDialogPr
             { type: "email", message: t("report.dialog.email.invalid") },
           ]}
         >
-          <Input placeholder={t("report.dialog.email.placeholder")} />
+          <ImeInput placeholder={t("report.dialog.email.placeholder")} />
         </Form.Item>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

@@ -1,4 +1,5 @@
-import type { Artifact, BridgeEvent, DesktopTask, GenerationMode, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskQuestionAnswer, TaskRuntimeSnapshot, TaskUserInput } from "../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, GenerationMode, ImageRatio, ProviderSnapshot, StageState, TaskPlan, TaskQuestion, TaskQuestionAnswer, TaskRuntimeSnapshot, TaskUserInput, VibeProjectTreeNode, VibeTreeAction, VibeTreeConfirmation, VibeTreeSnapshot, VibeTreeStage, VibeVisualAsset } from "../shared/types";
+import type { PptistSlide } from "../shared/pptistProtocol";
 
 export interface TaskState {
   tasks: Record<string, DesktopTask>;
@@ -161,6 +162,11 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
   if (event.type === "task.progress") {
     nextTask.lastProgressAt = Date.now();
     nextTask.stalledSince = undefined;
+    const step = stringPayload(event, "step");
+    const content = stringPayload(event, "content");
+    if (step === "assemble" && content) {
+      nextTask.assembleProgress = { step, status: stringPayload(event, "status") || "running", content };
+    }
   }
   if (event.type === "task.started") {
     const mode = stringPayload(event, "runtime_mode");
@@ -189,6 +195,17 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
     nextTask.question = undefined;
     nextTask.status = "plan_review";
   }
+  if (event.type === "task.vibe_tree") {
+    nextTask.vibeTree = vibeTreeFromPayload(event.payload) ?? previous.vibeTree;
+  }
+  if (event.type === "task.vibe_slide") {
+    const parsed = vibeSlideFromPayload(event.payload);
+    if (parsed) {
+      const slides = [...(previous.vibeSlides ?? [])];
+      slides[parsed.index] = parsed.slide;
+      nextTask.vibeSlides = slides;
+    }
+  }
   if (event.type === "task.completed") {
     const artifact = artifactFromPayload(taskID, event.payload);
     if (artifact) {
@@ -196,6 +213,7 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
     }
     nextTask.imageWatermark = imageWatermarkFromPayload(event.payload);
     nextTask.stalledSince = undefined;
+    nextTask.assembleProgress = undefined;
     applyCreditPayload(nextTask, event.payload);
   }
   if (event.type === "task.failed") {
@@ -212,6 +230,111 @@ export function applyTaskEvent(state: TaskState, event: BridgeEvent): TaskState 
   const artifact = nextTask.artifact;
   const artifacts = artifact && !state.artifacts.some((item) => item.filePath === artifact.filePath) ? [artifact, ...state.artifacts] : state.artifacts;
   return { tasks, taskOrder, artifacts };
+}
+
+function vibeSlideFromPayload(payload: BridgeEvent["payload"]): { index: number; slide: PptistSlide } | undefined {
+  if (!payload) return undefined;
+  const index = typeof payload.index === "number" ? payload.index : -1;
+  const slide = payload.slide;
+  if (index < 0 || !slide || typeof slide !== "object") return undefined;
+  const record = slide as Record<string, unknown>;
+  if (typeof record.id !== "string" || !Array.isArray(record.elements)) return undefined;
+  return { index, slide: slide as PptistSlide };
+}
+
+function vibeTreeFromPayload(payload: BridgeEvent["payload"]): VibeTreeSnapshot | undefined {
+  if (!payload) return undefined;
+  const stage = normalizeVibeTreeStage(payload.stage);
+  const rawTree = payload.tree;
+  if (!stage || !rawTree || typeof rawTree !== "object") return undefined;
+  const treeRecord = rawTree as Record<string, unknown>;
+  const nodes = Array.isArray(treeRecord.nodes)
+    ? treeRecord.nodes.map(vibeNodeFromUnknown).filter((node): node is VibeProjectTreeNode => node !== null)
+    : [];
+  const id = stringValue(treeRecord.id);
+  const rootId = stringValue(treeRecord.rootId) || stringValue(treeRecord.root_id);
+  const title = stringValue(treeRecord.title);
+  if (!id || !rootId || !title) return undefined;
+  const actions = Array.isArray(payload.actions)
+    ? payload.actions.map(vibeActionFromUnknown).filter((action): action is VibeTreeAction => action !== null)
+    : [];
+  return {
+    stage,
+    tree: {
+      id,
+      rootId,
+      title,
+      direction: stringValue(treeRecord.direction) || undefined,
+      nodes,
+    },
+    actions,
+    confirmation: vibeConfirmationFromUnknown(payload.confirmation),
+  };
+}
+
+function normalizeVibeTreeStage(value: unknown): VibeTreeStage | undefined {
+  return value === "story_ready" || value === "outline_ready" || value === "refined_ready" || value === "slides_ready" || value === "rendering" || value === "completed"
+    ? value
+    : undefined;
+}
+
+function vibeConfirmationFromUnknown(raw: unknown): VibeTreeConfirmation | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const nodeIds = stringArrayValue(record.nodeIds ?? record.node_ids);
+  return nodeIds && nodeIds.length > 0 ? { nodeIds } : undefined;
+}
+
+function vibeNodeFromUnknown(raw: unknown): VibeProjectTreeNode | null {
+  if (!raw || typeof raw !== "object") return null;
+  const node = raw as Record<string, unknown>;
+  const id = stringValue(node.id);
+  const kind = stringValue(node.kind);
+  const title = stringValue(node.title);
+  if (!id || !kind || !title) return null;
+  const slideNumber = numberValue(node.slideNumber ?? node.slide_number);
+  return {
+    id,
+    parentId: stringValue(node.parentId) || stringValue(node.parent_id) || undefined,
+    kind,
+    title,
+    summary: stringValue(node.summary) || undefined,
+    status: stringValue(node.status) || undefined,
+    intent: stringValue(node.intent) || undefined,
+    materials: stringArrayValue(node.materials),
+    slideRange: stringValue(node.slideRange) || stringValue(node.slide_range) || undefined,
+    slideNumber,
+    outline: stringArrayValue(node.outline),
+    visualAssets: visualAssetsFromUnknown(node.visualAssets ?? node.visual_assets),
+    trace: stringArrayValue(node.trace),
+  };
+}
+
+function vibeActionFromUnknown(raw: unknown): VibeTreeAction | null {
+  if (!raw || typeof raw !== "object") return null;
+  const action = raw as Record<string, unknown>;
+  const id = stringValue(action.id);
+  const label = stringValue(action.label);
+  if (!id || !label) return null;
+  return {
+    id,
+    label,
+    description: stringValue(action.description) || undefined,
+  };
+}
+
+function visualAssetsFromUnknown(raw: unknown): VibeVisualAsset[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const assets = raw
+    .map((item): VibeVisualAsset | null => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const kind = stringValue(record.kind);
+      const description = stringValue(record.description);
+      return kind && description ? { kind, description } : null;
+    })
+    .filter((item): item is VibeVisualAsset => item !== null);
+  return assets.length > 0 ? assets : undefined;
 }
 
 function statusFromEvent(type: string, fallback: DesktopTask["status"]): DesktopTask["status"] {
@@ -400,6 +523,16 @@ function normalizeGIFFPS(value: unknown): number | undefined {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function stringArrayValue(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return items.length > 0 ? items : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function runtimeSnapshotFromPayload(

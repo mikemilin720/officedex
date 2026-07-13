@@ -125,19 +125,13 @@
 }
 
 .nav-item.active {
-  background: var(--n-primary-soft);
-  color: var(--n-primary);
+  background: var(--n-primary);
+  color: var(--n-on-primary);
   font-weight: 600;
 }
 
 .nav-item.active::before {
-  position: absolute;
-  left: 0;
-  width: 3px;
-  height: 18px;
-  border-radius: var(--radius-full);
-  background: var(--n-primary);
-  content: "";
+  display: none;
 }
 
 .profile-link {
@@ -308,7 +302,8 @@
 
 .history-item.active {
   background: var(--n-primary-soft);
-  color: var(--n-primary);
+  color: var(--n-ink);
+  font-weight: 500;
 }
 
 .workspace-item.active {
@@ -431,7 +426,7 @@
 
 .credit-meter-icon {
   font-size: 14px;
-  color: var(--n-primary);
+  color: var(--n-secondary, #006876);
 }
 
 .credit-meter-label {
@@ -573,8 +568,8 @@
   height: 8px;
   border: 2px solid var(--n-canvas);
   border-radius: var(--radius-full);
-  background: var(--n-primary);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--n-primary) 20%, transparent);
+  background: var(--n-secondary, #006876);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--n-secondary, #006876) 20%, transparent);
 }
 
 .sidebar-hover-zone {
@@ -624,17 +619,38 @@
   background: var(--n-surface-soft);
 }
 
+/* Preview no longer splits the work area — it opens as a full-screen overlay,
+   so the stage underneath keeps its natural full-width layout (no reflow / clipping). */
 .content-grid.with-preview {
-  grid-template-columns: minmax(520px, 1.4fr) minmax(400px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .preview-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-left: 1px solid var(--n-hairline);
-  background: var(--n-canvas);
-  min-width: 0;
+  background: transparent;
+}
+
+@keyframes preview-overlay-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes preview-overlay-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
 }
 
 .preview-panel-root {
@@ -643,6 +659,12 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--n-canvas);
+  animation: preview-overlay-slide-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.preview-panel-root.is-closing {
+  animation: preview-overlay-slide-out 420ms cubic-bezier(0.64, 0, 0.78, 0) forwards;
 }
 
 .preview-panel-body {
@@ -720,18 +742,6 @@
   pointer-events: auto;
 }
 
-/* ─── Preview-active: collapse sidebar & widen preview ─── */
-
-.app-shell.preview-active,
-.fluid-shell.preview-active {
-  grid-template-columns: 0 minmax(0, 1fr);
-  transition: grid-template-columns 200ms ease;
-}
-
-.preview-active .content-grid.with-preview {
-  grid-template-columns: minmax(480px, 1fr) minmax(400px, 1.6fr);
-}
-
 /* ─── Responsive ─── */
 
 @media (max-width: 1100px) {
@@ -802,10 +812,6 @@
 
   .content-grid.with-preview {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .preview-panel {
-    display: none;
   }
 }
 

@@ -140,27 +140,142 @@
   margin: 0 2px;
 }
 
+/* While the full-screen preview overlay is up, hide the cockpit's body-portaled
+   node-confirmation popover so it can't float on top of the preview. */
+body.preview-overlay-active .living-tree-popover-overlay {
+  display: none !important;
+}
+
+/* ─── Full-screen preview chrome (header + footer) ─── */
+.preview-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 12px;
+  background: #ffffff;
+  border-bottom: 1px solid #ebebeb;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.preview-panel-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #37352f;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.preview-panel-back:hover {
+  background: #f0eeec;
+}
+
+.preview-panel-title-tag {
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: #e6e0f5;
+  color: #391c57;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .preview-panel-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
-  color: #dc2626;
+  color: #787671;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
 
 .preview-panel-close:hover {
-  background: rgba(220, 38, 38, 0.1);
-  color: #b91c1c;
+  background: #f0eeec;
+  color: #37352f;
+}
+
+.preview-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 16px;
+  background: #ffffff;
+  border-top: 1px solid #ebebeb;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.preview-panel-footer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: #787671;
+}
+
+.preview-panel-footer-status > svg {
+  color: #1aae39;
+  flex-shrink: 0;
+}
+
+.preview-footer-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #37352f;
+}
+
+.preview-panel-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.preview-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid #c8c4be;
+  border-radius: 8px;
+  background: transparent;
+  color: #1a1a1a;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.preview-action-btn:hover {
+  background: #f6f5f4;
+}
+
+.preview-action-btn.primary {
+  border-color: #5645d4;
+  background: #5645d4;
+  color: #ffffff;
+}
+
+.preview-action-btn.primary:hover {
+  background: #4534b3;
+  border-color: #4534b3;
 }
 
 .preview-toolbar-close {
@@ -329,6 +444,32 @@
   background: #ffffff;
 }
 
+/* ─── PPTX deck: embedded PPTist viewer ─── */
+.pptx-deck-layout {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  background: #f0f1f3;
+}
+
+/* ─── PPTX embedded (PPTist) viewer ─── */
+.pptx-embed-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  background: #1f1f1f;
+}
+
+.pptx-embed-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #1f1f1f;
+}
+
 /* ─── HTML Viewer ─── */
 .preview-html-container {
   flex: 1;
@@ -408,4 +549,3 @@
   background: #f0f0f0;
   font-weight: 600;
 }
-

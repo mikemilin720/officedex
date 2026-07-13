@@ -17,6 +17,7 @@ import type {
   InviteInfo,
   LlmProvider,
   LoginInput,
+  ModifyPptistDeckResult,
   ModifyInput,
   PeekReportContextResult,
   PreviewGrant,
@@ -25,6 +26,7 @@ import type {
   ProviderTestResult,
   RedeemResult,
   ReportCapabilityResult,
+  RendererLogInput,
   SubmitReportInput,
   SubmitReportResult,
   TaskHistoryEntry,
@@ -68,6 +70,7 @@ const DEFAULT_BROWSER_SETTINGS: UserSettings = {
   onboardingCompletedAt: null,
   proxy: { ...defaultProxySettings },
   imageWatermark: { showWatermark: true, preferenceSource: "system" },
+  waiting2048Enabled: false,
 };
 
 async function sendBrowserNotification(input: { title: string; body: string }): Promise<void> {
@@ -129,6 +132,15 @@ function createBrowserPreviewAPI(): DesktopAPI {
     savePastedImage: async () => {
       throw new Error("Saving pasted images requires desktop file access.");
     },
+    savePptx: async () => {
+      throw new Error("Saving PPTX requires desktop file access.");
+    },
+    exportVibeTreePptx: async () => {
+      throw new Error("Exporting PPTX via pptxgenjs requires desktop bridge access.");
+    },
+    modifyPptistDeck: async () => {
+      throw new Error("Editing PPTist decks with AI requires the desktop app.");
+    },
     previewArtifact: async (artifact) => {
       const params = new URLSearchParams({
         offlinePreview: "1",
@@ -153,7 +165,6 @@ function createBrowserPreviewAPI(): DesktopAPI {
     copyImageToClipboard: async () => {
       throw new Error("Image clipboard access requires the desktop app.");
     },
-    renderPreviewHtml: async () => null,
     setPreviewMode: async () => undefined,
     login: async () => {
       throw new Error("Login is only available inside the desktop app.");
@@ -245,6 +256,7 @@ function createBrowserPreviewAPI(): DesktopAPI {
     exportLogs: async (_input?: import("../shared/types").ExportLogsInput) => {
       throw new Error("Log export is only available inside the desktop app.");
     },
+    recordRendererLog: async (_input: RendererLogInput) => undefined,
     submitReport: async (_input: SubmitReportInput): Promise<SubmitReportResult> => {
       throw new Error("Issue reporting is only available inside the desktop app.");
     },
@@ -378,6 +390,9 @@ function adaptSettingsPatch(patch: Partial<UserSettings>): settingsNS.Patch {
   if (patch.imageWatermark !== undefined) {
     out.imageWatermark = patch.imageWatermark;
   }
+  if (patch.waiting2048Enabled !== undefined) {
+    out.waiting2048Enabled = patch.waiting2048Enabled;
+  }
   return out as unknown as settingsNS.Patch;
 }
 
@@ -397,6 +412,7 @@ function normaliseUserSettings(raw: unknown): UserSettings {
       showWatermark: merged.imageWatermark?.showWatermark === true,
       preferenceSource: merged.imageWatermark?.preferenceSource === "user" ? "user" : "system",
     },
+    waiting2048Enabled: merged.waiting2048Enabled === true,
   };
 }
 
@@ -520,6 +536,24 @@ function createWailsAPI(): DesktopAPI {
         ext,
       }));
     },
+    savePptx: async (data: Uint8Array, fileName: string, options = {}) => {
+      return WailsApp.SavePptx(toWails({
+        dataBase64: uint8ArrayToBase64(data),
+        fileName,
+        targetFilePath: options.targetFilePath,
+      }));
+    },
+    exportVibeTreePptx: async (tree, fileName) => {
+      return WailsApp.ExportVibeTreePptx(toWails({
+        treeJSON: JSON.stringify(tree),
+        fileName,
+      }));
+    },
+    modifyPptistDeck: async (input) => {
+      const fn = optionalWailsFunction<(arg: never) => Promise<ModifyPptistDeckResult>>("ModifyPptistDeck");
+      if (!fn) throw new Error("ModifyPptistDeck bridge binding is unavailable.");
+      return fn(toWails(input));
+    },
     previewArtifact: (artifact: Artifact) => WailsApp.PreviewArtifact(toWails(artifact)),
     issuePreviewToken: async (artifact: Artifact): Promise<PreviewGrant> =>
       WailsApp.IssuePreviewToken(toWails(artifact)),
@@ -538,13 +572,6 @@ function createWailsAPI(): DesktopAPI {
       return { data, mime };
     },
     copyImageToClipboard: (filePath: string) => WailsApp.CopyImageToClipboard(filePath),
-    renderPreviewHtml: async (previewToken: string) => {
-      const result = await WailsApp.RenderPreviewHtml(previewToken);
-      if (!result || typeof result.html !== "string") {
-        return null;
-      }
-      return { html: result.html };
-    },
     setPreviewMode: (active: boolean) => WailsApp.SetPreviewMode(active),
     login: async (input?: LoginInput) => WailsApp.Login(toWails(input ?? {})),
     cancelLogin: async () => WailsApp.CancelLogin(),
@@ -634,6 +661,11 @@ function createWailsAPI(): DesktopAPI {
       EventsOn("appupdate:event", (payload: unknown) => callback(payload as AppUpdateEvent)),
     exportLogs: (input?: import("../shared/types").ExportLogsInput) =>
       WailsApp.ExportLogs(toWails(input ?? {})) as Promise<{ path: string; manifest: import("../shared/types").BundleManifest }>,
+    recordRendererLog: async (input: RendererLogInput) => {
+      const fn = optionalWailsFunction<(input: never) => Promise<void>>("RecordRendererLog");
+      if (!fn) return;
+      await fn(toWails(input));
+    },
     submitReport: (input: SubmitReportInput) =>
       WailsApp.SubmitReport(toWails(input)) as Promise<SubmitReportResult>,
     getReportCapability: () =>
@@ -728,6 +760,11 @@ function createRealE2EAPI(endpoint: string): DesktopAPI {
     },
     savePastedImage: (data: Uint8Array, ext: string) =>
       rpc<string>("SavePastedImage", { dataBase64: uint8ArrayToBase64(data), ext }),
+    savePptx: (data: Uint8Array, fileName: string, options = {}) =>
+      rpc<string>("SavePptx", { dataBase64: uint8ArrayToBase64(data), fileName, targetFilePath: options.targetFilePath }),
+    exportVibeTreePptx: (tree, fileName) =>
+      rpc<string>("ExportVibeTreePptx", { treeJSON: JSON.stringify(tree), fileName }),
+    modifyPptistDeck: (input) => rpc("ModifyPptistDeck", input),
     previewArtifact: (artifact: Artifact) => rpc<void>("PreviewArtifact", artifact),
     issuePreviewToken: (artifact: Artifact) => rpc<PreviewGrant>("IssuePreviewToken", artifact),
     revokePreviewToken: (token: string) => rpc<void>("RevokePreviewToken", token),
@@ -743,11 +780,6 @@ function createRealE2EAPI(endpoint: string): DesktopAPI {
       };
     },
     copyImageToClipboard: (filePath: string) => rpc<void>("CopyImageToClipboard", filePath),
-    renderPreviewHtml: async (previewToken: string) => {
-      const result = await rpc<{ html?: unknown } | null>("RenderPreviewHtml", previewToken);
-      if (!result || typeof result.html !== "string") return null;
-      return { html: result.html };
-    },
     setPreviewMode: (active: boolean) => rpc<void>("SetPreviewMode", active),
     login: (input?: LoginInput) => rpc<{ url: string }>("Login", input ?? {}),
     cancelLogin: () => rpc<void>("CancelLogin"),
@@ -799,6 +831,7 @@ function createRealE2EAPI(endpoint: string): DesktopAPI {
     onAppUpdateEvent: (callback: (event: AppUpdateEvent) => void) => subscribe<AppUpdateEvent>("appupdate", callback),
     exportLogs: (input?: import("../shared/types").ExportLogsInput) =>
       rpc<{ path: string; manifest: import("../shared/types").BundleManifest }>("ExportLogs", input ?? {}),
+    recordRendererLog: (input: RendererLogInput) => rpc<void>("RecordRendererLog", input),
     submitReport: (input: SubmitReportInput) =>
       rpc<SubmitReportResult>("SubmitReport", input),
     getReportCapability: () =>

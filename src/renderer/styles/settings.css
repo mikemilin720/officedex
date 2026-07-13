@@ -53,10 +53,10 @@
 }
 
 .settings-secondary-menu button.active {
-  background: var(--n-primary-soft);
-  color: var(--n-primary);
+  background: var(--n-primary);
+  color: var(--n-on-primary);
   font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--n-primary);
+  box-shadow: none;
 }
 
 .settings-secondary-menu .material-symbol {
@@ -192,7 +192,7 @@
   align-items: center;
   gap: 12px;
   padding: 24px;
-  color: var(--text-muted, #6c6a7c);
+  color: var(--text-muted, #74777c);
 }
 
 .settings-error {
@@ -323,13 +323,13 @@
   width: 56px;
   height: 56px;
   place-items: center;
-  border: 1px solid rgba(63, 87, 196, 0.32);
+  border: 1px solid rgba(5, 16, 26, 0.24);
   border-radius: 14px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0)),
     var(--n-primary);
   color: var(--n-on-primary);
-  box-shadow: 0 12px 28px rgba(63, 87, 196, 0.22);
+  box-shadow: 0 12px 28px rgba(5, 16, 26, 0.16);
   font-size: 24px;
 }
 

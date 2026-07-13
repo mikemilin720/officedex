@@ -49,6 +49,9 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if !got.ImageWatermark.ShowWatermark || got.ImageWatermark.PreferenceSource != "system" {
 		t.Errorf("ImageWatermark = %+v, want enabled system default", got.ImageWatermark)
 	}
+	if got.Waiting2048Enabled {
+		t.Errorf("Waiting2048Enabled = true, want false by default")
+	}
 	if len(logger.calls) != 0 {
 		t.Errorf("expected no warnings for missing file, got %v", logger.calls)
 	}
@@ -187,6 +190,17 @@ func TestUpdatePersistsImageWatermark(t *testing.T) {
 	}
 	if got.ImageWatermark.PreferenceSource != "user" {
 		t.Fatalf("PreferenceSource = %q, want user", got.ImageWatermark.PreferenceSource)
+	}
+}
+
+func TestUpdatePersistsWaiting2048OptIn(t *testing.T) {
+	store, _, _ := newTempStore(t)
+	got, err := store.Update(Patch{Waiting2048Enabled: ptr(true)})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !got.Waiting2048Enabled {
+		t.Fatal("Waiting2048Enabled = false, want true")
 	}
 }
 

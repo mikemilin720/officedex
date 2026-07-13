@@ -1,4 +1,4 @@
-import { Button, Input, Modal, Progress, Select, Space, Spin, Switch, Tag, message } from "antd";
+import { Button, Modal, Progress, Select, Space, Spin, Switch, Tag, message } from "antd";
 import {
   CommentOutlined,
   CopyOutlined,
@@ -26,6 +26,7 @@ import { defaultProxySettings, isValidProxyUrl } from "../defaults";
 import { readNotificationsEnabled, setNotificationsEnabled as persistNotificationsEnabled } from "../notifications";
 import type { AuthEvent, CreditStatus, DocumentType, GenerateDefaults, ImagePromptTemplate, InviteInfo, LlmProvider, ProviderTestResult, ProxySettings, WhoAmIResult } from "../../shared/types";
 import { exportLocalImageTemplatesJSON, importLocalImageTemplatesJSON, loadLocalImageTemplates, saveLocalImageTemplates } from "../localImageTemplates";
+import { ImeInput, ImeTextArea } from "../components/ImeInput";
 
 export function SettingsScreen({
   onCreditRefresh,
@@ -183,6 +184,7 @@ export function SettingsScreen({
           llmProvider: null,
           onboardingCompletedAt: null,
           imageWatermark: { showWatermark: true, preferenceSource: "system" },
+          waiting2048Enabled: false,
         }).catch(() => undefined),
     });
   }, [update, t]);
@@ -328,6 +330,13 @@ export function SettingsScreen({
                   onChange={(checked) => updateDefaults({ enableImages: checked })}
                 />
               </SettingRow>
+              <SettingRow title={t("settings.row.waiting2048.title")} desc={t("settings.row.waiting2048.desc")}>
+                <Switch
+                  aria-label={t("settings.row.waiting2048.title")}
+                  checked={settings.waiting2048Enabled}
+                  onChange={(checked) => update({ waiting2048Enabled: checked }).catch(() => undefined)}
+                />
+              </SettingRow>
               <SettingRow title={t("settings.row.imageWatermark.title")} desc={t("settings.row.imageWatermark.desc")}>
                 <div className="settings-stack">
                   <Switch
@@ -417,7 +426,7 @@ export function SettingsScreen({
             <div className="setting-group" id={settingsSectionId("workspace")}>
               <h2>{t("settings.group.workspace")}</h2>
               <SettingRow title={t("settings.row.outputDir.title")} desc={t("settings.row.outputDir.desc")}>
-                <Input
+                <ImeInput
                   disabled
                   value={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")}
                 />
@@ -506,9 +515,9 @@ export function SettingsScreen({
               onCancel={() => setPasteModalOpen(false)}
               destroyOnHidden
             >
-              <Input.TextArea
+              <ImeTextArea
                 value={pasteTemplateJSON}
-                onChange={(event) => setPasteTemplateJSON(event.target.value)}
+                onValueChange={setPasteTemplateJSON}
                 placeholder={t("settings.localImageTemplates.pastePlaceholder")}
                 autoSize={{ minRows: 8, maxRows: 16 }}
               />
@@ -1042,10 +1051,10 @@ function RedeemCodeCard({ onCreditRefresh }: { onCreditRefresh?: () => void }) {
   return (
     <Space direction="vertical" size={8} style={{ width: "100%" }}>
       <Space.Compact style={{ width: "100%", display: "flex" }}>
-        <Input
+        <ImeInput
           style={{ flex: 1 }}
           value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onValueChange={(value) => setCode(value.toUpperCase())}
           onPressEnter={handleSubmit}
           placeholder={t("settings.redeem.placeholder")}
           maxLength={64}
@@ -1157,11 +1166,11 @@ function ProxyCard({
         <span>{t("settings.row.proxy.enableLabel")}</span>
       </Space>
       {enabled ? (
-        <Input
+        <ImeInput
           placeholder={t("settings.row.proxy.urlPlaceholder")}
           value={url}
-          onChange={(event) => {
-            setUrl(event.target.value);
+          onValueChange={(value) => {
+            setUrl(value);
             if (validationError) setValidationError(undefined);
           }}
           aria-label={t("settings.row.proxy.urlLabel")}

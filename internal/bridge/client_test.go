@@ -58,6 +58,12 @@ func (b *bufferedPipe) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (b *bufferedPipe) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.data)
+}
+
 // readUntilFrame blocks until a full LSP frame is available and consumes it.
 func (b *bufferedPipe) readUntilFrame() []byte {
 	b.mu.Lock()
@@ -434,9 +440,6 @@ func TestInvokeGenerateOpensSessionFirst(t *testing.T) {
 	if args["local_preview"] != true {
 		t.Errorf("local_preview = %v, want true", args["local_preview"])
 	}
-	if args["emit_preview"] != true {
-		t.Errorf("emit_preview = %v, want true", args["emit_preview"])
-	}
 	fake.writeResponse(t, second.idString(), map[string]any{
 		"task_id":    "task-x",
 		"session_id": "sess-1",
@@ -514,6 +517,9 @@ func TestInvokeGenerateNormalizesLegacyFastGenerationModeToBestInteractiveReques
 	if args["mode"] != "best" {
 		t.Fatalf("mode = %v, want best", args["mode"])
 	}
+	if _, ok := args["generation_mode"]; ok {
+		t.Fatalf("generation_mode should not be sent for legacy fast generation: %#v", args["generation_mode"])
+	}
 	if params["interactive"] != true {
 		t.Fatalf("interactive = %v, want true for legacy fast generation", params["interactive"])
 	}
@@ -577,6 +583,9 @@ func TestInvokeGenerateMapsPlanGenerationModeToBestInteractiveRequest(t *testing
 	args, _ := params["args"].(map[string]any)
 	if args["mode"] != "best" {
 		t.Fatalf("mode = %v, want best", args["mode"])
+	}
+	if args["generation_mode"] != "plan" {
+		t.Fatalf("generation_mode = %v, want plan", args["generation_mode"])
 	}
 	if params["interactive"] != true {
 		t.Fatalf("interactive = %v, want true for plan generation", params["interactive"])
@@ -996,6 +1005,240 @@ func TestInvokeModifyOmitsEmptyLangAndStyle(t *testing.T) {
 	}, nil)
 	if err := <-done; err != nil {
 		t.Errorf("InvokeModify: %v", err)
+	}
+}
+
+func TestPlanPptistEditCallsBridgePlanner(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.PlanPptistEdit(context.Background(), PlanPptistEditInput{
+			Tool:   "office.pptist.plan_edit",
+			Prompt: "把第一页的标题改为石墨文档介绍123，但字体和颜色不变",
+			Snapshot: map[string]any{
+				"slides": []map[string]any{{
+					"id":       "slide-1",
+					"elements": []map[string]any{{"id": "title", "type": "text", "content": "<p><span style=\"color:#f00\">Old</span></p>"}},
+				}},
+				"slideIndex": float64(0),
+			},
+			SelectedSlideID:    "slide-1",
+			SelectedElementIDs: []string{"title"},
+			PptxDataBase64:     "UEsDBA==",
+		})
+		done <- err
+	}()
+
+	req := fake.readRequest(t)
+	if req.Method != "pptist/plan-edit" {
+		t.Fatalf("method = %q, want pptist/plan-edit", req.Method)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if params["tool"] != "office.pptist.plan_edit" {
+		t.Fatalf("tool = %#v, want office.pptist.plan_edit", params["tool"])
+	}
+	if params["prompt"] != "把第一页的标题改为石墨文档介绍123，但字体和颜色不变" {
+		t.Fatalf("prompt = %#v", params["prompt"])
+	}
+	if params["selected_slide_id"] != "slide-1" {
+		t.Fatalf("selected_slide_id = %#v", params["selected_slide_id"])
+	}
+	if params["pptx_data_base64"] != "UEsDBA==" {
+		t.Fatalf("pptx_data_base64 = %#v, want current PPTX bytes", params["pptx_data_base64"])
+	}
+	fake.writeResponse(t, req.idString(), map[string]any{
+		"summary":               "Updated slide 1 title.",
+		"confidence":            "high",
+		"requires_confirmation": false,
+		"ops": []map[string]any{{
+			"type":          "element:update-text",
+			"slideId":       "slide-1",
+			"elementId":     "title",
+			"text":          "石墨文档介绍123",
+			"preserveStyle": true,
+		}},
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("PlanPptistEdit: %v", err)
+	}
+}
+
+func TestPlanPptistEditUsesDedicatedShortTimeout(t *testing.T) {
+	fake := newFakeTransport()
+	client := New(Options{
+		RequestTimeout:        time.Second,
+		TaskInvokeTimeout:     time.Hour,
+		PptistPlanEditTimeout: 10 * time.Millisecond,
+		CreateTransport: func(opts Options) (Transport, error) {
+			return fake, nil
+		},
+		DisableAutoReconnect: true,
+	})
+	if err := client.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer client.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.PlanPptistEdit(context.Background(), PlanPptistEditInput{
+			Tool:   "office.pptist.plan_edit",
+			Prompt: "请让当前页面表达更现代",
+			Snapshot: map[string]any{
+				"slides": []map[string]any{{
+					"id":       "slide-1",
+					"elements": []map[string]any{{"id": "title", "type": "text", "content": "<p>Old</p>"}},
+				}},
+			},
+		})
+		done <- err
+	}()
+
+	req := fake.readRequest(t)
+	if req.Method != "pptist/plan-edit" {
+		t.Fatalf("method = %q, want pptist/plan-edit", req.Method)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "pptist/plan-edit") || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("PlanPptistEdit error = %v, want pptist/plan-edit timeout", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("PlanPptistEdit did not use the dedicated short timeout")
+	}
+}
+
+func TestPlanPptistEditCompactsHugeSnapshotBeforeRequest(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	hugeDataURL := "data:image/png;base64," + strings.Repeat("a", 12*1024*1024)
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.PlanPptistEdit(context.Background(), PlanPptistEditInput{
+			Tool:   "office.pptist.plan_edit",
+			Prompt: "把第一页标题改得更现代",
+			Snapshot: map[string]any{
+				"slides": []map[string]any{{
+					"id": "slide-1",
+					"elements": []map[string]any{
+						{"id": "title", "type": "text", "content": "<p>Original title</p>"},
+						{"id": "hero-image", "type": "image", "src": hugeDataURL},
+					},
+					"background": map[string]any{"image": hugeDataURL},
+				}},
+			},
+		})
+		done <- err
+	}()
+
+	req := fake.readRequest(t)
+	if req.Method != "pptist/plan-edit" {
+		t.Fatalf("method = %q, want pptist/plan-edit", req.Method)
+	}
+	if len(req.Params) > 64*1024 {
+		t.Fatalf("planner request params too large: %d bytes", len(req.Params))
+	}
+	if strings.Contains(string(req.Params), hugeDataURL) || strings.Contains(string(req.Params), strings.Repeat("a", 1024)) {
+		t.Fatalf("planner request still contains raw image data")
+	}
+	if !strings.Contains(string(req.Params), "Original title") || !strings.Contains(string(req.Params), "hero-image") {
+		t.Fatalf("planner request lost useful deck context: %s", req.Params)
+	}
+	if !strings.Contains(string(req.Params), "image omitted") {
+		t.Fatalf("planner request does not include image placeholder: %s", req.Params)
+	}
+	fake.writeResponse(t, req.idString(), map[string]any{
+		"summary": "Updated slide.",
+		"ops":     []map[string]any{{"type": "element:update-text", "slideId": "slide-1", "elementId": "title", "text": "Updated"}},
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("PlanPptistEdit: %v", err)
+	}
+}
+
+func TestPlanPptistEditCompactsStructSnapshotBeforeRequest(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	type slide struct {
+		ID         string           `json:"id"`
+		Elements   []map[string]any `json:"elements"`
+		Background map[string]any   `json:"background,omitempty"`
+	}
+	type deckSnapshot struct {
+		Slides     []slide `json:"slides"`
+		SlideIndex int     `json:"slideIndex"`
+	}
+
+	hugeDataURL := "data:image/png;base64," + strings.Repeat("a", 12*1024*1024)
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.PlanPptistEdit(context.Background(), PlanPptistEditInput{
+			Tool:   "office.pptist.plan_edit",
+			Prompt: "把第一页标题改得更现代",
+			Snapshot: deckSnapshot{
+				Slides: []slide{{
+					ID: "slide-1",
+					Elements: []map[string]any{
+						{"id": "title", "type": "text", "content": "<p>Original title</p>"},
+						{"id": "hero-image", "type": "image", "src": hugeDataURL},
+					},
+					Background: map[string]any{"image": hugeDataURL},
+				}},
+				SlideIndex: 0,
+			},
+		})
+		done <- err
+	}()
+
+	req := fake.readRequest(t)
+	if req.Method != "pptist/plan-edit" {
+		t.Fatalf("method = %q, want pptist/plan-edit", req.Method)
+	}
+	if len(req.Params) > 64*1024 {
+		t.Fatalf("planner request params too large: %d bytes", len(req.Params))
+	}
+	if strings.Contains(string(req.Params), hugeDataURL) || strings.Contains(string(req.Params), strings.Repeat("a", 1024)) {
+		t.Fatalf("planner request still contains raw image data")
+	}
+	if !strings.Contains(string(req.Params), "Original title") || !strings.Contains(string(req.Params), "hero-image") {
+		t.Fatalf("planner request lost useful deck context: %s", req.Params)
+	}
+	if !strings.Contains(string(req.Params), "image omitted") {
+		t.Fatalf("planner request does not include image placeholder: %s", req.Params)
+	}
+	fake.writeResponse(t, req.idString(), map[string]any{
+		"summary": "Updated slide.",
+		"ops":     []map[string]any{{"type": "element:update-text", "slideId": "slide-1", "elementId": "title", "text": "Updated"}},
+	}, nil)
+	if err := <-done; err != nil {
+		t.Errorf("PlanPptistEdit: %v", err)
+	}
+}
+
+func TestPlanPptistEditRejectsOversizedCompactedRequest(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	_, err := client.PlanPptistEdit(context.Background(), PlanPptistEditInput{
+		Tool:   "office.pptist.plan_edit",
+		Prompt: strings.Repeat("x", 3*1024*1024),
+		Snapshot: map[string]any{
+			"slides": []map[string]any{{"id": "slide-1", "elements": []map[string]any{{"id": "title", "type": "text", "content": "<p>Original title</p>"}}}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "request too large after compaction") {
+		t.Fatalf("PlanPptistEdit error = %v, want compacted request size error", err)
+	}
+	if got := fake.stdin.Len(); got != 0 {
+		t.Fatalf("request was sent despite local size guard: stdin bytes = %d", got)
 	}
 }
 

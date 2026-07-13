@@ -1,0 +1,1338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OfficeDex AI 编辑区交互方案</title>
+  <style>
+    :root {
+      --app-bg: #f4f1ea;
+      --surface: #fffefa;
+      --surface-soft: #f8f7f2;
+      --canvas: #fbfaf6;
+      --line: #dfd9ce;
+      --line-strong: #c4b9aa;
+      --ink: #1e252b;
+      --text: #33383e;
+      --muted: #747a80;
+      --steel: #8a9095;
+      --primary: #0f766e;
+      --primary-deep: #075c56;
+      --primary-soft: #e4f4ee;
+      --blue: #2f6fed;
+      --rose: #c24147;
+      --amber: #a26112;
+      --green: #1f8a4c;
+      --purple: #5a50b2;
+      --shadow: 0 18px 46px rgba(31, 37, 43, 0.12);
+      --small-shadow: 0 8px 22px rgba(31, 37, 43, 0.08);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      color: var(--text);
+      background: #101214;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    }
+
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+
+    .page {
+      min-height: 100vh;
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .option-bar {
+      width: min(1840px, calc(100vw - 36px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .option-tabs {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid #32363a;
+      border-radius: var(--radius);
+      background: #181b1e;
+    }
+
+    .option-tab {
+      min-height: 58px;
+      border: 1px solid #343a40;
+      border-radius: 7px;
+      background: #202327;
+      color: #d8d8d5;
+      text-align: left;
+      padding: 9px 11px;
+      display: grid;
+      gap: 2px;
+    }
+
+    .option-tab strong {
+      color: #fff;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .option-tab span {
+      min-width: 0;
+      color: #a7adb2;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .option-tab.is-active {
+      border-color: rgba(56, 189, 164, 0.72);
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.34), rgba(32, 35, 39, 0.98));
+      box-shadow: inset 0 0 0 1px rgba(56, 189, 164, 0.22);
+    }
+
+    .utility-actions {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .utility-actions button,
+    .card button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 12px;
+      white-space: nowrap;
+    }
+
+    .utility-actions button {
+      min-height: 100%;
+      border-color: #343a40;
+      background: #202327;
+      color: #d8d8d5;
+    }
+
+    .window {
+      width: min(1840px, calc(100vw - 36px));
+      height: min(1030px, calc(100vh - 112px));
+      min-height: 760px;
+      margin: 0 auto;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 44px 70px minmax(0, 1fr);
+      border-radius: 18px;
+      background: var(--app-bg);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+    }
+
+    .traffic {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 18px;
+      border-bottom: 1px solid #e6e2da;
+      background: #fbfbfa;
+      color: #52565b;
+      font-weight: 760;
+    }
+
+    .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 99px;
+      background: #d4d4d4;
+    }
+
+    .dot.red { background: #ff5c5c; }
+    .dot.yellow { background: #ffbd2e; }
+    .dot.gray { margin-right: 10px; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 30px;
+      border-bottom: 1px solid #e4dfd6;
+      background: var(--surface);
+    }
+
+    .crumb {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .crumb strong {
+      min-width: 0;
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .official {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 7px;
+      background: #dff2df;
+      color: #1a9b47;
+      font-weight: 760;
+    }
+
+    .workspace {
+      min-height: 0;
+      padding: 28px;
+    }
+
+    .cockpit {
+      height: 100%;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 18px;
+      padding: 22px;
+      overflow: hidden;
+      border: 1px solid #cfdde0;
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 8% 8%, rgba(210, 238, 235, 0.78), transparent 24%),
+        radial-gradient(circle at 82% 11%, rgba(255, 229, 210, 0.58), transparent 27%),
+        rgba(255, 255, 255, 0.78);
+    }
+
+    .project-title {
+      display: grid;
+      gap: 4px;
+    }
+
+    .eyebrow {
+      color: #17232c;
+      font-size: 14px;
+      font-weight: 830;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .project-title h1 {
+      margin: 0;
+      color: #22303a;
+      font-size: 24px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .steps {
+      min-width: 0;
+      min-height: 56px;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      align-items: center;
+      padding: 0 26px;
+      border: 1px solid #ded8cf;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: var(--small-shadow);
+    }
+
+    .step {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+      font-weight: 760;
+    }
+
+    .step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      left: 42px;
+      right: 8px;
+      top: 50%;
+      height: 3px;
+      background: #b8d1d3;
+      transform: translateY(-50%);
+      z-index: 0;
+    }
+
+    .step span {
+      z-index: 1;
+      width: 31px;
+      height: 31px;
+      display: grid;
+      place-items: center;
+      border-radius: 99px;
+      background: #061421;
+      color: #fff;
+      box-shadow: 0 0 0 7px rgba(10, 85, 89, 0.12);
+    }
+
+    .step strong {
+      z-index: 1;
+      min-width: 0;
+      padding-left: 4px;
+      background: rgba(255, 255, 255, 0.86);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .editor {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 225px minmax(0, 1fr) minmax(330px, 25%);
+      gap: 14px;
+    }
+
+    .thumbs,
+    .slide-stage,
+    .side-column {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.76);
+    }
+
+    .thumbs {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) 58px;
+      overflow: hidden;
+    }
+
+    .thumb-scroll {
+      min-height: 0;
+      overflow: hidden;
+      padding: 10px 10px 0;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .thumb-row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      color: #9a9fa4;
+      font-weight: 760;
+    }
+
+    .thumb {
+      height: 84px;
+      border: 2px solid #f1d6d1;
+      border-radius: 5px;
+      background: #fbf9f4;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+      box-shadow: 0 5px 14px rgba(31, 37, 43, 0.08);
+    }
+
+    .thumb.active { border-color: #e7472e; }
+
+    .thumb .bar {
+      height: 9px;
+      width: 65%;
+      border-radius: 3px;
+      background: #1f2937;
+    }
+
+    .thumb .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+    }
+
+    .thumb .grid i {
+      display: block;
+      height: 42px;
+      border-radius: 4px;
+      background: #eaf0f4;
+    }
+
+    .thumb .grid i:nth-child(2) { background: #d8f0e7; }
+    .thumb-footer {
+      border-top: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .slide-stage {
+      position: relative;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: #fbfbfb;
+    }
+
+    .slide {
+      width: min(78%, 920px);
+      aspect-ratio: 16 / 9;
+      padding: 44px 56px;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 18px;
+      background: #fff;
+      box-shadow: 0 18px 38px rgba(31, 37, 43, 0.14);
+    }
+
+    .slide h2 {
+      margin: 0;
+      color: #1d2b3a;
+      font-size: clamp(22px, 2vw, 38px);
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .slide > p {
+      margin: 0;
+      color: #78808b;
+      font-size: 15px;
+    }
+
+    .slide-grid {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 24px;
+    }
+
+    .slide-block {
+      min-width: 0;
+      border-radius: 7px;
+      padding: 22px;
+      background: #eef3f7;
+    }
+
+    .slide-block.alt { background: #dff2ec; }
+    .slide-block strong {
+      display: block;
+      color: #26333d;
+      font-size: 19px;
+      margin-bottom: 10px;
+    }
+
+    .slide-block ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #34414b;
+      font-size: 14px;
+    }
+
+    .slide-page {
+      justify-self: end;
+      color: #99a1aa;
+      font-weight: 760;
+    }
+
+    .side-column {
+      overflow: hidden;
+      background: transparent;
+      border: none;
+    }
+
+    .variant {
+      height: 100%;
+      min-height: 0;
+      display: none;
+      gap: 12px;
+    }
+
+    .variant.is-active { display: grid; }
+
+    .variant-a,
+    .variant-b,
+    .variant-c {
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .card {
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: var(--small-shadow);
+    }
+
+    .action-card,
+    .chat-card {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .action-card {
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .status-text {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 790;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ok-icon {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      color: #52c41a;
+    }
+
+    .count-pill,
+    .badge {
+      flex: 0 0 auto;
+      min-width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      background: #f4f2ec;
+      color: var(--muted);
+      font-weight: 790;
+    }
+
+    .badge {
+      width: auto;
+      padding: 0 8px;
+      color: var(--primary-deep);
+      background: var(--primary-soft);
+      font-size: 12px;
+    }
+
+    .action-title {
+      display: grid;
+      gap: 2px;
+    }
+
+    .action-title strong {
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1.22;
+    }
+
+    .action-title span,
+    .card-note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .button-grid.single { grid-template-columns: 1fr; }
+
+    .card button.primary {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+      font-weight: 760;
+    }
+
+    .card button.icon-only {
+      width: 36px;
+      padding: 0;
+    }
+
+    .card button:hover {
+      border-color: color-mix(in srgb, var(--primary) 48%, var(--line));
+      box-shadow: 0 5px 12px rgba(15, 118, 110, 0.12);
+    }
+
+    .meta-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .meta {
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid #e8e1d6;
+      border-radius: 7px;
+      background: #fbfaf6;
+    }
+
+    .meta span {
+      display: block;
+      color: var(--steel);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .meta strong {
+      display: block;
+      min-width: 0;
+      margin-top: 2px;
+      color: var(--text);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-card {
+      overflow: hidden;
+    }
+
+    .chat-head {
+      flex: 0 0 auto;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chat-head strong {
+      color: var(--ink);
+      font-size: 15px;
+    }
+
+    .chat-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chat-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(251, 250, 246, 0.64);
+    }
+
+    .message {
+      max-width: 92%;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      border-color: rgba(15, 118, 110, 0.24);
+      background: #eaf5ef;
+    }
+
+    .message span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--steel);
+      font-size: 10px;
+      font-weight: 840;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .message p {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .message.prompt {
+      max-width: 100%;
+      border-style: dashed;
+      background: #fffdf8;
+    }
+
+    .chat-input {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.86);
+    }
+
+    .chat-input textarea {
+      width: 100%;
+      height: 46px;
+      resize: none;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 11px 12px;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+    }
+
+    .chat-input textarea:focus {
+      border-color: color-mix(in srgb, var(--primary) 62%, var(--line));
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+    }
+
+    .chat-input button {
+      width: 46px;
+      min-height: 46px;
+      padding: 0;
+    }
+
+    .variant-b .action-card {
+      padding: 12px;
+    }
+
+    .compact-actions {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .icon-strip {
+      display: flex;
+      gap: 7px;
+      justify-content: flex-end;
+    }
+
+    .intent-panel {
+      display: grid;
+      gap: 8px;
+      padding: 12px 14px 0;
+    }
+
+    .intent-panel strong {
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .chip {
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #d9d4c9;
+      border-radius: 999px;
+      padding: 0 10px;
+      color: var(--primary-deep);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .timeline-message {
+      position: relative;
+      margin-left: 15px;
+    }
+
+    .timeline-message::before {
+      content: "";
+      position: absolute;
+      left: -16px;
+      top: 15px;
+      width: 8px;
+      height: 8px;
+      border-radius: 99px;
+      background: var(--primary);
+      box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.13);
+    }
+
+    .timeline-message:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      left: -12px;
+      top: 27px;
+      bottom: -18px;
+      width: 1px;
+      background: #d8d4c9;
+    }
+
+    .variant-c .action-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .review-summary {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .review-summary strong {
+      min-width: 0;
+      color: var(--ink);
+      font-size: 16px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .review-summary span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .action-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      padding: 10px 12px 0;
+      background: rgba(255, 255, 255, 0.86);
+    }
+
+    .tabs button {
+      min-height: 30px;
+      border-radius: 7px;
+      padding: 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .tabs button.active {
+      color: #fff;
+      border-color: var(--ink);
+      background: var(--ink);
+    }
+
+    .warning {
+      max-width: 100%;
+      display: grid;
+      gap: 4px;
+      border-color: rgba(194, 65, 71, 0.28);
+      background: #fff6f4;
+    }
+
+    .warning strong {
+      color: var(--rose);
+      font-size: 12px;
+    }
+
+    .collapsed-note {
+      display: none;
+      padding: 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .chat-card.is-collapsed .chat-body,
+    .chat-card.is-collapsed .chat-input,
+    .chat-card.is-collapsed .intent-panel {
+      display: none;
+    }
+
+    .chat-card.is-collapsed .collapsed-note {
+      display: block;
+    }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 22px;
+      z-index: 20;
+      max-width: min(360px, calc(100vw - 48px));
+      padding: 12px 14px;
+      border: 1px solid rgba(15, 118, 110, 0.28);
+      border-radius: var(--radius);
+      background: #fffffc;
+      color: var(--text);
+      box-shadow: 0 18px 46px rgba(0, 0, 0, 0.2);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+    }
+
+    @media (max-width: 1180px) {
+      .window {
+        height: auto;
+        min-height: 1000px;
+      }
+
+      .editor {
+        grid-template-columns: 150px minmax(0, 1fr);
+        grid-template-rows: 560px 560px;
+      }
+
+      .side-column {
+        grid-column: 1 / -1;
+      }
+
+      .slide {
+        width: min(88%, 780px);
+        padding: 34px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .page { padding: 10px; }
+      .option-bar {
+        width: calc(100vw - 20px);
+        grid-template-columns: 1fr;
+      }
+
+      .option-tabs {
+        grid-template-columns: 1fr;
+      }
+
+      .window {
+        width: calc(100vw - 20px);
+        min-height: 1180px;
+        grid-template-rows: 44px 64px minmax(0, 1fr);
+      }
+
+      .workspace { padding: 12px; }
+      .cockpit { padding: 14px; }
+      .steps { grid-template-columns: 1fr; gap: 6px; border-radius: var(--radius); padding: 12px; }
+      .step:not(:last-child)::after { display: none; }
+      .editor { grid-template-columns: 1fr; grid-template-rows: 220px 420px 560px; }
+      .thumbs { grid-row: 1; }
+      .slide-stage { grid-row: 2; }
+      .side-column { grid-row: 3; }
+      .slide { width: 92%; padding: 22px; }
+      .slide-grid { grid-template-columns: 1fr; }
+      .button-grid,
+      .action-row,
+      .meta-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="option-bar" aria-label="方案切换">
+      <div class="option-tabs">
+        <button class="option-tab is-active" type="button" data-option="a">
+          <strong>方案 A：上下分离</strong>
+          <span>状态与功能按钮一张卡，AI 对话一张卡，最接近现状</span>
+        </button>
+        <button class="option-tab" type="button" data-option="b">
+          <strong>方案 B：紧凑工具卡</strong>
+          <span>功能按钮压成工具条，把高度留给 AI 对话</span>
+        </button>
+        <button class="option-tab" type="button" data-option="c">
+          <strong>方案 C：审阅控制台</strong>
+          <span>独立操作卡加带标签页的对话卡，适合后续扩展</span>
+        </button>
+      </div>
+      <div class="utility-actions">
+        <button type="button" data-action="重置当前方案">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>
+          重置
+        </button>
+      </div>
+    </section>
+
+    <section class="window" aria-label="OfficeDex mock window">
+      <div class="traffic">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot gray"></span>
+        <span>OfficeDex</span>
+      </div>
+      <div class="topbar">
+        <div class="crumb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
+          <span>OfficeDex</span>
+          <span>/</span>
+          <strong>OfficeDex Workspace</strong>
+        </div>
+        <div class="official">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 17.6A4.6 4.6 0 0 0 15.7 11 6 6 0 0 0 4.4 13.5 3.5 3.5 0 0 0 5.5 20H18a4 4 0 0 0 2-7.5"/></svg>
+          Official
+        </div>
+      </div>
+      <div class="workspace">
+        <div class="cockpit">
+          <div class="project-title">
+            <div class="eyebrow">Living Tree Cockpit</div>
+            <h1>介绍石墨文档，十页</h1>
+          </div>
+
+          <div class="steps" aria-label="生成步骤">
+            <div class="step"><span>✓</span><strong>Idea</strong></div>
+            <div class="step"><span>✓</span><strong>Story Beat</strong></div>
+            <div class="step"><span>✓</span><strong>Chapter</strong></div>
+            <div class="step"><span>✓</span><strong>Outline</strong></div>
+            <div class="step"><span>5</span><strong>PPTX</strong></div>
+          </div>
+
+          <div class="editor">
+            <aside class="thumbs" aria-label="幻灯片缩略图">
+              <div class="thumb-scroll">
+                <div class="thumb-row"><span>01</span><div class="thumb"><div class="bar"></div><div class="grid"><i></i><i></i></div></div></div>
+                <div class="thumb-row"><span style="color:#e7472e">02</span><div class="thumb active"><div class="bar"></div><div class="grid"><i></i><i></i></div></div></div>
+                <div class="thumb-row"><span>03</span><div class="thumb"><div class="bar"></div><div class="grid"><i></i><i></i></div></div></div>
+                <div class="thumb-row"><span>04</span><div class="thumb"><div class="bar"></div><div class="grid"><i></i><i></i></div></div></div>
+                <div class="thumb-row"><span>05</span><div class="thumb"><div class="bar"></div><div class="grid"><i></i><i></i></div></div></div>
+                <div class="thumb-row"><span>06</span><div class="thumb"><div class="bar"></div><div class="grid"><i></i><i></i></div></div></div>
+              </div>
+              <div class="thumb-footer">幻灯片 2 / 10</div>
+            </aside>
+
+            <section class="slide-stage" aria-label="当前幻灯片">
+              <div class="slide">
+                <h2>什么是石墨文档</h2>
+                <p>本页从产品定义、使用对象与协作价值三个层面展开，为后续功能与场景说明建立清晰前提。</p>
+                <div class="slide-grid">
+                  <div class="slide-block">
+                    <strong>产品定义与协作价值</strong>
+                    <ul>
+                      <li>支持在线创建、编辑、评论与共享。</li>
+                      <li>多人在同一空间中完成写作、讨论和修订。</li>
+                      <li>适合企业团队、项目小组与教学协作。</li>
+                    </ul>
+                  </div>
+                  <div class="slide-block alt">
+                    <strong>三个层面</strong>
+                    <ul>
+                      <li>云端文档</li>
+                      <li>协作空间</li>
+                      <li>多人共创</li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="slide-page">02/10</div>
+              </div>
+            </section>
+
+            <aside class="side-column" aria-live="polite">
+              <section class="variant variant-a is-active" data-variant="a">
+                <div class="card action-card">
+                  <div class="status-row">
+                    <div class="status-text">
+                      <svg class="ok-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></svg>
+                      10/10 pages generated
+                    </div>
+                    <span class="badge">Ready</span>
+                  </div>
+                  <div class="action-title">
+                    <strong>Edit with AI</strong>
+                    <span>Ready to edit. 功能按钮从对话流里拆出，保持稳定入口。</span>
+                  </div>
+                  <div class="button-grid">
+                    <button type="button" data-action="打开 Canvas tree">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>
+                      Canvas tree
+                    </button>
+                    <button type="button" data-action="在文件夹中显示">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 4"/></svg>
+                      Show in folder
+                    </button>
+                  </div>
+                  <div class="meta-row">
+                    <div class="meta"><span>File</span><strong>介绍石墨文档十页.pptx</strong></div>
+                    <div class="meta"><span>State</span><strong>可继续修改</strong></div>
+                    <div class="meta"><span>Pages</span><strong>10 pages</strong></div>
+                  </div>
+                </div>
+
+                <div class="card chat-card">
+                  <div class="chat-head">
+                    <div>
+                      <strong>AI conversation</strong><br />
+                      <span>上下文与输入集中在同一张卡</span>
+                    </div>
+                    <span class="count-pill">6</span>
+                  </div>
+                  <div class="chat-body">
+                    <div class="message prompt"><p>generate Chapters, or type a message to adjust direction.</p></div>
+                    <div class="message"><span>AI</span><p>Chapters generated. Continue to generate per-page Outlines, or type a message to adjust direction.</p></div>
+                    <div class="message"><span>AI</span><p>Per-page titles, outlines, and visual markers refined.</p></div>
+                    <div class="message"><span>AI</span><p>PPTX generated: 介绍石墨文档十页.pptx</p></div>
+                    <div class="message warning"><strong>Edit failed</strong><p>The current PPTist deck was kept.</p></div>
+                  </div>
+                  <div class="chat-input">
+                    <textarea placeholder="Ask to modify this PPT..."></textarea>
+                    <button class="primary send-button" type="button" aria-label="发送">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="variant variant-b" data-variant="b">
+                <div class="card action-card">
+                  <div class="compact-actions">
+                    <div class="status-row">
+                      <div class="status-text">
+                        <svg class="ok-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></svg>
+                        10/10 pages generated
+                      </div>
+                    </div>
+                    <div class="icon-strip">
+                      <button class="icon-only" type="button" title="Canvas tree" data-action="打开 Canvas tree">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>
+                      </button>
+                      <button class="icon-only" type="button" title="Show in folder" data-action="在文件夹中显示">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 4"/></svg>
+                      </button>
+                      <button class="icon-only" type="button" title="Open preview" data-action="打开预览">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="m10 14 11-11"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="action-title">
+                    <strong>Edit with AI</strong>
+                    <span>功能入口收进紧凑工具条，减少右栏上半部分高度。</span>
+                  </div>
+                </div>
+
+                <div class="card chat-card">
+                  <div class="chat-head">
+                    <div>
+                      <strong>AI conversation</strong><br />
+                      <span>把主要注意力给修改指令</span>
+                    </div>
+                    <span class="count-pill">6</span>
+                  </div>
+                  <div class="intent-panel">
+                    <strong>你想怎么改这份 PPT？</strong>
+                    <div class="chips">
+                      <button class="chip" type="button" data-fill="把第 2 页改得更适合销售团队演示">更销售化</button>
+                      <button class="chip" type="button" data-fill="把视觉风格改得更轻、更现代">更现代</button>
+                      <button class="chip" type="button" data-fill="减少文字，增加图示">少字多图</button>
+                    </div>
+                  </div>
+                  <div class="chat-body">
+                    <div class="message timeline-message"><span>AI</span><p>Chapters generated. Continue to generate per-page Outlines.</p></div>
+                    <div class="message timeline-message"><span>AI</span><p>Per-page titles, outlines, and visual markers refined.</p></div>
+                    <div class="message timeline-message"><span>AI</span><p>extracting_content</p></div>
+                    <div class="message timeline-message"><span>AI</span><p>PPTX generated: 介绍石墨文档十页.pptx</p></div>
+                  </div>
+                  <div class="chat-input">
+                    <textarea placeholder="描述修改要求..."></textarea>
+                    <button class="primary send-button" type="button" aria-label="发送">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="variant variant-c" data-variant="c">
+                <div class="card action-card">
+                  <div class="review-summary">
+                    <div>
+                      <strong>Ready to edit with AI</strong><br />
+                      <span>10 页已生成，当前文件已保留</span>
+                    </div>
+                    <span class="badge">PPTX</span>
+                  </div>
+                  <div class="action-row">
+                    <button type="button" data-action="打开预览">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="m10 14 11-11"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                      Preview
+                    </button>
+                    <button type="button" data-action="打开 Canvas tree">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>
+                      Tree
+                    </button>
+                    <button type="button" data-action="在文件夹中显示">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 4"/></svg>
+                      Folder
+                    </button>
+                  </div>
+                </div>
+
+                <div class="card chat-card">
+                  <div class="chat-head">
+                    <div>
+                      <strong>AI conversation</strong><br />
+                      <span>对话和变更请求分层显示</span>
+                    </div>
+                    <button class="icon-only collapse-chat" type="button" title="收起或展开对话">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                  </div>
+                  <div class="tabs">
+                    <button type="button" class="active" data-action="查看 Conversation">Conversation</button>
+                    <button type="button" data-action="查看 Change request">Change request</button>
+                  </div>
+                  <div class="collapsed-note">对话已收起。功能按钮仍保持在独立操作卡中。</div>
+                  <div class="chat-body">
+                    <div class="message warning"><strong>Last edit failed</strong><p>The current PPTist deck was kept. You can send a new edit request below.</p></div>
+                    <div class="message"><span>AI</span><p>PPTX generated: 介绍石墨文档十页.pptx</p></div>
+                    <div class="message"><span>AI</span><p>Per-page titles and visual markers refined. Current deck is ready for another edit.</p></div>
+                  </div>
+                  <div class="chat-input">
+                    <textarea placeholder="例如：把第 2 页右侧三层说明换成流程图"></textarea>
+                    <button class="primary send-button" type="button" aria-label="发送">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const optionTabs = Array.from(document.querySelectorAll(".option-tab"));
+    const variants = Array.from(document.querySelectorAll(".variant"));
+    const toast = document.querySelector(".toast");
+    let toastTimer = 0;
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    function setOption(option) {
+      optionTabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.option === option));
+      variants.forEach((variant) => variant.classList.toggle("is-active", variant.dataset.variant === option));
+      showToast(`已切换到方案 ${option.toUpperCase()}`);
+    }
+
+    optionTabs.forEach((tab) => {
+      tab.addEventListener("click", () => setOption(tab.dataset.option));
+    });
+
+    document.addEventListener("click", (event) => {
+      const actionTarget = event.target.closest("[data-action]");
+      if (actionTarget) {
+        showToast(`${actionTarget.dataset.action}：这是原型交互，不会调用真实文件。`);
+      }
+
+      const fillTarget = event.target.closest("[data-fill]");
+      if (fillTarget) {
+        const activeVariant = document.querySelector(".variant.is-active");
+        const input = activeVariant?.querySelector(".chat-input textarea");
+        if (input) {
+          input.value = fillTarget.dataset.fill;
+          input.focus();
+        }
+      }
+
+      const collapseTarget = event.target.closest(".collapse-chat");
+      if (collapseTarget) {
+        const card = collapseTarget.closest(".chat-card");
+        card?.classList.toggle("is-collapsed");
+      }
+
+      const sendTarget = event.target.closest(".send-button");
+      if (sendTarget) {
+        sendMessage(sendTarget);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        const activeVariant = document.querySelector(".variant.is-active");
+        const sendButton = activeVariant?.querySelector(".send-button");
+        if (sendButton) sendMessage(sendButton);
+      }
+    });
+
+    function sendMessage(sendButton) {
+      const card = sendButton.closest(".chat-card");
+      const textarea = card?.querySelector("textarea");
+      const body = card?.querySelector(".chat-body");
+      const text = textarea?.value.trim();
+      if (!text || !body || !textarea) {
+        showToast("先输入一条修改要求。");
+        return;
+      }
+
+      const userMessage = document.createElement("div");
+      userMessage.className = "message user";
+      userMessage.innerHTML = `<span>You</span><p>${escapeHtml(text)}</p>`;
+      body.appendChild(userMessage);
+
+      const aiMessage = document.createElement("div");
+      aiMessage.className = "message";
+      aiMessage.innerHTML = "<span>AI</span><p>已收到修改要求。下一步会分析受影响页面，并保持当前 PPTX 文件可回退。</p>";
+      body.appendChild(aiMessage);
+
+      textarea.value = "";
+      body.scrollTop = body.scrollHeight;
+      showToast("已添加一轮模拟对话。");
+    }
+
+    function escapeHtml(value) {
+      return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>

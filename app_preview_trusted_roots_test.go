@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,68 @@ func TestUpdateSettingsWorkspaceDirRefreshesPreviewTrustedRoots(t *testing.T) {
 	err = app.PreviewArtifact(types.Artifact{FilePath: artifactPath})
 	if err != nil {
 		t.Fatalf("PreviewArtifact should accept custom output artifact, got %v", err)
+	}
+}
+
+func TestSavePptxCanOverwriteTrustedArtifactTarget(t *testing.T) {
+	dir := t.TempDir()
+	workspaceDir := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	reg, err := preview.New(preview.RegistryOptions{TrustedRoots: []string{workspaceDir}})
+	if err != nil {
+		t.Fatalf("preview.New: %v", err)
+	}
+	app := &App{workspaceDir: workspaceDir, previewReg: reg}
+	target := filepath.Join(workspaceDir, "generated.pptx")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	got, err := app.SavePptx(SavePptxInput{
+		DataBase64:     base64.StdEncoding.EncodeToString([]byte("new pptx bytes")),
+		FileName:       "ignored-name.pptx",
+		TargetFilePath: target,
+	})
+	if err != nil {
+		t.Fatalf("SavePptx: %v", err)
+	}
+	if got != target {
+		t.Fatalf("SavePptx path = %q, want %q", got, target)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "new pptx bytes" {
+		t.Fatalf("target bytes = %q", string(data))
+	}
+}
+
+func TestSavePptxRejectsTargetOutsideTrustedRoots(t *testing.T) {
+	dir := t.TempDir()
+	workspaceDir := filepath.Join(dir, "workspace")
+	outsideDir := filepath.Join(dir, "outside")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	reg, err := preview.New(preview.RegistryOptions{TrustedRoots: []string{workspaceDir}})
+	if err != nil {
+		t.Fatalf("preview.New: %v", err)
+	}
+	app := &App{workspaceDir: workspaceDir, previewReg: reg}
+
+	_, err = app.SavePptx(SavePptxInput{
+		DataBase64:     base64.StdEncoding.EncodeToString([]byte("new pptx bytes")),
+		FileName:       "generated.pptx",
+		TargetFilePath: filepath.Join(outsideDir, "generated.pptx"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside trusted") {
+		t.Fatalf("SavePptx should reject outside target, got %v", err)
 	}
 }
 

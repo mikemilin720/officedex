@@ -36,9 +36,14 @@ test.describe("OfficeDex real client artifact preview, OS actions, and issue rep
     expect(actions.actions.some((action) => action.kind === "openPath" && action.value === artifact.artifactPath)).toBeTruthy();
     expect(actions.actions.some((action) => action.kind === "showItemInFolder" && action.value === artifact.artifactPath)).toBeTruthy();
 
-    const preview = await hostControl<{ issued: number; revoked: number }>("/control/preview-tokens");
-    expect(preview.issued).toBeGreaterThan(0);
-    expect(preview.revoked).toBeGreaterThan(0);
+    await expect.poll(async () => {
+      const preview = await hostControl<{ issued: number; revoked: number }>("/control/preview-tokens");
+      return preview.issued;
+    }, { timeout: 5_000 }).toBeGreaterThan(0);
+    await expect.poll(async () => {
+      const preview = await hostControl<{ issued: number; revoked: number }>("/control/preview-tokens");
+      return preview.revoked;
+    }, { timeout: 5_000 }).toBeGreaterThan(0);
 
     await hostControl("/control/seed/failed-task", {
       method: "POST",

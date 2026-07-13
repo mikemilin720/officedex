@@ -17,6 +17,10 @@ export interface ScenarioRecord {
   error?: string;
 }
 
+const ONBOARDING_WELCOME_TEXT = /Welcome to OfficeDex/i;
+const ONBOARDING_SKIP_BUTTON = /Skip for now/i;
+const VIBE_CONFIRM_BUTTON = /确认这个节点|确认所属|Confirm this node|Confirm parent/i;
+
 export function realE2EEndpoint(): string {
   const endpoint = process.env.OFFICEDEX_REAL_E2E_ENDPOINT;
   if (!endpoint) {
@@ -72,18 +76,23 @@ export async function preparePage(page: Page): Promise<void> {
 }
 
 export async function dismissOnboarding(page: Page): Promise<void> {
-  const skip = page.getByRole("button", { name: /Skip for now/i });
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (!(await skip.isVisible().catch(() => false))) {
+  const welcome = page.getByText(ONBOARDING_WELCOME_TEXT).first();
+  const skip = page.getByRole("button", { name: ONBOARDING_SKIP_BUTTON }).first();
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const welcomeVisible = await welcome.isVisible().catch(() => false);
+    const skipVisible = await skip.isVisible().catch(() => false);
+    if (!welcomeVisible && !skipVisible) {
       return;
     }
-    await skip.click();
-    await page.waitForTimeout(1_000);
-    if ((await page.getByText("Welcome to OfficeDex").count()) === 0) {
+    if (skipVisible && await skip.isEnabled().catch(() => false)) {
+      await skip.click({ timeout: 5_000 });
+      await expect(welcome).toBeHidden({ timeout: 10_000 });
       return;
     }
+    await page.waitForTimeout(250);
   }
-  await expect(page.getByText("Welcome to OfficeDex")).toHaveCount(0);
+  await expect(welcome).toBeHidden();
 }
 
 export async function queueFileDialog(paths: string | string[]): Promise<void> {
@@ -115,7 +124,11 @@ export async function openNewGeneration(page: Page): Promise<void> {
   if (await prompt.isVisible().catch(() => false)) {
     return;
   }
-  await page.getByRole("button", { name: /New chat/i }).first().click({ timeout: 60_000 });
+  const expandSidebar = page.getByRole("button", { name: /Expand sidebar/i }).first();
+  if (await expandSidebar.isVisible().catch(() => false)) {
+    await expandSidebar.click({ force: true });
+  }
+  await page.getByRole("button", { name: /New chat/i }).first().click({ force: true, timeout: 60_000 });
   await expect(prompt).toBeVisible({ timeout: 60_000 });
 }
 
@@ -147,7 +160,7 @@ export async function submitGeneration(page: Page, input: {
 export async function waitForCompletedArtifact(page: Page, documentType: DocumentType): Promise<{ taskId: string; artifactPath: string; fileSize: number }> {
   const deadline = Date.now() + 45 * 60_000;
   while (Date.now() < deadline) {
-    if (await page.getByText("Generation Complete").first().isVisible().catch(() => false)) {
+    if (await isCompletedArtifactVisible(page)) {
       break;
     }
     await assertNoResponseContractError(page);
@@ -156,7 +169,9 @@ export async function waitForCompletedArtifact(page: Page, documentType: Documen
     }
     await page.waitForTimeout(1_000);
   }
-  await expect(page.getByText("Generation Complete").first()).toBeVisible({ timeout: 1_000 });
+  if (!(await page.getByText("Generation Complete").first().isVisible().catch(() => false))) {
+    await expect(completedArtifactSurface(page)).toBeVisible({ timeout: 1_000 });
+  }
   const artifact = await hostControl<{ taskId: string; path: string; size: number; documentType: string }>("/control/artifacts/latest");
   expect(artifact.documentType).toBe(documentType);
   if (documentType !== "img" && documentType !== "report") {
@@ -169,7 +184,7 @@ export async function waitForCompletedArtifact(page: Page, documentType: Documen
 export async function answerPlanUntilCompleted(page: Page, documentType: DocumentType): Promise<{ taskId: string; artifactPath: string; fileSize: number }> {
   const deadline = Date.now() + 45 * 60_000;
   while (Date.now() < deadline) {
-    if (await page.getByText("Generation Complete").first().isVisible().catch(() => false)) {
+    if (await isCompletedArtifactVisible(page)) {
       return waitForCompletedArtifact(page, documentType);
     }
     await assertNoResponseContractError(page);
@@ -183,7 +198,25 @@ export async function answerPlanUntilCompleted(page: Page, documentType: Documen
   throw new Error(`Timed out waiting for ${documentType} plan generation to complete`);
 }
 
+async function isCompletedArtifactVisible(page: Page): Promise<boolean> {
+  if (await page.getByText("Generation Complete").first().isVisible().catch(() => false)) {
+    return true;
+  }
+  return completedArtifactSurface(page).isVisible().catch(() => false);
+}
+
+function completedArtifactSurface(page: Page) {
+  return page.locator([
+    ".living-tree-cockpit[data-vibe-stage='completed'] .living-tree-artifact-actions",
+    ".living-tree-cockpit[data-vibe-stage='completed'] .living-tree-pptx-edit-panel.is-review-mode",
+  ].join(", ")).first();
+}
+
 async function answerVisibleInteraction(page: Page): Promise<boolean> {
+  if (await answerVisibleVibeCanvas(page)) {
+    return true;
+  }
+
   const approve = page.locator("button.plan-review-approve").first();
   if (await approve.isVisible().catch(() => false)) {
     await approve.click();
@@ -202,6 +235,44 @@ async function answerVisibleInteraction(page: Page): Promise<boolean> {
   if (await freeform.isVisible().catch(() => false)) {
     await freeform.fill("Use the recommended concise default for this real E2E run.");
     await page.locator(".question-composer button").last().click();
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  return false;
+}
+
+async function answerVisibleVibeCanvas(page: Page): Promise<boolean> {
+  const canvas = page.locator(".living-tree-cockpit").first();
+  if (!(await canvas.isVisible().catch(() => false))) {
+    return false;
+  }
+
+  if (await page.locator(".living-tree-flow-node.is-node-drawing, .living-tree-flow-node.is-idea-drawing").first().isVisible().catch(() => false)) {
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  const existingConfirmButton = page.getByRole("button", { name: VIBE_CONFIRM_BUTTON }).filter({ visible: true }).first();
+  if (await existingConfirmButton.isVisible().catch(() => false)) {
+    await existingConfirmButton.click();
+    await page.waitForTimeout(600);
+    return true;
+  }
+
+  const pendingNode = page.locator(".living-tree-flow-node.is-confirmable.is-pending").first();
+  if (await pendingNode.isVisible().catch(() => false)) {
+    await pendingNode.dispatchEvent("click");
+    const confirmButton = page.getByRole("button", { name: VIBE_CONFIRM_BUTTON }).filter({ visible: true }).first();
+    await expect(confirmButton).toBeVisible({ timeout: 60_000 });
+    await confirmButton.click();
+    await page.waitForTimeout(600);
+    return true;
+  }
+
+  const stageButton = page.locator(".living-tree-task-card button.living-tree-stage-cta-ready").first();
+  if (await stageButton.isVisible().catch(() => false)) {
+    await stageButton.click({ force: true });
     await page.waitForTimeout(1_000);
     return true;
   }

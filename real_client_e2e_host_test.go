@@ -254,6 +254,18 @@ func (h *realClientE2EHost) call(method string, raw json.RawMessage) (any, error
 			return nil, err
 		}
 		return h.app.SavePastedImage(input)
+	case "SavePptx":
+		var input SavePptxInput
+		if err := decodeRealClientInput(raw, &input); err != nil {
+			return nil, err
+		}
+		return h.app.SavePptx(input)
+	case "ModifyPptistDeck":
+		var input ModifyPptistDeckInput
+		if err := decodeRealClientInput(raw, &input); err != nil {
+			return nil, err
+		}
+		return h.app.ModifyPptistDeck(input)
 	case "PreviewArtifact":
 		var artifact types.Artifact
 		if err := decodeRealClientInput(raw, &artifact); err != nil {
@@ -304,12 +316,6 @@ func (h *realClientE2EHost) call(method string, raw json.RawMessage) (any, error
 			return nil, h.app.CopyImageToClipboard(value)
 		}
 		return nil, nil
-	case "RenderPreviewHtml":
-		token, err := decodeRealClientString(raw)
-		if err != nil {
-			return nil, err
-		}
-		return h.app.RenderPreviewHtml(token)
 	case "SetPreviewMode":
 		var active bool
 		if err := decodeRealClientInput(raw, &active); err != nil {

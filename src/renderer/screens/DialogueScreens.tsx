@@ -1,13 +1,16 @@
-import { Button, Dropdown, Form, Image, Input, InputNumber, message, Modal, Progress, Radio, Space, Spin, Tag, Timeline, Tooltip, type MenuProps } from "antd";
+import { Button, Dropdown, Form, Image, InputNumber, message, Modal, Popover, Progress, Radio, Space, Spin, Tag, Timeline, Tooltip, type MenuProps } from "antd";
 import {
   CheckCircleFilled,
+  CheckCircleOutlined,
   CloseCircleFilled,
   CloseCircleOutlined,
+  CloseOutlined,
   CloudOutlined,
   CopyOutlined,
   DeleteOutlined,
   DisconnectOutlined,
   DownOutlined,
+  DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
@@ -22,24 +25,138 @@ import {
   UserOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { getAttachmentSpec } from "../../shared/types";
-import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, GenerationMode, ImagePromptSlot, ImagePromptTemplate, ImageRatio, StageState, WorkspaceSummary } from "../../shared/types";
+import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, GenerationMode, ImagePromptSlot, ImagePromptTemplate, ImageRatio, ModifyPptistDeckResult, StageState, VibeProjectTreeNode, VibeTreeSnapshot, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
 import { useSettings } from "../useSettings";
 import { useAttachments } from "../useAttachments";
 import { officecli } from "../bridge";
 import { FileGlyph, MaterialSymbol } from "../components/Shell";
 import { TaskRuntimePanel } from "../components/TaskRuntimePanel";
+import { Waiting2048Game } from "../components/Waiting2048Game";
 import { acquireBlob, releaseBlob } from "../imageCache";
 import { useT } from "../i18n";
 import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
 import { ReportIssueDialog } from "../components/ReportIssueDialog";
+import { ImeInput, ImePlainTextArea, ImeTextArea } from "../components/ImeInput";
 import { Check as CheckIcon, Copy as CopyIcon } from "lucide-react";
 import { loadLocalImageTemplates } from "../localImageTemplates";
+import {
+  AnimatedTextLine,
+  AnimatedVisualAssetIcon,
+  IDEA_NODE_DRAWING_MS,
+  VIBE_NODE_DRAWING_MS,
+  VIBE_NODE_MAX_VISUAL_ASSETS,
+  VIBE_NODE_TEXT_START_MS,
+  VIBE_NODE_VISUAL_ASSET_MS,
+  vibeNodeDrawingDurationMs,
+  vibeNodeDrawingTexts,
+  vibeNodeLineTimings,
+  vibeNodeVisualAssetTimings,
+} from "./vibeNodeAnimation";
+import { PptistEmbedPanel, type PptistEmbedPanelHandle } from "../components/PptistEmbedPanel";
+import type { PptistEditOp, PptistElementSelection, PptistSlide } from "../../shared/pptistProtocol";
+import { vibeNodeToSlide } from "../vibeSlideConverter";
+import {
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+  type Edge,
+  type Node as FlowNode,
+  type NodeProps,
+} from "@xyflow/react";
+
+// Re-exported for existing tests that import these from this module.
+export { IDEA_NODE_DRAWING_MS, VIBE_NODE_DRAWING_MS };
+
+function withPptistTypewriterAnimation(ops: PptistEditOp[]): PptistEditOp[] {
+  return ops.map((op) => {
+    if (op.type !== "element:update-text") return op;
+    return {
+      ...op,
+      animation: op.animation ?? { mode: "typewriter", clearFirst: true, showCaret: true },
+    };
+  });
+}
+
+function FocusToolbarButton({
+  className,
+  disabled,
+  icon,
+  label,
+  onClick,
+  type = "default",
+}: {
+  className?: string;
+  disabled?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick?: () => void;
+  type?: "default" | "primary";
+}) {
+  return (
+    <Tooltip title={label}>
+      <span className="living-tree-pptx-tooltip-anchor">
+        <Button
+          className={className}
+          icon={icon}
+          aria-label={label}
+          title={label}
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+        />
+      </span>
+    </Tooltip>
+  );
+}
+
+function uint8ArrayToBase64(data: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < data.length; i += chunk) {
+    binary += String.fromCharCode(...data.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string;
+export type VibeCanvasNodeKind = "root" | "branch" | "slide_group" | "outline" | "generated_slide" | "deck";
+type VibeFlowNodeKind = VibeCanvasNodeKind | "thinking";
+type CanvasPreparationPhase = "expanding" | "ready";
+type CanvasPreparationState = { taskId: string; phase: CanvasPreparationPhase; durationMs: number };
+type VibeThinkingState = "active" | "done" | "fading";
+type VibeCanvasData = {
+  treeNode: VibeProjectTreeNode;
+  kind: VibeFlowNodeKind;
+  label: string;
+  muted?: boolean;
+  assembling?: boolean;
+  ideaDrawing?: boolean;
+  nodeDrawing?: boolean;
+  nodeWaiting?: boolean;
+  confirmed?: boolean;
+  confirmable?: boolean;
+  expectedPageCount?: number;
+  laneIndex?: number;
+  thinkingState?: VibeThinkingState;
+  thinkingTargetKind?: VibeCanvasNodeKind;
+  popoverOpen?: boolean;
+  popoverContent?: ReactNode;
+  slidePushState?: "pushing" | "pushed" | "waiting";
+  slideData?: PptistSlide;
+  completedArtifact?: Artifact;
+  completedArtifactTitle?: string;
+  onPreviewArtifact?: (artifact: Artifact) => void;
+};
 
 export type FailureKind = "connection" | "auth" | "task" | "setup" | "other";
 
@@ -91,6 +208,43 @@ const EMPTY_NEW_GENERATION_DRAFT: NewGenerationDraft = {
   imageRatio: "square",
   fps: 16,
 };
+
+const CANVAS_PREPARATION_MIN_MS = 3000;
+const CANVAS_PREPARATION_MAX_MS = 5000;
+const VIBE_THINKING_NODE_WIDTH = 164;
+const VIBE_THINKING_NODE_HEIGHT = 108;
+const VIBE_THINKING_DONE_MS = 420;
+const VIBE_THINKING_FADE_MS = 520;
+
+type VibeThinkingTransition = {
+  key: string;
+  stage: VibeTreeSnapshot["stage"];
+  treeId: string;
+  sourceNodeIds: string[];
+  targetKind: VibeCanvasNodeKind;
+  phase: VibeThinkingState;
+};
+
+function vibeNodeEditableText(node: VibeProjectTreeNode) {
+  const sections = [
+    node.title,
+    node.summary && node.summary !== node.title ? node.summary : undefined,
+    node.outline?.length ? node.outline.map((item) => `- ${item}`).join("\n") : undefined,
+  ];
+  return sections.filter((text): text is string => Boolean(text?.trim())).join("\n\n");
+}
+
+function vibeNodeEditLabel(kind: VibeCanvasNodeKind, t: (key: string, vars?: Record<string, string | number>) => string) {
+  return t(`vibe.editLabel.${kind}`);
+}
+
+function generationModeForNewDocumentType(documentType: DocumentType): GenerationMode | undefined {
+  return documentType === "pptx" || documentType === "docx" || documentType === "xlsx" || documentType === "report" ? "plan" : undefined;
+}
+
+function randomCanvasPreparationDurationMs() {
+  return CANVAS_PREPARATION_MIN_MS + Math.round(Math.random() * (CANVAS_PREPARATION_MAX_MS - CANVAS_PREPARATION_MIN_MS));
+}
 
 const IMAGE_RATIO_OPTIONS: ImageRatio[] = ["square", "landscape", "portrait"];
 const GIF_FPS_MIN = 4;
@@ -561,7 +715,7 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
   );
   const promptField = (
     <Form.Item name="prompt" rules={[{ required: true, message: t("dialogue.prompt.required") }]} hidden={hasSlots && !rawDecoupled && !rawOpen}>
-      <Input.TextArea className={`new-chat-nudge-input ${promptNudgeActive ? "is-new-chat-nudging" : ""}`} autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
+      <ImeTextArea className={`new-chat-nudge-input ${promptNudgeActive ? "is-new-chat-nudging" : ""}`} autoSize={{ minRows: 4, maxRows: 8 }} placeholder={t("dialogue.prompt.placeholder")} onChange={handleRawPromptEdit} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); form.submit(); } }} onPaste={makePasteHandler(attachments, t)} />
     </Form.Item>
   );
   const sourceFileAttachment = attachments.sourceWorkbookSpec && attachments.sourceFile ? (
@@ -704,9 +858,7 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
           setCurrentDocumentType(nextDocumentType);
           onDraftChange({
             documentType: nextDocumentType,
-            generationMode: nextDocumentType === "img" || nextDocumentType === "gif"
-              ? undefined
-              : "plan",
+            generationMode: generationModeForNewDocumentType(nextDocumentType),
             topic: values.topic ?? "",
             prompt: values.prompt ?? "",
             imageRatio: normalizeImageRatio(values.imageRatio),
@@ -730,10 +882,11 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
             ? assembleSlots(selectedTemplate.promptPreset, slots, slotValues)
             : submitValues.prompt;
           const nextInput: GenerateInput = { ...submitValues, documentType, prompt, ...attachments.collect() };
-          if (documentType === "img" || documentType === "gif") {
-            delete nextInput.generationMode;
+          const generationMode = generationModeForNewDocumentType(documentType);
+          if (generationMode) {
+            nextInput.generationMode = generationMode;
           } else {
-            nextInput.generationMode = "plan";
+            delete nextInput.generationMode;
           }
           if (targetWorkspace) {
             nextInput.workspaceId = targetWorkspace.id;
@@ -751,7 +904,7 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
         }} className="fluid-command-bar">
           {docType === "img" ? (
             <Form.Item name="documentType" hidden>
-              <Input />
+              <ImeInput />
             </Form.Item>
           ) : (
             <div className="format-row">
@@ -778,10 +931,10 @@ function FluidNewGeneration({ draft, newChatNudgeKey, busy, workspaces, newChatT
             </div>
           ) : null}
           <Form.Item name="topic" hidden>
-            <Input />
+            <ImeInput />
           </Form.Item>
           <Form.Item name="promptTemplateId" hidden>
-            <Input />
+            <ImeInput />
           </Form.Item>
           {docType === "img" ? (
             selectedTemplateId ? (
@@ -1113,14 +1266,14 @@ function TemplateSlotForm({ slots, slug, values, errors, previewText, onChange, 
               help={errors[slot.key]}
             >
               {slot.multiline ? (
-                <Input.TextArea
+                <ImeTextArea
                   autoSize={{ minRows: 2, maxRows: 6 }}
                   value={values[slot.key] ?? ""}
                   placeholder={slot.defaultValue}
                   onChange={(e) => onChange(slot.key, e.target.value)}
                 />
               ) : (
-                <Input
+                <ImeInput
                   value={values[slot.key] ?? ""}
                   placeholder={slot.defaultValue}
                   onChange={(e) => onChange(slot.key, e.target.value)}
@@ -1169,10 +1322,23 @@ function ConversationView({ tasks, onPreview, onForceCancel, onContinueGeneratio
   const latestTask = tasks[tasks.length - 1];
   const bottomRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const appSessionStartedAtRef = useRef(Date.now());
+  const seenTaskIdsRef = useRef<Set<string>>(new Set(tasks.map((task) => task.id)));
+  const canvasPreparedTaskIdsRef = useRef<Set<string>>(new Set());
+  const canvasRevealedTaskIdsRef = useRef<Set<string>>(new Set());
+  const completedNodeAnimationKeysRef = useRef<Set<string>>(new Set());
+  const canvasPreparationDurationsRef = useRef<Map<string, number>>(new Map());
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  const [sessionIntroducedTaskIds, setSessionIntroducedTaskIds] = useState<Set<string>>(new Set());
+  const [canvasPreparationPhase, setCanvasPreparationPhase] = useState<CanvasPreparationState | null>(null);
   const conversationId = tasks[0]?.conversationId;
   const referenceImagesSpec = getAttachmentSpec("img", "referenceImages");
   const referenceImageMaxCount = referenceImagesSpec?.maxCount ?? 6;
+  const latestVibeCanvasTask = [...tasks].reverse().find(isVibeCanvasTask);
+  const vibeWorkspaceTask = latestVibeCanvasTask && shouldRenderVibeWorkspaceForLatestTask(latestTask, latestVibeCanvasTask)
+    ? mergeVibeWorkspaceTask(latestVibeCanvasTask, latestTask)
+    : undefined;
+  const activeCanvasTask = vibeWorkspaceTask ?? latestTask;
   const scrollToBottom = useCallback(() => {
     const bottom = bottomRef.current;
     bottom?.scrollIntoView({ behavior: "auto", block: "end" });
@@ -1200,11 +1366,104 @@ function ConversationView({ tasks, onPreview, onForceCancel, onContinueGeneratio
     setReferenceImages([]);
   }, [conversationId]);
 
+  useEffect(() => {
+    if (seenTaskIdsRef.current.has(latestTask.id)) return;
+    seenTaskIdsRef.current.add(latestTask.id);
+    setSessionIntroducedTaskIds((current) => {
+      if (current.has(latestTask.id)) return current;
+      const next = new Set(current);
+      next.add(latestTask.id);
+      return next;
+    });
+  }, [latestTask.id]);
+
+  const isCanvasPreparing = isPptCanvasPreparationTask(activeCanvasTask);
+  const allowCanvasPreparationForLatestTask = shouldAllowCanvasPreparationForTask(
+    activeCanvasTask,
+    appSessionStartedAtRef.current,
+    sessionIntroducedTaskIds.has(activeCanvasTask.id),
+  );
+  const canvasPreparationKey = activeCanvasTask.conversationId || activeCanvasTask.id;
+
+  useEffect(() => {
+    if (allowCanvasPreparationForLatestTask && isCanvasPreparing && !canvasRevealedTaskIdsRef.current.has(canvasPreparationKey)) {
+      canvasPreparedTaskIdsRef.current.add(canvasPreparationKey);
+      setCanvasPreparationPhase(null);
+    }
+  }, [allowCanvasPreparationForLatestTask, canvasPreparationKey, isCanvasPreparing]);
+
   function addReferenceImage(path: string) {
     setReferenceImages((current) => mergeUniquePaths(current, [path], referenceImageMaxCount));
   }
 
+  function canvasPreparationDurationForTask(taskId: string) {
+    const existing = canvasPreparationDurationsRef.current.get(taskId);
+    if (existing) return existing;
+    const durationMs = randomCanvasPreparationDurationMs();
+    canvasPreparationDurationsRef.current.set(taskId, durationMs);
+    return durationMs;
+  }
+
   const isActive = ["running", "starting", "question", "plan_review"].includes(latestTask.status);
+  const isCanvasActive = ["running", "starting", "question", "plan_review"].includes(activeCanvasTask.status);
+  const isVibeFocus = Boolean(activeCanvasTask.vibeTree && isVibeCanvasTask(activeCanvasTask) && (isCanvasActive || activeCanvasTask.status === "completed"));
+  const allowNodeAnimationForLatestSnapshot = isVibeFocus && (
+    shouldAllowVibeNodeAnimationForTask(activeCanvasTask, appSessionStartedAtRef.current)
+    || canvasPreparedTaskIdsRef.current.has(canvasPreparationKey)
+    || (allowCanvasPreparationForLatestTask && isInitialPptVibeCanvasTask(activeCanvasTask))
+  );
+  const shouldAnimateCanvasPreparation = isVibeFocus && allowCanvasPreparationForLatestTask && !canvasRevealedTaskIdsRef.current.has(canvasPreparationKey) && (
+    canvasPreparedTaskIdsRef.current.has(canvasPreparationKey)
+    || isInitialPptVibeCanvasTask(activeCanvasTask)
+  );
+  const resolvedCanvasPhase: CanvasPreparationPhase | null = isVibeFocus
+    ? (canvasPreparationPhase?.taskId === canvasPreparationKey ? canvasPreparationPhase.phase : (shouldAnimateCanvasPreparation ? "expanding" : "ready"))
+    : null;
+  const canvasPreparationDurationMs = isVibeFocus && shouldAnimateCanvasPreparation
+    ? canvasPreparationDurationForTask(canvasPreparationKey)
+    : (canvasPreparationPhase?.taskId === canvasPreparationKey ? canvasPreparationPhase.durationMs : CANVAS_PREPARATION_MIN_MS);
+
+  useEffect(() => {
+    if (!isVibeFocus || !activeCanvasTask.vibeTree) return;
+    const durationMs = canvasPreparationDurationForTask(canvasPreparationKey);
+    if (!shouldAnimateCanvasPreparation) {
+      canvasRevealedTaskIdsRef.current.add(canvasPreparationKey);
+      setCanvasPreparationPhase((current) => current?.taskId === canvasPreparationKey && current.phase === "ready"
+        ? current
+        : { taskId: canvasPreparationKey, phase: "ready", durationMs });
+      return;
+    }
+    setCanvasPreparationPhase((current) => current?.taskId === canvasPreparationKey
+      ? current
+      : { taskId: canvasPreparationKey, phase: "expanding", durationMs });
+    const timeout = window.setTimeout(() => {
+      canvasRevealedTaskIdsRef.current.add(canvasPreparationKey);
+      setCanvasPreparationPhase({ taskId: canvasPreparationKey, phase: "ready", durationMs });
+    }, durationMs);
+    return () => window.clearTimeout(timeout);
+  }, [canvasPreparationKey, isVibeFocus, activeCanvasTask.vibeTree, shouldAnimateCanvasPreparation]);
+
+  if (isVibeFocus && activeCanvasTask.vibeTree) {
+    return (
+      <div
+        className={`conversation-layout is-vibe-canvas-focus is-canvas-${resolvedCanvasPhase ?? "ready"}`}
+        data-canvas-phase={resolvedCanvasPhase ?? "ready"}
+        ref={layoutRef}
+      >
+        <LivingTreeCockpit
+          task={activeCanvasTask}
+          snapshot={activeCanvasTask.vibeTree}
+          onPreview={onPreview}
+          onForceCancel={onForceCancel}
+          onContinueModify={onContinueModify}
+          canvasReveal={resolvedCanvasPhase === "expanding" ? "pending" : "ready"}
+          allowCurrentSnapshotNodeAnimation={allowNodeAnimationForLatestSnapshot}
+          completedNodeAnimationKeys={completedNodeAnimationKeysRef.current}
+        />
+        {resolvedCanvasPhase === "expanding" ? <CanvasPreparationTransition durationMs={canvasPreparationDurationMs} /> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="conversation-layout" ref={layoutRef}>
@@ -1216,7 +1475,7 @@ function ConversationView({ tasks, onPreview, onForceCancel, onContinueGeneratio
             return <ConversationRound key={task.id} task={task} onPreview={onPreview} onOpenLogin={onOpenLogin} onUseAsReference={addReferenceImage} onRetryTask={onRetryTask} />;
           }
           // Latest + active: show as active round
-          return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} />;
+          return <ActiveTaskRound key={task.id} task={task} onForceCancel={onForceCancel} allowCanvasPreparation={allowCanvasPreparationForLatestTask} />;
         })}
         <div ref={bottomRef} />
       </div>
@@ -1258,9 +1517,10 @@ function ConversationRound({ task, onPreview, onOpenLogin, onUseAsReference, onR
 
 /* ─── Active Task Round (running / starting / question) ─── */
 
-function ActiveTaskRound({ task, onForceCancel }: {
+function ActiveTaskRound({ task, onForceCancel, allowCanvasPreparation }: {
   task: DesktopTask;
   onForceCancel?: (taskId: string) => void;
+  allowCanvasPreparation?: boolean;
 }) {
   const t = useT();
   const capability = useReportCapability();
@@ -1288,8 +1548,9 @@ function ActiveTaskRound({ task, onForceCancel }: {
     <>
       <div className="time-marker">{timeMarker}</div>
       <UserMessage task={task} fallback={subject} />
+      {task.vibeTree ? <LivingTreeCockpit task={task} snapshot={task.vibeTree} /> : null}
       {isRunning ? (
-        <GenerationLoadingMessage task={task} />
+        <GenerationLoadingMessage task={task} allowCanvasPreparation={allowCanvasPreparation} />
       ) : isQuestion ? null : (
         <>
           <div className="message ai-message">
@@ -1345,6 +1606,2733 @@ function ActiveTaskRound({ task, onForceCancel }: {
   );
 }
 
+const vibeNodeTypes = {
+  vibeNode: VibeTreeFlowNode,
+  vibeLane: VibeTreeLaneNode,
+};
+
+const VIBE_NODE_VERTICAL_GAP = 34;
+const VIBE_LANE_VERTICAL_PADDING = 10;
+const VIBE_NODE_HEIGHTS: Record<VibeCanvasNodeKind, number> = {
+  root: 116,
+  branch: 126,
+  slide_group: 124,
+  outline: 258,
+  generated_slide: 234,
+  deck: 320,
+};
+const VIBE_NODE_WIDTH = 320;
+const VIBE_NODE_WIDTHS: Record<VibeCanvasNodeKind, number> = {
+  root: VIBE_NODE_WIDTH,
+  branch: VIBE_NODE_WIDTH,
+  slide_group: VIBE_NODE_WIDTH,
+  outline: VIBE_NODE_WIDTH,
+  generated_slide: 416,
+  deck: 520,
+};
+const VIBE_NODE_COLUMN_SPACING = 504;
+const VIBE_GENERATED_SLIDE_VERTICAL_GAP = 72;
+const VIBE_TREE_CANVAS_CENTER_Y = 260;
+
+export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLabel, onStageAction, confirmableKinds, onPreview, onForceCancel, onContinueModify, canvasReveal, allowCurrentSnapshotNodeAnimation = true, completedNodeAnimationKeys }: {
+  task: DesktopTask;
+  snapshot: VibeTreeSnapshot;
+  progressIndex?: number;
+  stageActionLabel?: string;
+  onStageAction?: () => void;
+  confirmableKinds?: VibeCanvasNodeKind[];
+  onPreview?: (artifact: Artifact) => void;
+  onForceCancel?: (taskId: string) => void;
+  onContinueModify?: (documentType: string, prompt: string) => void;
+  canvasReveal?: "pending" | "ready";
+  allowCurrentSnapshotNodeAnimation?: boolean;
+  completedNodeAnimationKeys?: Set<string>;
+}) {
+  const t = useT();
+  const [selectedNodeId, setSelectedNodeId] = useState<string>(() => snapshot.tree.rootId);
+  const [popoverNodeId, setPopoverNodeId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+  const [submittingRevision, setSubmittingRevision] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [confirmedNodeIds, setConfirmedNodeIds] = useState<Set<string>>(() => new Set());
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [ideaConfirmed, setIdeaConfirmed] = useState(() => snapshot.stage !== "story_ready");
+  const [completedDrawingKey, setCompletedDrawingKey] = useState<string | null>(null);
+  const [nodeDrawingStep, setNodeDrawingStep] = useState<{ key: string; index: number } | null>(null);
+  const activeThinkingRef = useRef<Omit<VibeThinkingTransition, "phase"> | null>(null);
+  const ideaConfirmInFlightRef = useRef(false);
+  const [optimisticThinking, setOptimisticThinking] = useState<Omit<VibeThinkingTransition, "phase"> | null>(null);
+  const [dismissedThinking, setDismissedThinking] = useState<VibeThinkingTransition | null>(null);
+  const guideStateRef = useRef<{ stage: VibeTreeSnapshot["stage"]; confirmableKindsKey: string } | null>(null);
+  const activeSnapshot = useMemo(() => storyReadySnapshotForIdeaGate(snapshot, ideaConfirmed), [ideaConfirmed, snapshot]);
+  const storyIdeaGateActive = snapshot.stage === "story_ready" && !ideaConfirmed;
+  const actions = activeSnapshot.actions ?? [];
+  const flowModel = useMemo(() => buildVibeFlowModel(activeSnapshot, t), [activeSnapshot, t]);
+  const confirmableNodeIds = useMemo(
+    () => currentStepConfirmableNodeIds(flowModel.nodes, activeSnapshot, confirmableKinds),
+    [activeSnapshot, confirmableKinds, flowModel.nodes],
+  );
+  const sortedConfirmableNodeIds = useMemo(
+    () => flowModel.nodes
+      .filter((node) => confirmableNodeIds.has(node.id))
+      .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+      .map((node) => node.id),
+    [confirmableNodeIds, flowModel.nodes],
+  );
+  const pendingNodeIds = useMemo(
+    () => sortedConfirmableNodeIds.filter((id) => !confirmedNodeIds.has(id)),
+    [confirmedNodeIds, sortedConfirmableNodeIds],
+  );
+  const artifact = task.artifact;
+  const canCancelTask = ["running", "starting", "question", "plan_review"].includes(task.status);
+  const confirmedCount = [...confirmableNodeIds].filter((id) => confirmedNodeIds.has(id)).length;
+  const allCurrentNodesConfirmed = confirmableNodeIds.size === 0 || confirmedCount === confirmableNodeIds.size;
+  const stageActionReady = (confirmableNodeIds.size > 0 && allCurrentNodesConfirmed) || (confirmableNodeIds.size === 0 && actions.length > 0);
+  const visibleActions = storyIdeaGateActive ? [] : (onStageAction && stageActionLabel ? [{ id: "stage_action", label: stageActionLabel }] : actions);
+  const popoverNode = popoverNodeId ? flowModel.nodeMap.get(popoverNodeId) : undefined;
+  const upstreamCompletedKinds = useMemo(() => new Set(completedVibeKindsForStage(activeSnapshot.stage)), [activeSnapshot.stage]);
+  const confirmableKindsKey = confirmableKinds?.join(",") ?? "";
+  const snapshotGuideKey = useMemo(
+    () => [
+      activeSnapshot.stage,
+      activeSnapshot.tree.id,
+      activeSnapshot.tree.nodes.length,
+      sortedConfirmableNodeIds.join(","),
+      confirmableKindsKey,
+    ].join(":"),
+    [activeSnapshot.stage, activeSnapshot.tree.id, activeSnapshot.tree.nodes.length, confirmableKindsKey, sortedConfirmableNodeIds],
+  );
+  const activeProgressIndex = storyIdeaGateActive ? 0 : (progressIndex ?? vibeProgressIndex(activeSnapshot.stage));
+  const motionPhase = useMotionPhase(`${activeSnapshot.tree.id}:${activeSnapshot.stage}:${flowModel.nodes.length}:${flowModel.edges.length}`);
+  const canvasIsRevealed = canvasReveal !== "pending";
+  const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const nodeDrawingKey = `${snapshotGuideKey}:${canvasIsRevealed ? "revealed" : "hidden"}`;
+  const snapshotNodeAnimationConsumed = completedDrawingKey === nodeDrawingKey || completedNodeAnimationKeys?.has(nodeDrawingKey) === true;
+  // At the rendering stage the slide nodes become "confirmable" again, which would otherwise
+  // replay their per-slide draw on the canvas. The right-side deck draw-in now owns that
+  // animation, so keep the canvas slides settled here.
+  const shouldSkipNodeDrawingAnimation = prefersReducedMotion || !allowCurrentSnapshotNodeAnimation || snapshotNodeAnimationConsumed || activeSnapshot.stage === "rendering";
+  const shouldHoldCurrentNodeReveal = Boolean(dismissedThinking && sortedConfirmableNodeIds.length > 0);
+  const nodeDrawingSequenceActive = !shouldHoldCurrentNodeReveal && !shouldSkipNodeDrawingAnimation && canvasIsRevealed && sortedConfirmableNodeIds.length > 0;
+  const activeDrawingIndex = nodeDrawingSequenceActive
+    ? Math.min(nodeDrawingStep?.key === nodeDrawingKey ? nodeDrawingStep.index : 0, sortedConfirmableNodeIds.length - 1)
+    : -1;
+  const activeDrawingNodeId = nodeDrawingSequenceActive && activeDrawingIndex >= 0
+    ? (sortedConfirmableNodeIds[activeDrawingIndex] ?? null)
+    : null;
+  const nodeDrawingIds = useMemo(() => {
+    if (!nodeDrawingSequenceActive || !activeDrawingNodeId) {
+      return new Set<string>();
+    }
+    return new Set([activeDrawingNodeId]);
+  }, [activeDrawingNodeId, nodeDrawingSequenceActive]);
+  const nodeWaitingIds = useMemo(() => {
+    if (shouldHoldCurrentNodeReveal && sortedConfirmableNodeIds.length > 0) {
+      return new Set(sortedConfirmableNodeIds);
+    }
+    if (!nodeDrawingSequenceActive || activeDrawingIndex < 0) return new Set<string>();
+    return new Set(sortedConfirmableNodeIds.slice(activeDrawingIndex + 1));
+  }, [activeDrawingIndex, nodeDrawingSequenceActive, shouldHoldCurrentNodeReveal, sortedConfirmableNodeIds]);
+  const renderableFlowNodeIds = useMemo(
+    () => new Set(flowModel.nodes
+      .filter((node) => !nodeWaitingIds.has(node.data.treeNode.id))
+      .map((node) => node.id)),
+    [flowModel.nodes, nodeWaitingIds],
+  );
+  const nodeDrawingActive = nodeDrawingSequenceActive;
+  const ideaIntroActive = storyIdeaGateActive && nodeDrawingIds.has(activeSnapshot.tree.rootId);
+  const runningThinkingSourceIds = useMemo(() => {
+    if (!["running", "starting"].includes(task.status)) return [];
+    if (storyIdeaGateActive || confirmableNodeIds.size === 0 || !allCurrentNodesConfirmed) return [];
+    if (!thinkingTargetKindForStage(activeSnapshot.stage)) return [];
+    return flowModel.nodes
+      .filter((node) => confirmableNodeIds.has(node.id))
+      .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+      .map((node) => node.id);
+  }, [activeSnapshot.stage, allCurrentNodesConfirmed, confirmableNodeIds, flowModel.nodes, storyIdeaGateActive, task.status]);
+  const runningThinkingTargetKind = thinkingTargetKindForStage(activeSnapshot.stage);
+  const runningThinking = !optimisticThinking && runningThinkingSourceIds.length > 0 && runningThinkingTargetKind
+    ? {
+        key: `${activeSnapshot.tree.id}:${activeSnapshot.stage}:${runningThinkingTargetKind}:${runningThinkingSourceIds.join(",")}`,
+        stage: activeSnapshot.stage,
+        treeId: activeSnapshot.tree.id,
+        sourceNodeIds: runningThinkingSourceIds,
+        targetKind: runningThinkingTargetKind,
+      }
+    : null;
+  const activeThinking = optimisticThinking ?? runningThinking;
+  const activeThinkingKey = activeThinking?.key ?? null;
+  const activeThinkingElements = useMemo(
+    () => activeThinking
+      ? buildVibeThinkingTransitionElements(flowModel, activeThinking.stage, activeThinking.sourceNodeIds, activeThinking.targetKind, "active")
+      : { nodes: [], edges: [] },
+    [activeThinking, flowModel],
+  );
+  const dismissedThinkingElements = useMemo(
+    () => dismissedThinking
+      ? buildVibeThinkingTransitionElements(flowModel, dismissedThinking.stage, dismissedThinking.sourceNodeIds, dismissedThinking.targetKind, dismissedThinking.phase)
+      : { nodes: [], edges: [] },
+    [dismissedThinking, flowModel],
+  );
+  const thinkingFocusNodeId = activeThinkingElements.nodes[0]?.id ?? dismissedThinkingElements.nodes[0]?.id ?? null;
+  const cameraFocusNodeId = thinkingFocusNodeId ?? activeDrawingNodeId ?? focusedNodeId;
+
+  useEffect(() => {
+    setIdeaConfirmed(snapshot.stage !== "story_ready");
+    setSubmittingAction(null);
+  }, [snapshot.stage, snapshot.tree.id]);
+
+  useEffect(() => {
+    if (!optimisticThinking) return;
+    const targetReady = flowModel.nodes.some((node) => {
+      const parentId = node.data.treeNode.parentId;
+      return node.data.kind === optimisticThinking.targetKind
+        && typeof parentId === "string"
+        && optimisticThinking.sourceNodeIds.includes(parentId);
+    });
+    if (activeSnapshot.stage !== optimisticThinking.stage || activeSnapshot.tree.id !== optimisticThinking.treeId || targetReady) {
+      setOptimisticThinking(null);
+    }
+  }, [activeSnapshot.stage, activeSnapshot.tree.id, flowModel.nodes, optimisticThinking]);
+
+  useEffect(() => {
+    if (activeThinking) {
+      activeThinkingRef.current = {
+        key: activeThinking.key,
+        stage: activeThinking.stage,
+        treeId: activeThinking.treeId,
+        sourceNodeIds: activeThinking.sourceNodeIds,
+        targetKind: activeThinking.targetKind,
+      };
+      setDismissedThinking(null);
+      return;
+    }
+    const previous = activeThinkingRef.current;
+    if (!previous) {
+      setDismissedThinking(null);
+      return;
+    }
+    activeThinkingRef.current = null;
+    if (previous.stage === activeSnapshot.stage && previous.key.startsWith(`${activeSnapshot.tree.id}:`)) return;
+    const transitionKey = `${previous.key}:${activeSnapshot.tree.id}:${activeSnapshot.stage}`;
+    setDismissedThinking({
+      key: transitionKey,
+      stage: previous.stage,
+      treeId: previous.treeId,
+      sourceNodeIds: previous.sourceNodeIds,
+      targetKind: previous.targetKind,
+      phase: "done",
+    });
+    const fadeTimer = window.setTimeout(() => {
+      setDismissedThinking((current) => current?.key === transitionKey ? { ...current, phase: "fading" } : current);
+    }, VIBE_THINKING_DONE_MS);
+    const clearTimer = window.setTimeout(() => {
+      setDismissedThinking((current) => current?.key === transitionKey ? null : current);
+    }, VIBE_THINKING_DONE_MS + VIBE_THINKING_FADE_MS);
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [activeSnapshot.stage, activeSnapshot.tree.id, activeThinking, activeThinkingKey]);
+
+  useEffect(() => {
+    if (!canvasIsRevealed || sortedConfirmableNodeIds.length === 0) {
+      setCompletedDrawingKey(null);
+      setNodeDrawingStep(null);
+      return;
+    }
+    if (shouldSkipNodeDrawingAnimation) {
+      completedNodeAnimationKeys?.add(nodeDrawingKey);
+      setCompletedDrawingKey(nodeDrawingKey);
+      setNodeDrawingStep(null);
+      return;
+    }
+    if (completedDrawingKey === nodeDrawingKey) return;
+    setNodeDrawingStep((current) => current?.key === nodeDrawingKey ? current : { key: nodeDrawingKey, index: 0 });
+  }, [canvasIsRevealed, completedDrawingKey, completedNodeAnimationKeys, nodeDrawingKey, shouldSkipNodeDrawingAnimation, sortedConfirmableNodeIds.length]);
+
+  useEffect(() => {
+    if (!nodeDrawingSequenceActive || sortedConfirmableNodeIds.length === 0) return;
+    const currentIndex = Math.min(nodeDrawingStep?.key === nodeDrawingKey ? nodeDrawingStep.index : 0, sortedConfirmableNodeIds.length - 1);
+    const currentNodeId = sortedConfirmableNodeIds[currentIndex];
+    const currentFlowNode = flowModel.nodes.find((node) => node.id === currentNodeId);
+    const drawingDurationMs = currentFlowNode
+      ? vibeNodeDrawingDurationMs(currentFlowNode.data.label, currentFlowNode.data.treeNode)
+      : VIBE_NODE_DRAWING_MS;
+    const timeout = window.setTimeout(() => {
+      if (currentIndex >= sortedConfirmableNodeIds.length - 1) {
+        completedNodeAnimationKeys?.add(nodeDrawingKey);
+        setCompletedDrawingKey(nodeDrawingKey);
+        return;
+      }
+      setNodeDrawingStep({ key: nodeDrawingKey, index: currentIndex + 1 });
+    }, drawingDurationMs);
+    return () => window.clearTimeout(timeout);
+  }, [completedNodeAnimationKeys, flowModel.nodes, nodeDrawingKey, nodeDrawingSequenceActive, nodeDrawingStep, sortedConfirmableNodeIds]);
+
+  useEffect(() => {
+    if (!flowModel.nodeMap.has(selectedNodeId)) {
+      setSelectedNodeId(activeSnapshot.tree.rootId);
+      setPopoverNodeId(null);
+      setFocusedNodeId(activeSnapshot.tree.rootId);
+    }
+  }, [activeSnapshot.tree.rootId, flowModel.nodeMap, selectedNodeId]);
+
+  useEffect(() => {
+    setFeedback(popoverNode ? vibeNodeEditableText(popoverNode) : "");
+    setNeedsConfirm(false);
+  }, [popoverNode?.id, popoverNode?.outline, popoverNode?.summary, popoverNode?.title]);
+
+  useEffect(() => {
+    if (canvasIsRevealed) return;
+    setPopoverNodeId(null);
+    setFocusedNodeId(null);
+  }, [canvasIsRevealed]);
+
+  useEffect(() => {
+    if (!ideaIntroActive) return;
+    setPopoverNodeId(null);
+    setFocusedNodeId(activeSnapshot.tree.rootId);
+  }, [activeSnapshot.tree.rootId, ideaIntroActive]);
+
+  useEffect(() => {
+    if (!canvasIsRevealed) return;
+    if (nodeDrawingActive) return;
+    const previousGuideState = guideStateRef.current;
+    // Terminal stage: the finished deck is the deliverable, not a node to confirm. Auto-confirm the
+    // confirmable node(s) so the task card reads as closed ("Deck 已确认 1/1"), keep the deck selected
+    // so the task card owns it, but never auto-open the confirm popover.
+    if (activeSnapshot.stage === "completed") {
+      setConfirmedNodeIds(new Set(sortedConfirmableNodeIds));
+      const deckNodeId = sortedConfirmableNodeIds[0] ?? activeSnapshot.tree.rootId;
+      const firstSlide = flowModel.nodes.find((n) => n.data.kind === "generated_slide");
+      setPopoverNodeId(null);
+      setSelectedNodeId(deckNodeId);
+      setFocusedNodeId(firstSlide?.id ?? deckNodeId);
+      guideStateRef.current = { stage: activeSnapshot.stage, confirmableKindsKey };
+      return;
+    }
+    const shouldResetConfirmedNodes = !previousGuideState
+      || previousGuideState.stage !== activeSnapshot.stage
+      || previousGuideState.confirmableKindsKey !== confirmableKindsKey;
+    const nextConfirmedNodeIds = shouldResetConfirmedNodes
+      ? new Set<string>()
+      : new Set([...confirmedNodeIds].filter((id) => confirmableNodeIds.has(id)));
+    setConfirmedNodeIds(nextConfirmedNodeIds);
+    const firstPendingNodeId = sortedConfirmableNodeIds.find((id) => !nextConfirmedNodeIds.has(id)) ?? null;
+    setPopoverNodeId(firstPendingNodeId);
+    if (firstPendingNodeId || sortedConfirmableNodeIds.length > 0) {
+      setSelectedNodeId(firstPendingNodeId ?? activeSnapshot.tree.rootId);
+      setFocusedNodeId(firstPendingNodeId ?? activeSnapshot.tree.rootId);
+    } else {
+      const firstSlideNode = flowModel.nodes.find((n) => n.data.kind === "generated_slide");
+      if (firstSlideNode) {
+        setSelectedNodeId(firstSlideNode.id);
+        setFocusedNodeId(firstSlideNode.id);
+      }
+    }
+    guideStateRef.current = { stage: activeSnapshot.stage, confirmableKindsKey };
+  }, [activeSnapshot.stage, activeSnapshot.tree.rootId, canvasIsRevealed, confirmableKindsKey, confirmableNodeIds, nodeDrawingActive, snapshotGuideKey, sortedConfirmableNodeIds]);
+
+  function startThinkingTransition(sourceNodeIds: string[], targetKind: VibeCanvasNodeKind) {
+    if (sourceNodeIds.length === 0) return;
+    setOptimisticThinking({
+      key: `${activeSnapshot.tree.id}:${activeSnapshot.stage}:${targetKind}:${sourceNodeIds.join(",")}`,
+      stage: activeSnapshot.stage,
+      treeId: activeSnapshot.tree.id,
+      sourceNodeIds,
+      targetKind,
+    });
+    setDismissedThinking(null);
+  }
+
+  async function submitAction(actionId: string) {
+    if (!actionId || submittingAction) return;
+    if (!allCurrentNodesConfirmed) return;
+    if (onStageAction && actionId === "stage_action") {
+      setSubmittingAction(actionId);
+      setPopoverNodeId(null);
+      onStageAction();
+      return;
+    }
+    setSubmittingAction(actionId);
+    const targetKind = thinkingTargetKindForStage(activeSnapshot.stage);
+    if (targetKind) {
+      startThinkingTransition(sortedConfirmableNodeIds, targetKind);
+    }
+    try {
+      await officecli.respond({
+        taskId: task.id,
+        questionId: task.question?.id,
+        optionId: actionId,
+      });
+    } catch (err) {
+      setOptimisticThinking(null);
+      setSubmittingAction(null);
+      message.error(`Action failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function submitNodeRevisionForNode(node: VibeProjectTreeNode, descendantCount: number): Promise<boolean> {
+    const answer = feedback.trim();
+    if (!answer || submittingRevision) return false;
+    if (descendantCount > 0 && !needsConfirm) {
+      setNeedsConfirm(true);
+      return false;
+    }
+    setSubmittingRevision(true);
+    try {
+      await officecli.respond({
+        taskId: task.id,
+        questionId: task.question?.id,
+        answer: JSON.stringify({
+          kind: "vibe_node_feedback",
+          nodeId: node.id,
+          feedback: answer,
+        }),
+      });
+      setFeedback(vibeNodeEditableText(node));
+      setNeedsConfirm(false);
+      return true;
+    } catch (err) {
+      message.error(`Revision failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    } finally {
+      setSubmittingRevision(false);
+    }
+  }
+
+  async function cancelTask() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await officecli.cancel(task.id);
+      onForceCancel?.(task.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found") && onForceCancel) {
+        onForceCancel(task.id);
+      } else {
+        message.error(`Cancel failed: ${msg}`);
+      }
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function confirmNode(nodeId: string) {
+    if (storyIdeaGateActive && nodeId === activeSnapshot.tree.rootId) {
+      // Guard against double-submit: the gate stays visually active until
+      // setIdeaConfirmed(true) commits, so a quick second click would fire a
+      // second respond() against a question the backend has already consumed.
+      if (ideaConfirmInFlightRef.current) return;
+      ideaConfirmInFlightRef.current = true;
+      startThinkingTransition([nodeId], "branch");
+      try {
+        await officecli.respond({
+          taskId: task.id,
+          questionId: task.question?.id,
+          answer: JSON.stringify({
+            kind: "vibe_node_confirmed",
+            nodeId,
+          }),
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // "no pending input" means the idea question was already answered (a
+        // racing/duplicate confirm, or the backend already advanced past the
+        // gate). The desired end state — idea confirmed — is already true, so
+        // treat it as success instead of surfacing a scary error toast.
+        if (!msg.includes("no pending input")) {
+          setOptimisticThinking(null);
+          message.error(`Confirm failed: ${msg}`);
+          return;
+        }
+      } finally {
+        ideaConfirmInFlightRef.current = false;
+      }
+      setIdeaConfirmed(true);
+    }
+    const nextPendingNodeId = pendingNodeIds.find((id) => id !== nodeId) ?? null;
+    setConfirmedNodeIds((current) => {
+      const next = new Set(current);
+      next.add(nodeId);
+      return next;
+    });
+    setFeedback("");
+    setNeedsConfirm(false);
+    if (nextPendingNodeId) {
+      setSelectedNodeId(nextPendingNodeId);
+      setPopoverNodeId(nextPendingNodeId);
+      setFocusedNodeId(nextPendingNodeId);
+      return;
+    }
+    setSelectedNodeId(nodeId);
+    setPopoverNodeId(null);
+    setFocusedNodeId(nodeId);
+  }
+
+  const pptistRef = useRef<PptistEmbedPanelHandle>(null);
+  const pptistAnimationSessionKeysRef = useRef<Set<string>>(new Set());
+  const [slideDataMap, setSlideDataMap] = useState<Map<string, PptistSlide>>(new Map());
+  const [artifactSlidesByNodeId, setArtifactSlidesByNodeId] = useState<Map<string, PptistSlide>>(new Map());
+  const [selectedPptistSlideId, setSelectedPptistSlideId] = useState<string | undefined>(undefined);
+  const [pptistEditRunning, setPptistEditRunning] = useState(false);
+  const [pptistEditStatus, setPptistEditStatus] = useState<string>("");
+  const [pendingPptistEdit, setPendingPptistEdit] = useState<ModifyPptistDeckResult | null>(null);
+  const [selectedPptistElements, setSelectedPptistElements] = useState<PptistElementSelection | null>(null);
+  const [pptistAutosaveState, setPptistAutosaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "failed">("idle");
+  const [pptistThumbnailCapturePaused, setPptistThumbnailCapturePaused] = useState(false);
+  const handleSlideUpdated = useCallback((slideId: string, slide: PptistSlide) => {
+    setSlideDataMap((prev) => {
+      const next = new Map(prev);
+      next.set(slideId, slide);
+      return next;
+    });
+  }, []);
+  const hasPptxFile = Boolean(task.artifact?.filePath);
+  const hasVibeSlides = (task.vibeSlides ?? []).length > 0;
+  const isPptxgenjsAssembling =
+    activeSnapshot.stage === "completed"
+    && !hasPptxFile
+    && task.status === "running"
+    && !hasVibeSlides;
+  const showPptistEmbed = !isPptxgenjsAssembling && (activeSnapshot.stage === "slides_ready" || activeSnapshot.stage === "rendering" || activeSnapshot.stage === "completed");
+  const completedReviewMode = activeSnapshot.stage === "completed" && showPptistEmbed;
+  const [completedCanvasTreeOpen, setCompletedCanvasTreeOpen] = useState(false);
+  const canvasTreeInteractionsEnabled = !completedReviewMode || completedCanvasTreeOpen;
+  const canvasTreeMounted = !completedReviewMode || completedCanvasTreeOpen;
+  const pptistAnimationKey = pptistAnimationPlayedStorageKey(task.parentTaskId || task.id);
+  const shouldAnimatePptist = activeSnapshot.stage !== "completed" && (
+    !readPptistAnimationPlayed(pptistAnimationKey) || pptistAnimationSessionKeysRef.current.has(pptistAnimationKey)
+  );
+  const markPptistAnimationStarted = useCallback(() => {
+    pptistAnimationSessionKeysRef.current.add(pptistAnimationKey);
+    savePptistAnimationPlayed(pptistAnimationKey);
+  }, [pptistAnimationKey]);
+  const taskCardStage = isPptxgenjsAssembling ? "rendering" : activeSnapshot.stage;
+  const showTaskCardConfirmationProgress = !isPptxgenjsAssembling && confirmableNodeIds.size > 0;
+  const pptistAllSlideNodes = useMemo(() => {
+    if (!showPptistEmbed) return [];
+    const byId = new Map<string, VibeProjectTreeNode>();
+    for (const node of activeSnapshot.tree.nodes) {
+      if (kindForVibeNode(node, activeSnapshot.stage) === "generated_slide") byId.set(node.id, node);
+    }
+    for (const node of flowModel.nodes) {
+      if (node.data.kind === "generated_slide" && !byId.has(node.data.treeNode.id)) {
+        byId.set(node.data.treeNode.id, node.data.treeNode);
+      }
+    }
+    return [...byId.values()].sort(compareVibeNodes);
+  }, [activeSnapshot.stage, activeSnapshot.tree.nodes, flowModel.nodes, showPptistEmbed]);
+  // Backend streams complete per-slide PptistSlide data (charts/images inlined),
+  // in tree-slide-node order. Re-key each to its node id so the canvas ↔ slide
+  // mapping (reveal, gotoSlide, edit overlay) keeps working.
+  const streamedSlidesByNodeId = useMemo(() => {
+    const map = new Map<string, PptistSlide>();
+    const slides = task.vibeSlides ?? [];
+    pptistAllSlideNodes.forEach((node, i) => {
+      const slide = slides[i];
+      if (slide) map.set(node.id, { ...slide, id: `generated-${node.id}` });
+    });
+    return map;
+  }, [pptistAllSlideNodes, task.vibeSlides]);
+  const pptistSlideIds = useMemo(
+    () => pptistAllSlideNodes.map((node) => `generated-${node.id}`),
+    [pptistAllSlideNodes],
+  );
+  const handleSlidesLoaded = useCallback((slides: PptistSlide[]) => {
+    setArtifactSlidesByNodeId(() => {
+      const next = new Map<string, PptistSlide>();
+      pptistAllSlideNodes.forEach((node, i) => {
+        const slide = slides[i];
+        if (slide) next.set(node.id, { ...slide, id: `generated-${node.id}` });
+      });
+      return next;
+    });
+    if (!shouldAnimatePptist) {
+      setSlidePushIndex(slides.length > 0 ? slides.length - 1 : -1);
+      setTypedNodeIds(new Set(pptistAllSlideNodes.map((node) => node.id)));
+    }
+  }, [pptistAllSlideNodes, shouldAnimatePptist]);
+  const handlePptistEditRequest = useCallback(async (prompt: string) => {
+    const api = pptistRef.current;
+    if (!api) return;
+    setPendingPptistEdit(null);
+    setPptistEditRunning(true);
+    setPptistEditStatus(t("vibe.pptx.edit.preparing"));
+    try {
+      const snapshot = await api.getSnapshot();
+      const targetSelection = selectedPptistElements;
+      const selectedSlideId = targetSelection?.slideId || snapshot.selectedSlideId || selectedPptistSlideId;
+      const selectedElementIds = targetSelection?.elementIds?.length ? targetSelection.elementIds : snapshot.selectedElementIds;
+      const currentPptx = await api.exportPptxBytes(task.artifact?.fileName || "deck.pptx");
+      const pptxDataBase64 = uint8ArrayToBase64(currentPptx.bytes);
+      setPptistEditStatus(t("vibe.pptx.edit.thinking"));
+      await Promise.resolve();
+      const result = await officecli.modifyPptistDeck({
+        prompt,
+        snapshot,
+        selectedSlideId,
+        selectedElementIds,
+        pptxDataBase64,
+      });
+      if (!result.ops.length) {
+        throw new Error("No PPTist edit operations returned.");
+      }
+      const animatedResult = { ...result, ops: withPptistTypewriterAnimation(result.ops) };
+      if (result.requiresConfirmation) {
+        setPendingPptistEdit(animatedResult);
+        setPptistEditStatus(result.summary || t("vibe.pptx.edit.confirmHint"));
+        return;
+      }
+      setPptistEditStatus(result.summary || t("vibe.pptx.edit.applying"));
+      await Promise.resolve();
+      await api.applyEditOps(animatedResult.ops);
+      setPptistEditStatus("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPptistEditStatus(t("vibe.pptx.edit.failed"));
+      message.error(msg);
+    } finally {
+      setPptistEditRunning(false);
+    }
+  }, [selectedPptistElements, selectedPptistSlideId, t, task.artifact?.fileName]);
+  const handleConfirmPptistEdit = useCallback(async () => {
+    const api = pptistRef.current;
+    const edit = pendingPptistEdit;
+    if (!api || !edit) return;
+    setPptistEditRunning(true);
+    setPptistEditStatus(edit.summary || t("vibe.pptx.edit.applying"));
+    try {
+      await api.applyEditOps(edit.ops);
+      setPendingPptistEdit(null);
+      setPptistEditStatus("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPptistEditStatus(t("vibe.pptx.edit.failed"));
+      message.error(msg);
+    } finally {
+      setPptistEditRunning(false);
+    }
+  }, [pendingPptistEdit, t]);
+  const handleCancelPptistEdit = useCallback(() => {
+    setPendingPptistEdit(null);
+    setPptistEditStatus("");
+  }, []);
+  const handlePptistSelectionChanged = useCallback((selection: PptistElementSelection) => {
+    if (!selection.elementIds.length) return;
+    setSelectedPptistElements(selection);
+  }, []);
+  const handleOpenPptistSelection = useCallback((selection: PptistElementSelection) => {
+    pptistRef.current?.selectElements(selection);
+  }, []);
+  const handleClearPptistSelectionReference = useCallback(() => {
+    setSelectedPptistElements(null);
+  }, []);
+  // Canvas reveal is driven by PPTist's typing progress (pptist:slide-changed),
+  // so a flow node lights up exactly as that page starts typing in the editor —
+  // instead of a fixed timer racing ahead of the live typing animation.
+  const [slidePushIndex, setSlidePushIndex] = useState(-1);
+  // Node ids whose page PPTist has FINISHED typing. The left canvas shows a page's
+  // full content only once it's here — until then it renders a background-only
+  // skeleton, so the live typing on the right always stays ahead of the left.
+  const [typedNodeIds, setTypedNodeIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!completedReviewMode) {
+      setCompletedCanvasTreeOpen(false);
+      return;
+    }
+    if (!completedCanvasTreeOpen) setPopoverNodeId(null);
+  }, [completedCanvasTreeOpen, completedReviewMode]);
+  useEffect(() => {
+    if (!showPptistEmbed) {
+      setSlidePushIndex(-1);
+      setTypedNodeIds(new Set());
+    }
+  }, [showPptistEmbed]);
+  useEffect(() => {
+    if (!showPptistEmbed || shouldAnimatePptist || hasPptxFile || pptistAllSlideNodes.length === 0) return;
+    setSlidePushIndex(pptistAllSlideNodes.length - 1);
+    setTypedNodeIds(new Set(pptistAllSlideNodes.map((node) => node.id)));
+  }, [hasPptxFile, pptistAllSlideNodes, shouldAnimatePptist, showPptistEmbed]);
+  // All available slides are handed to PPTist at once; PPTist owns the page-by-page
+  // typing pace (one page typed in before the next). User edits override streamed data.
+  const pptistSlides = useMemo(
+    () => pptistAllSlideNodes
+      .map((n) => {
+        if (hasPptxFile) return undefined;
+        return slideDataMap.get(`generated-${n.id}`) ?? streamedSlidesByNodeId.get(n.id) ?? vibeNodeToSlide(n);
+      })
+      .filter((s): s is PptistSlide => Boolean(s)),
+    [hasPptxFile, pptistAllSlideNodes, slideDataMap, streamedSlidesByNodeId],
+  );
+  const totalGeneratedPages = pptistAllSlideNodes.length || pptistSlides.length;
+  const generatedPageCount = totalGeneratedPages > 0 ? Math.min(typedNodeIds.size, totalGeneratedPages) : typedNodeIds.size;
+  const allPagesGenerated = totalGeneratedPages > 0 && generatedPageCount >= totalGeneratedPages;
+  const baseFlowNodes = canvasTreeMounted ? flowModel.nodes.filter((node) => renderableFlowNodeIds.has(node.id)).map((node) => {
+    const treeNode = node.data.treeNode;
+    const nodeIsConfirmable = confirmableNodeIds.has(treeNode.id);
+    const confirmationTargetNode = nodeIsConfirmable
+      ? treeNode
+      : nearestConfirmableAncestor(flowModel.nodeMap, treeNode, confirmableNodeIds);
+    const descendantCount = descendantNodes(flowModel.nodeMap, treeNode.id).length;
+    const nodeIsDrawing = nodeDrawingIds.has(treeNode.id);
+    const nodeIsWaiting = nodeWaitingIds.has(treeNode.id);
+    const nodeIsConfirmed = confirmedNodeIds.has(treeNode.id) || (!nodeIsConfirmable && upstreamCompletedKinds.has(node.data.kind as VibeCanvasNodeKind));
+    const nodeIsPopoverOpen = canvasTreeInteractionsEnabled && popoverNodeId === treeNode.id && !nodeDrawingActive && !nodeIsDrawing && !nodeIsWaiting && !confirmedNodeIds.has(treeNode.id);
+    const slidePushState = (() => {
+      if (!showPptistEmbed || slidePushIndex < 0) return undefined;
+      const outlineIndex = pptistAllSlideNodes.findIndex((n) =>
+        n.parentId === treeNode.id || n.id === `generated-${treeNode.id}` || n.id === treeNode.id
+      );
+      if (outlineIndex < 0) return undefined;
+      if (outlineIndex < slidePushIndex) return "pushed" as const;
+      if (outlineIndex === slidePushIndex) return "pushing" as const;
+      return "waiting" as const;
+    })();
+
+    return {
+      ...node,
+      selected: node.id === selectedNodeId,
+      data: {
+        ...node.data,
+        assembling: activeSnapshot.stage === "rendering" && (node.data.kind === "generated_slide" || node.data.kind === "deck"),
+        ideaDrawing: ideaIntroActive && treeNode.id === activeSnapshot.tree.rootId,
+        nodeDrawing: nodeIsDrawing,
+        nodeWaiting: nodeIsWaiting,
+        confirmed: nodeIsConfirmed,
+        confirmable: nodeIsConfirmable,
+        slidePushState,
+        slideData: node.data.kind === "generated_slide"
+          ? (() => {
+              const edited = slideDataMap.get(`generated-${treeNode.id}`);
+              if (edited) return edited;
+              const artifactSlide = artifactSlidesByNodeId.get(treeNode.id);
+              const streamed = streamedSlidesByNodeId.get(treeNode.id);
+              if (artifactSlide?.elements?.length) {
+                return typedNodeIds.has(treeNode.id) ? artifactSlide : { ...artifactSlide, elements: [] };
+              }
+              if (hasPptxFile && streamed) return typedNodeIds.has(treeNode.id) ? streamed : { ...streamed, elements: [] };
+              if (hasPptxFile) return { id: `generated-${treeNode.id}`, elements: [] };
+              if (!streamed) return vibeNodeToSlide(treeNode);
+              // Reveal full content only after PPTist finishes typing this page;
+              // otherwise show a background-only skeleton (no spoiler).
+              if (typedNodeIds.has(treeNode.id)) return streamed;
+              return { ...streamed, elements: [] };
+            })()
+          : undefined,
+        completedArtifact: node.data.kind === "deck" && task.status === "completed" && artifact && !showPptistEmbed
+          ? artifact
+          : undefined,
+        completedArtifactTitle: node.data.kind === "deck" && task.status === "completed" && artifact && !showPptistEmbed
+          ? (activeSnapshot.tree.title || artifact.fileName)
+          : undefined,
+        onPreviewArtifact: onPreview,
+        popoverOpen: nodeIsPopoverOpen,
+        popoverContent: nodeIsPopoverOpen ? (
+          <VibeNodePopoverContent
+            node={treeNode}
+            kind={node.data.kind as VibeCanvasNodeKind}
+            confirmationTarget={confirmationTargetNode}
+            confirmationTargetKind={confirmationTargetNode ? kindForVibeNode(confirmationTargetNode, activeSnapshot.stage) : undefined}
+            confirmationTargetConfirmed={confirmationTargetNode ? confirmedNodeIds.has(confirmationTargetNode.id) : false}
+            feedback={nodeIsPopoverOpen ? feedback : ""}
+            needsConfirm={nodeIsPopoverOpen ? needsConfirm : false}
+            submittingRevision={nodeIsPopoverOpen && submittingRevision}
+            descendantCount={descendantCount}
+            onConfirm={confirmNode}
+            onFeedbackChange={(value) => {
+              setFeedback(value);
+              setNeedsConfirm(false);
+            }}
+            onSubmitRevision={() => submitNodeRevisionForNode(treeNode, descendantCount)}
+          />
+        ) : null,
+      },
+    };
+  }) : [];
+  const filteredFlowNodes = showPptistEmbed
+    ? baseFlowNodes.filter((node) => node.data.kind !== "deck")
+    : baseFlowNodes;
+  const filteredNodeIds = showPptistEmbed ? new Set(filteredFlowNodes.map((n) => n.id)) : renderableFlowNodeIds;
+  const waitingNodeIds = showPptistEmbed
+    ? new Set(filteredFlowNodes.filter((n) => n.data.slidePushState === "waiting").map((n) => n.id))
+    : new Set<string>();
+  const flowNodes = [...filteredFlowNodes, ...activeThinkingElements.nodes, ...dismissedThinkingElements.nodes];
+  const flowEdges = [
+    ...flowModel.edges.filter((edge) =>
+      filteredNodeIds.has(edge.source) && filteredNodeIds.has(edge.target) &&
+      !waitingNodeIds.has(edge.source) && !waitingNodeIds.has(edge.target)
+    ),
+    ...activeThinkingElements.edges,
+    ...dismissedThinkingElements.edges,
+  ];
+  const artifactFileName = artifact?.fileName || artifact?.filePath || "deck.pptx";
+  const pptistActionBusy = pptistEditRunning || Boolean(pendingPptistEdit);
+  const exportDisabled = !allPagesGenerated || task.status !== "completed" || pptistActionBusy;
+  const artifactActionDisabled = task.status !== "completed";
+  const completedReviewToolbar = completedReviewMode && artifact ? (
+    <div className="living-tree-pptx-toolbar is-focus-toolbar">
+      <div className="living-tree-pptx-action-card">
+        <FocusToolbarButton
+          className="living-tree-pptx-file-anchor"
+          icon={<FileTextOutlined />}
+          label={`${t("dialogue.completed.open")} ${artifactFileName}`}
+          disabled={artifactActionDisabled}
+          onClick={() => officecli.openPath(artifact.filePath)}
+        />
+        <div className="living-tree-pptx-action-card-buttons">
+          <FocusToolbarButton
+            icon={<GlobalOutlined />}
+            label={t("vibe.pptx.review.openCanvasTree")}
+            onClick={() => setCompletedCanvasTreeOpen(true)}
+          />
+          <FocusToolbarButton
+            icon={<DownloadOutlined />}
+            label={t("vibe.pptx.export")}
+            disabled={exportDisabled}
+            onClick={() => pptistRef.current?.exportPptx(artifactFileName)}
+          />
+          <FocusToolbarButton
+            icon={<FolderOpenOutlined />}
+            label={t("dialogue.completed.showInFolder")}
+            disabled={artifactActionDisabled}
+            onClick={() => officecli.showItemInFolder(artifact.filePath)}
+          />
+          {supportsOfflinePreview(artifact) && onPreview ? (
+            <FocusToolbarButton
+              icon={<LinkOutlined />}
+              label={t("dialogue.vibeTree.openPreview")}
+              disabled={artifactActionDisabled}
+              onClick={() => onPreview(artifact)}
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div
+      className="living-tree-cockpit"
+      aria-label="Living Tree Cockpit"
+      data-vibe-stage={snapshot.stage}
+      data-vibe-active-index={activeProgressIndex}
+      data-motion-phase={motionPhase}
+      data-canvas-reveal={canvasReveal}
+    >
+      <div className="living-tree-header">
+        <div>
+          <span className="living-tree-eyebrow">Living Tree Cockpit</span>
+          <strong>{snapshot.tree.title || "OfficeDex Project Map"}</strong>
+        </div>
+        {completedReviewToolbar ?? (canCancelTask ? (
+          <Button
+            danger
+            size="small"
+            icon={<StopOutlined />}
+            aria-label={t("dialogue.running.cancel")}
+            loading={cancelling}
+            onClick={() => { void cancelTask(); }}
+          >
+            {t("dialogue.running.cancel")}
+          </Button>
+        ) : null)}
+      </div>
+      {snapshot.tree.direction ? <div className="living-tree-direction">{snapshot.tree.direction}</div> : null}
+      <VibeProgressSteps
+        stage={snapshot.stage}
+        progressIndex={activeProgressIndex}
+        motionPhase={motionPhase}
+        autoOpenTaskCard={stageActionReady && !showPptistEmbed && !submittingAction}
+        taskCard={task.status !== "completed" && !showPptistEmbed && !submittingAction ? (
+          <section className="living-tree-task-card" aria-label={t("vibe.task.title")}>
+            <div className="living-tree-task-card-head">
+              <span>{t("vibe.task.title")}</span>
+              <Tag color="processing">{vibeStageLabel(taskCardStage, t)}</Tag>
+            </div>
+            <strong>{currentTaskTitle(taskCardStage, storyIdeaGateActive, t)}</strong>
+            <p>{currentTaskDescription(taskCardStage, confirmedCount, showTaskCardConfirmationProgress ? confirmableNodeIds.size : 0, storyIdeaGateActive, t)}</p>
+            {showTaskCardConfirmationProgress ? (
+              <div className="living-tree-task-progress">
+                <span>{t("vibe.task.confirmed", { confirmed: confirmedCount, total: confirmableNodeIds.size })}</span>
+                <div>
+                  <i style={{ width: `${Math.round((confirmedCount / confirmableNodeIds.size) * 100)}%` }} />
+                </div>
+              </div>
+            ) : null}
+            {pendingNodeIds.length > 0 ? (
+              <Button
+                block
+                icon={<CheckCircleOutlined />}
+                onClick={() => {
+                  if (storyIdeaGateActive) {
+                    const rootId = activeSnapshot.tree.rootId;
+                    void confirmNode(rootId);
+                  }
+                  setConfirmedNodeIds(new Set(sortedConfirmableNodeIds));
+                  setPopoverNodeId(null);
+                }}
+              >
+                {t("vibe.task.confirmAll", { count: pendingNodeIds.length })}
+              </Button>
+            ) : null}
+            {visibleActions.map((action) => (
+              <Button
+                key={action.id}
+                type="primary"
+                className={stageActionReady ? "living-tree-stage-cta-ready" : undefined}
+                icon={activeSnapshot.stage === "refined_ready" ? <PlayCircleOutlined /> : <SendOutlined />}
+                aria-label={action.label}
+                loading={submittingAction === action.id}
+                disabled={!allCurrentNodesConfirmed}
+                onClick={() => { void submitAction(action.id); }}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </section>
+        ) : undefined}
+      />
+      <div className={`living-tree-workbench ${showPptistEmbed ? "has-pptist-embed" : ""} ${isPptxgenjsAssembling ? "has-assembling-panel" : ""} ${completedReviewMode ? "is-completed-review" : ""} ${completedCanvasTreeOpen ? "is-canvas-tree-open" : ""}`}>
+        {canvasTreeMounted ? (
+          <div
+            className={`living-tree-flow-shell ${activeSnapshot.stage === "rendering" ? "is-deck-assembling" : ""} ${completedReviewMode ? "is-canvas-tree-drawer" : ""}`}
+            data-testid="living-tree-flow"
+            data-vibe-stage={activeSnapshot.stage}
+            data-camera-focus-node-id={cameraFocusNodeId ?? undefined}
+            aria-hidden={completedReviewMode ? !completedCanvasTreeOpen : undefined}
+          >
+            {completedReviewMode ? (
+              <div className="living-tree-canvas-drawer-head">
+                <strong>{t("vibe.pptx.review.canvasTree")}</strong>
+                <Button
+                  size="small"
+                  icon={<CloseCircleOutlined />}
+                  aria-label={t("vibe.pptx.review.closeCanvasTree")}
+                  onClick={() => {
+                    setCompletedCanvasTreeOpen(false);
+                    setPopoverNodeId(null);
+                  }}
+                >
+                  {t("vibe.pptx.review.closeCanvasTree")}
+                </Button>
+              </div>
+            ) : null}
+            <ReactFlowProvider>
+              <ReactFlow
+                key={`${activeSnapshot.stage}-${flowModel.nodes.length}-${flowModel.edges.length}-${showPptistEmbed}`}
+                nodes={flowNodes}
+                edges={flowEdges}
+                nodeTypes={vibeNodeTypes}
+                minZoom={0.22}
+                maxZoom={1.12}
+                fitView={!cameraFocusNodeId}
+                fitViewOptions={{ padding: 0.16, minZoom: 0.22, maxZoom: 0.88 }}
+                defaultViewport={vibeNodeDefaultViewport(cameraFocusNodeId, flowNodes)}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                elementsSelectable
+                panOnScroll={showPptistEmbed}
+                zoomOnScroll={!showPptistEmbed}
+                onNodeClick={(_, node) => {
+                  if ((node.data as VibeCanvasData | undefined)?.kind === "thinking") return;
+                  setSelectedNodeId(node.id);
+                  if (!canvasTreeInteractionsEnabled) {
+                    setPopoverNodeId(null);
+                    return;
+                  }
+                  if (nodeDrawingActive) return;
+                  if (nodeDrawingIds.has(node.id)) return;
+                  if (nodeWaitingIds.has(node.id)) return;
+                  const nodeKind = (node.data as VibeCanvasData | undefined)?.kind;
+                  if (nodeKind !== "generated_slide") {
+                    setPopoverNodeId(node.id);
+                  }
+                  if (showPptistEmbed && pptistRef.current) {
+                    const slideIndex = pptistAllSlideNodes.findIndex((n) => n.id === node.id || n.parentId === node.id);
+                    if (slideIndex >= 0) pptistRef.current.gotoSlide(slideIndex);
+                  }
+                }}
+                onPaneClick={() => setPopoverNodeId(null)}
+              >
+                <VibeTreeViewportController focusedNodeId={cameraFocusNodeId} nodes={flowNodes} />
+                <Background gap={28} size={1} color="rgba(86, 69, 212, 0.10)" />
+                <Controls showInteractive={false} />
+                {!showPptistEmbed && (
+                  <MiniMap
+                    pannable
+                    zoomable
+                    position="bottom-right"
+                    ariaLabel="Living Tree minimap"
+                    style={{ width: 192, height: 128 }}
+                    bgColor="rgba(255, 255, 255, 0.96)"
+                    nodeColor={(node) => vibeMiniMapNodeColor((node.data as VibeCanvasData | undefined)?.kind)}
+                    nodeStrokeColor={() => "rgba(10, 21, 48, 0.32)"}
+                    nodeStrokeWidth={3}
+                    nodeBorderRadius={7}
+                    maskColor="rgba(255, 255, 255, 0.42)"
+                    maskStrokeColor="rgba(86, 69, 212, 0.32)"
+                    maskStrokeWidth={2}
+                  />
+                )}
+              </ReactFlow>
+            </ReactFlowProvider>
+          </div>
+        ) : null}
+        {showPptistEmbed ? (
+          <PptistEmbedPanel
+            ref={pptistRef}
+            slides={pptistSlides}
+            artifact={hasPptxFile ? artifact : undefined}
+            animateArtifact={shouldAnimatePptist}
+            animateSlides={shouldAnimatePptist}
+            slideIds={pptistSlideIds}
+            onAnimationStarted={markPptistAnimationStarted}
+            onSlideChanged={(index, slideId) => {
+              // Reveal the matching flow node as PPTist begins typing this page, and
+              // pan the canvas to it so the left view tracks the page rendering on the right.
+              const treeNodeId = slideId.startsWith("generated-") ? slideId.slice("generated-".length) : pptistAllSlideNodes[index]?.id ?? slideId;
+              setSelectedPptistSlideId(slideId);
+              if (!canvasTreeMounted) return;
+              setSlidePushIndex((prev) => Math.max(prev, index));
+              if (flowModel.nodeMap.has(treeNodeId)) {
+                setSelectedNodeId(treeNodeId);
+                setFocusedNodeId(treeNodeId);
+              }
+            }}
+            onSlideUpdated={handleSlideUpdated}
+            onSelectionChanged={handlePptistSelectionChanged}
+            onSlidesLoaded={handleSlidesLoaded}
+            autosaveEnabled={false}
+            thumbnailCapturePaused={pptistThumbnailCapturePaused}
+            ariaLabel={completedReviewMode ? t("vibe.pptx.review.editorAria") : undefined}
+            onAutosaveStateChange={(state, msg) => {
+              setPptistAutosaveState(state);
+              if (msg) setPptistEditStatus(msg);
+            }}
+            onEditOpStarted={(index, op: PptistEditOp) => {
+              setPptistEditStatus(t("vibe.pptx.edit.applyingStep", { current: index + 1 }));
+              if ("slideId" in op && typeof op.slideId === "string") setSelectedPptistSlideId(op.slideId);
+            }}
+            onEditOpApplied={(index) => {
+              setPptistEditStatus(t("vibe.pptx.edit.appliedStep", { current: index + 1 }));
+            }}
+            onSlideTyped={(index, slideId) => {
+              // Page finished typing on the right → reveal its full content on the left.
+              const treeNodeId = slideId.startsWith("generated-") ? slideId.slice("generated-".length) : pptistAllSlideNodes[index]?.id ?? slideId;
+              setSelectedPptistSlideId(slideId);
+              if (canvasTreeMounted) setSlidePushIndex((prev) => Math.max(prev, index));
+              setTypedNodeIds((prev) => {
+                if (prev.has(treeNodeId)) return prev;
+                const next = new Set(prev);
+                next.add(treeNodeId);
+                return next;
+              });
+            }}
+            onExportError={(msg) => { void message.error(t("vibe.pptx.exportFailed", { msg })); }}
+          />
+        ) : null}
+        {showPptistEmbed ? (
+          completedReviewMode && artifact ? (
+            <div className="living-tree-pptx-ai-drawer" role="complementary" aria-label={t("vibe.pptx.dialogue.title")}>
+              <VibePptxEditPanel
+                artifact={artifact}
+                task={task}
+                disabled={!allPagesGenerated || task.status !== "completed"}
+                busy={pptistEditRunning || Boolean(pendingPptistEdit)}
+                generated={allPagesGenerated && task.status === "completed"}
+                renderingGeneratedDeck={hasPptxFile && task.status === "completed" && !allPagesGenerated}
+                autosaveState={pptistAutosaveState}
+                statusText={pptistEditStatus}
+                pendingEdit={pendingPptistEdit}
+                selectedElements={selectedPptistElements}
+                onEditRequest={handlePptistEditRequest}
+                onConfirmEdit={handleConfirmPptistEdit}
+                onCancelEdit={handleCancelPptistEdit}
+                onOpenSelectedElements={handleOpenPptistSelection}
+                onClearSelectedElements={handleClearPptistSelectionReference}
+                showDialogueLog
+                showReviewActionCard={false}
+                onInputFocusChange={setPptistThumbnailCapturePaused}
+              />
+            </div>
+          ) : (
+            <div className={`living-tree-pptx-toolbar ${artifact ? "has-edit-panel" : ""}`}>
+              <div className="living-tree-pptx-toolbar-status">
+                {!allPagesGenerated ? (
+                  <>
+                    <LoadingOutlined />
+                    <span>{t("vibe.pptx.generatedProgress", { generated: generatedPageCount, total: totalGeneratedPages })}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircleOutlined />
+                    <span>{t("vibe.pptx.generatedProgress", { generated: generatedPageCount, total: totalGeneratedPages })}</span>
+                  </>
+                )}
+              </div>
+              <div className="living-tree-pptx-toolbar-actions">
+                {artifact ? (
+                  <VibePptxEditPanel
+                    artifact={artifact}
+                    task={task}
+                    disabled={!allPagesGenerated || task.status !== "completed"}
+                    busy={pptistEditRunning || Boolean(pendingPptistEdit)}
+                    generated={allPagesGenerated && task.status === "completed"}
+                    renderingGeneratedDeck={hasPptxFile && task.status === "completed" && !allPagesGenerated}
+                    autosaveState={pptistAutosaveState}
+                    statusText={pptistEditStatus}
+                    pendingEdit={pendingPptistEdit}
+                    selectedElements={selectedPptistElements}
+                    onEditRequest={handlePptistEditRequest}
+                    onConfirmEdit={handleConfirmPptistEdit}
+                    onCancelEdit={handleCancelPptistEdit}
+                    onOpenSelectedElements={handleOpenPptistSelection}
+                    onClearSelectedElements={handleClearPptistSelectionReference}
+                    onInputFocusChange={setPptistThumbnailCapturePaused}
+                    onExportPptx={() => pptistRef.current?.exportPptx(artifact.fileName || "deck.pptx")}
+                  />
+                ) : null}
+              </div>
+            </div>
+          )
+        ) : null}
+        {isPptxgenjsAssembling ? (
+          <PptxgenjsAssemblingPanel assembleProgress={task.assembleProgress} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function assembleStepKey(content: string): string {
+  if (/generating.*code/i.test(content)) return "vibe.pptx.assembleStep.generating";
+  if (/executing.*script/i.test(content)) return "vibe.pptx.assembleStep.executing";
+  if (/script failed|retrying/i.test(content)) return "vibe.pptx.assembleStep.fixing";
+  if (/qa detected|layout issue|qa-fixed/i.test(content)) return "vibe.pptx.assembleStep.qa";
+  if (/presentation created/i.test(content)) return "vibe.pptx.assembleStep.done";
+  return "vibe.pptx.assembling";
+}
+
+function PptxgenjsAssemblingPanel({ assembleProgress }: { assembleProgress?: { step: string; status: string; content: string } }) {
+  const t = useT();
+  const stepKey = assembleProgress ? assembleStepKey(assembleProgress.content) : "vibe.pptx.assembling";
+
+  return (
+    <div className="pptxgenjs-assembling-panel">
+      <div className="pptxgenjs-assembling-icon">
+        <FileTextOutlined />
+      </div>
+      <div className="pptxgenjs-assembling-title">{t("vibe.pptx.assembling")}</div>
+      <div className="pptxgenjs-assembling-bar">
+        <div className="pptxgenjs-assembling-bar-fill" />
+      </div>
+      <div className="pptxgenjs-assembling-step">{t(stepKey)}</div>
+    </div>
+  );
+}
+
+function VibeArtifactActions({ artifact, onPreview, disabled = false }: { artifact: Artifact; onPreview?: (artifact: Artifact) => void; disabled?: boolean }) {
+  const t = useT();
+
+  return (
+    <div className="living-tree-artifact-actions" onClick={(event) => event.stopPropagation()}>
+      {supportsOfflinePreview(artifact) && onPreview ? (
+        <Button
+          type="primary"
+          icon={<PlayCircleOutlined />}
+          aria-label={t("dialogue.vibeTree.openPreview")}
+          disabled={disabled}
+          onClick={() => onPreview(artifact)}
+        >
+          {t("dialogue.vibeTree.openPreview")}
+        </Button>
+      ) : null}
+      <Button
+        icon={<FolderOpenOutlined />}
+        aria-label={t("dialogue.completed.showInFolder")}
+        disabled={disabled}
+        onClick={() => officecli.showItemInFolder(artifact.filePath)}
+      >
+        {t("dialogue.completed.showInFolder")}
+      </Button>
+    </div>
+  );
+}
+
+function VibePptxEditPanel({ artifact, task, disabled, busy, generated, renderingGeneratedDeck = false, autosaveState, statusText, pendingEdit, selectedElements, onEditRequest, onConfirmEdit, onCancelEdit, showDialogueLog = false, showReviewActionCard = true, onInputFocusChange, onOpenCanvasTree, onPreview, onExportPptx, onOpenSelectedElements, onClearSelectedElements }: {
+  artifact: Artifact;
+  task?: DesktopTask;
+  disabled: boolean;
+  busy?: boolean;
+  generated: boolean;
+  renderingGeneratedDeck?: boolean;
+  autosaveState: "idle" | "dirty" | "saving" | "saved" | "failed";
+  statusText?: string;
+  pendingEdit?: ModifyPptistDeckResult | null;
+  selectedElements?: PptistElementSelection | null;
+  onEditRequest?: (prompt: string) => void | Promise<void>;
+  onConfirmEdit?: () => void | Promise<void>;
+  onCancelEdit?: () => void;
+  showDialogueLog?: boolean;
+  showReviewActionCard?: boolean;
+  onInputFocusChange?: (focused: boolean) => void;
+  onOpenCanvasTree?: () => void;
+  onPreview?: (artifact: Artifact) => void;
+  onExportPptx?: () => void;
+  onOpenSelectedElements?: (selection: PptistElementSelection) => void;
+  onClearSelectedElements?: () => void;
+}) {
+  const t = useT();
+  const [prompt, setPrompt] = useState("");
+  const [localDialogueItems, setLocalDialogueItems] = useState<VibePptxDialogueItem[]>([]);
+  const [hasReviewEditActivity, setHasReviewEditActivity] = useState(false);
+  const lastWorkflowStatusRef = useRef("");
+  const trimmedPrompt = prompt.trim();
+  const autosaveBusy = autosaveState === "dirty" || autosaveState === "saving";
+  const inputDisabled = disabled || busy || autosaveBusy || !onEditRequest;
+  const reviewAutosaveText = autosaveState === "idle" || (autosaveState === "saved" && !hasReviewEditActivity) ? "" : autosaveText(autosaveState, t);
+  const generatedDeckRenderingHint = renderingGeneratedDeck ? t("vibe.pptx.edit.renderingHint") : "";
+  const pendingOrRenderingHint = generatedDeckRenderingHint || t("vibe.pptx.edit.pendingHint");
+  const reviewStatusText = statusText || (!generated ? pendingOrRenderingHint : reviewAutosaveText);
+  const showFooterStatus = Boolean(reviewStatusText && (!showDialogueLog || !hasReviewEditActivity));
+  const liveSelectionLabel = selectedElements?.elementIds.length ? pptistSelectionLabel(selectedElements) : "";
+  const quickPrompts = [
+    { label: t("vibe.pptx.dialogue.quick.sales"), prompt: t("vibe.pptx.dialogue.quick.salesPrompt") },
+    { label: t("vibe.pptx.dialogue.quick.modern"), prompt: t("vibe.pptx.dialogue.quick.modernPrompt") },
+    { label: t("vibe.pptx.dialogue.quick.visual"), prompt: t("vibe.pptx.dialogue.quick.visualPrompt") },
+  ];
+
+  useEffect(() => {
+    if (showDialogueLog && (statusText || (autosaveState !== "idle" && autosaveState !== "saved"))) {
+      setHasReviewEditActivity(true);
+    }
+  }, [autosaveState, showDialogueLog, statusText]);
+
+  useEffect(() => {
+    if (!showDialogueLog || !reviewStatusText || !hasReviewEditActivity) return;
+    if (lastWorkflowStatusRef.current === reviewStatusText) return;
+    lastWorkflowStatusRef.current = reviewStatusText;
+    setLocalDialogueItems((items) => appendVibePptxDialogueItem(items, {
+      role: "ai",
+      text: reviewStatusText,
+      state: workflowStateForStatus(reviewStatusText, t),
+    }));
+  }, [hasReviewEditActivity, reviewStatusText, showDialogueLog, t]);
+
+  useEffect(() => {
+    if (!showDialogueLog || !hasReviewEditActivity || busy || reviewStatusText) return;
+    setLocalDialogueItems(finalizeVibePptxWorkingItems);
+  }, [busy, hasReviewEditActivity, reviewStatusText, showDialogueLog]);
+
+  function submitEditRequest() {
+    if (inputDisabled || !trimmedPrompt || !onEditRequest) return;
+    const submittedPrompt = trimmedPrompt;
+    setLocalDialogueItems((items) => appendVibePptxDialogueItem(items, { role: "user" as const, text: submittedPrompt }));
+    void onEditRequest(submittedPrompt);
+    setPrompt("");
+    onClearSelectedElements?.();
+  }
+
+  const selectionReferenceChip = liveSelectionLabel && selectedElements ? (
+    <span className="living-tree-pptx-reference-chip">
+      <button
+        type="button"
+        className="living-tree-pptx-reference-chip-main"
+        aria-label={t("vibe.pptx.selection.open", { target: liveSelectionLabel })}
+        title={t("vibe.pptx.selection.open", { target: liveSelectionLabel })}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => onOpenSelectedElements?.(selectedElements)}
+      >
+        <span className="living-tree-pptx-reference-chip-icon" aria-hidden="true">
+          <PaperClipOutlined />
+        </span>
+        <span className="living-tree-pptx-reference-chip-label">{liveSelectionLabel}</span>
+      </button>
+      <button
+        type="button"
+        className="living-tree-pptx-reference-chip-remove"
+        aria-label={t("vibe.pptx.selection.remove", { target: liveSelectionLabel })}
+        title={t("vibe.pptx.selection.remove", { target: liveSelectionLabel })}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClearSelectedElements?.();
+        }}
+      >
+        <CloseOutlined />
+      </button>
+    </span>
+  ) : null;
+
+  const editRequestRow = (
+    <div className="living-tree-pptx-edit-row">
+      <div className={`living-tree-pptx-edit-composer ${selectionReferenceChip ? "has-inline-reference" : ""}`}>
+        {selectionReferenceChip}
+        <ImePlainTextArea
+          rows={1}
+          className="living-tree-pptx-edit-input"
+          placeholder={t("vibe.pptx.edit.placeholder")}
+          value={prompt}
+          disabled={inputDisabled}
+          onChange={(event) => setPrompt(event.target.value)}
+          onFocus={() => onInputFocusChange?.(true)}
+          onBlur={() => onInputFocusChange?.(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+              event.preventDefault();
+              submitEditRequest();
+            }
+          }}
+        />
+      </div>
+      <Button
+        type="primary"
+        icon={busy ? <LoadingOutlined /> : <SendOutlined />}
+        aria-label={t("vibe.pptx.edit.send")}
+        disabled={inputDisabled || !trimmedPrompt}
+        onClick={submitEditRequest}
+      />
+    </div>
+  );
+
+  const editConfirmation = pendingEdit ? (
+    <div className="living-tree-pptx-edit-confirmation" role="status">
+      <strong>{pendingEdit.confirmation?.title || t("vibe.pptx.edit.confirmTitle")}</strong>
+      {pendingEdit.confirmation?.message ? <span>{pendingEdit.confirmation.message}</span> : null}
+      {pendingEdit.confirmation?.target ? <span>{pendingEdit.confirmation.target}</span> : null}
+      {pendingEdit.confirmation?.changes?.length ? (
+        <ul>
+          {pendingEdit.confirmation.changes.map((item) => <li key={`change-${item}`}>{item}</li>)}
+        </ul>
+      ) : null}
+      {pendingEdit.confirmation?.preserved?.length ? (
+        <span>{t("vibe.pptx.edit.preserved", { items: pendingEdit.confirmation.preserved.join(", ") })}</span>
+      ) : null}
+      <div className="living-tree-pptx-edit-confirmation-actions">
+        <Button size="small" onClick={onCancelEdit}>{t("vibe.pptx.edit.cancel")}</Button>
+        <Button size="small" type="primary" onClick={() => { void onConfirmEdit?.(); }} disabled={!onConfirmEdit}>
+          {t("vibe.pptx.edit.apply")}
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <section className={`living-tree-pptx-edit-panel ${showDialogueLog ? "is-review-mode" : ""}`} aria-label={t("vibe.pptx.edit.title")}>
+      {showDialogueLog && showReviewActionCard ? (
+        <div className="living-tree-pptx-action-card">
+          <div className="living-tree-pptx-file-title">
+            <FileTextOutlined />
+            <strong>{artifact.fileName || artifact.filePath}</strong>
+          </div>
+          <div className="living-tree-pptx-action-card-buttons">
+            {onOpenCanvasTree ? (
+              <Button
+                icon={<GlobalOutlined />}
+                aria-label={t("vibe.pptx.review.openCanvasTree")}
+                onClick={onOpenCanvasTree}
+              />
+            ) : null}
+            {onExportPptx ? (
+              <Button
+                icon={<DownloadOutlined />}
+                aria-label={t("vibe.pptx.export")}
+                disabled={disabled || busy}
+                onClick={onExportPptx}
+              />
+            ) : null}
+            <Button
+              icon={<FolderOpenOutlined />}
+              aria-label={t("dialogue.completed.showInFolder")}
+              disabled={disabled || busy}
+              onClick={() => officecli.showItemInFolder(artifact.filePath)}
+            />
+            {supportsOfflinePreview(artifact) && onPreview ? (
+              <Button
+                icon={<LinkOutlined />}
+                aria-label={t("dialogue.vibeTree.openPreview")}
+                disabled={disabled || busy}
+                onClick={() => onPreview(artifact)}
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="living-tree-pptx-edit-panel-head">
+          <div>
+            <strong>{t("vibe.pptx.edit.title")}</strong>
+            <span>{busy ? t("vibe.pptx.edit.running") : generated ? t("vibe.pptx.edit.ready") : renderingGeneratedDeck ? t("vibe.pptx.edit.rendering") : t("vibe.pptx.edit.pending")}</span>
+          </div>
+          {!showDialogueLog ? <div className="living-tree-pptx-edit-panel-head-actions">
+            {onOpenCanvasTree ? (
+              <Button
+                icon={<GlobalOutlined />}
+                aria-label={t("vibe.pptx.review.openCanvasTree")}
+                onClick={onOpenCanvasTree}
+              >
+                {t("vibe.pptx.review.canvasTree")}
+              </Button>
+            ) : null}
+            <Button
+              icon={<DownloadOutlined />}
+              aria-label={t("vibe.pptx.export")}
+              disabled={disabled || busy}
+              onClick={onExportPptx}
+            >
+              {t("vibe.pptx.export")}
+            </Button>
+            <Button
+              icon={<FolderOpenOutlined />}
+              aria-label={t("dialogue.completed.showInFolder")}
+              disabled={disabled || busy}
+              onClick={() => officecli.showItemInFolder(artifact.filePath)}
+            >
+              {t("dialogue.completed.showInFolder")}
+            </Button>
+          </div> : null}
+        </div>
+      )}
+	      {showDialogueLog ? (
+	        task ? (
+	          <VibePptxDialogueLog task={task} quickPrompts={quickPrompts} onPromptSelect={setPrompt} localItems={localDialogueItems}>
+	            {showFooterStatus ? <p className="living-tree-pptx-dialogue-status">{reviewStatusText}</p> : null}
+	            {editConfirmation}
+	            {editRequestRow}
+	          </VibePptxDialogueLog>
+        ) : null
+      ) : (
+        <p>{statusText || autosaveText(autosaveState, t) || (generated ? t("vibe.pptx.edit.readyHint") : pendingOrRenderingHint)}</p>
+      )}
+      {!showDialogueLog ? editConfirmation : null}
+      {!showDialogueLog ? editRequestRow : null}
+    </section>
+  );
+}
+
+function pptistSelectionLabel(selection: PptistElementSelection): string {
+  const first = selection.elements[0];
+  if (selection.elementIds.length === 1 && first) {
+    const rawType = String(first.type || "object");
+    const type = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+    const preview = first.textPreview?.trim() || first.id;
+    return `${type} ${preview}`;
+  }
+  return `${selection.elementIds.length} objects`;
+}
+
+type VibePptxDialogueItem = {
+  role: "user" | "ai";
+  text: string;
+  state?: "working" | "done" | "error";
+};
+
+function appendVibePptxDialogueItem(items: VibePptxDialogueItem[], item: VibePptxDialogueItem): VibePptxDialogueItem[] {
+  const normalized = item.text.trim();
+  if (!normalized) return items;
+  const nextItem = { ...item, text: normalized };
+  const baseItems = nextItem.role === "ai"
+    ? items.map((existing) => (
+      existing.role === "ai" && existing.state === "working" && existing.text !== nextItem.text
+        ? { ...existing, state: "done" as const }
+        : existing
+    ))
+    : items;
+  const last = baseItems[baseItems.length - 1];
+  if (last && last.role === nextItem.role && last.text === nextItem.text) {
+    return [...baseItems.slice(0, -1), { ...last, ...nextItem }].slice(-8);
+  }
+  return [...baseItems, nextItem].slice(-8);
+}
+
+function finalizeVibePptxWorkingItems(items: VibePptxDialogueItem[]): VibePptxDialogueItem[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.role !== "ai" || item.state !== "working") return item;
+    changed = true;
+    return { ...item, state: "done" as const };
+  });
+  return changed ? next : items;
+}
+
+function workflowStateForStatus(text: string, t: Translator): VibePptxDialogueItem["state"] {
+  if (text === t("vibe.pptx.edit.failed") || text === t("vibe.pptx.autosave.failed")) return "error";
+  const workingTexts = new Set([
+    t("vibe.pptx.edit.preparing"),
+    t("vibe.pptx.edit.thinking"),
+    t("vibe.pptx.edit.applying"),
+    t("vibe.pptx.autosave.dirty"),
+    t("vibe.pptx.autosave.saving"),
+  ]);
+  if (workingTexts.has(text) || text.includes("Applying edit ") || text.includes("正在 PPTist 中应用第 ")) return "working";
+  return "done";
+}
+
+function VibePptxDialogueLog({ task, quickPrompts, onPromptSelect, localItems = [], children }: {
+  task: DesktopTask;
+  quickPrompts: Array<{ label: string; prompt: string }>;
+  onPromptSelect: (prompt: string) => void;
+  localItems?: VibePptxDialogueItem[];
+  children?: ReactNode;
+}) {
+  const t = useT();
+  const items = useMemo(() => [...buildVibePptxDialogueItems(task, t), ...localItems].slice(-6), [localItems, task, t]);
+
+  return (
+    <section className="living-tree-pptx-dialogue-log" aria-label={t("vibe.pptx.dialogue.title")}>
+      <div className="living-tree-pptx-dialogue-log-head">
+        <div>
+          <strong>{t("vibe.pptx.dialogue.title")}</strong>
+          <span>{t("vibe.pptx.dialogue.subtitle")}</span>
+        </div>
+        <Tag color="default">{items.length}</Tag>
+      </div>
+      <div className="living-tree-pptx-dialogue-intent">
+        <strong>{t("vibe.pptx.dialogue.intentTitle")}</strong>
+        <div className="living-tree-pptx-dialogue-chips">
+          {quickPrompts.map((item) => (
+            <Button key={item.label} size="small" onClick={() => onPromptSelect(item.prompt)}>
+              {item.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+	      <div className="living-tree-pptx-dialogue-log-body">
+	        {items.map((item, index) => (
+	          <div key={`${item.role}-${index}-${item.text}`} className={`living-tree-pptx-dialogue-message is-${item.role}${item.state ? ` is-${item.state}` : ""}`}>
+	            <span>{item.role === "user" ? t("vibe.pptx.dialogue.user") : t("vibe.pptx.dialogue.ai")}</span>
+	            <p>
+	              {item.role === "ai" && item.state === "working" ? <LoadingOutlined /> : null}
+	              {item.text}
+	            </p>
+	          </div>
+	        ))}
+	      </div>
+      <div className="living-tree-pptx-dialogue-footer">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function buildVibePptxDialogueItems(task: DesktopTask, t: Translator): VibePptxDialogueItem[] {
+  if (task.status === "completed") {
+    return [{ role: "ai", text: t("vibe.pptx.dialogue.empty") }];
+  }
+
+  const items: VibePptxDialogueItem[] = [];
+  const seen = new Set<string>();
+  const add = (role: VibePptxDialogueItem["role"], text: string | undefined) => {
+    const normalized = text?.trim();
+    if (!normalized || seen.has(`${role}:${normalized}`)) return;
+    seen.add(`${role}:${normalized}`);
+    items.push({ role, text: normalized });
+  };
+
+  add("user", task.userInput?.prompt || task.topic);
+  for (const event of task.events) {
+    const text = eventText(event);
+    if (!text || text.toLowerCase() === "done") continue;
+    if (event.type === "task.started" || event.type === "task.vibe_tree" || event.type === "task.vibe_slide") continue;
+    add("ai", text);
+  }
+  if (items.length === 0) {
+    add("ai", t("vibe.pptx.dialogue.empty"));
+  }
+
+  return items.slice(-6);
+}
+
+function autosaveText(state: "idle" | "dirty" | "saving" | "saved" | "failed", t: Translator): string {
+  switch (state) {
+    case "dirty":
+      return t("vibe.pptx.autosave.dirty");
+    case "saving":
+      return t("vibe.pptx.autosave.saving");
+    case "saved":
+      return t("vibe.pptx.autosave.saved");
+    case "failed":
+      return t("vibe.pptx.autosave.failed");
+    default:
+      return "";
+  }
+}
+
+function VibeDeckPptxArt() {
+  return (
+    <div className="living-tree-deck-pptx-art" aria-hidden="true">
+      <div className="living-tree-deck-slide-fan">
+        {Array.from({ length: 3 }, (_, index) => (
+          <span key={`deck-fan-slide-${index}`} className="living-tree-deck-fan-slide" />
+        ))}
+        <span className="living-tree-deck-pptx-chip">P</span>
+      </div>
+    </div>
+  );
+}
+
+function VibeTreeViewportController({ focusedNodeId, nodes }: {
+  focusedNodeId: string | null;
+  nodes: Array<FlowNode<VibeCanvasData>>;
+}) {
+  const { setCenter } = useReactFlow<FlowNode<VibeCanvasData>>();
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  useEffect(() => {
+    if (!focusedNodeId) return;
+    const node = nodesRef.current.find((candidate) => candidate.id === focusedNodeId);
+    if (!node) return;
+    const shell = document.querySelector(".living-tree-flow-shell");
+    const shellRect = shell?.getBoundingClientRect();
+    if (!shellRect || shellRect.width <= 0 || shellRect.height <= 0) return;
+    const fallbackHeight = node.data.kind === "thinking" ? VIBE_THINKING_NODE_HEIGHT : (VIBE_NODE_HEIGHTS[node.data.kind] ?? 160);
+    const nodeHeight = node.height ?? fallbackHeight;
+    const fallbackWidth = node.data.kind === "thinking" ? VIBE_THINKING_NODE_WIDTH : (VIBE_NODE_WIDTHS[node.data.kind] ?? VIBE_NODE_WIDTH);
+    const nodeWidth = node.width ?? fallbackWidth;
+    const x = node.position.x + nodeWidth / 2;
+    const y = node.position.y + nodeHeight / 2;
+    const timer = window.setTimeout(() => {
+      void setCenter(x, y, { zoom: 0.82, duration: 420 });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusedNodeId, setCenter]);
+
+  return null;
+}
+
+function vibeNodeDefaultViewport(focusedNodeId: string | null, nodes: Array<FlowNode<VibeCanvasData>>): { x: number; y: number; zoom: number } {
+  if (!focusedNodeId) return { x: 0, y: 0, zoom: 1 };
+  const node = nodes.find((n) => n.id === focusedNodeId);
+  if (!node) return { x: 0, y: 0, zoom: 1 };
+  const zoom = 0.82;
+  const fallbackWidth = node.data.kind === "thinking" ? VIBE_THINKING_NODE_WIDTH : (VIBE_NODE_WIDTHS[node.data.kind] ?? VIBE_NODE_WIDTH);
+  const fallbackHeight = node.data.kind === "thinking" ? VIBE_THINKING_NODE_HEIGHT : (VIBE_NODE_HEIGHTS[node.data.kind] ?? 160);
+  const nodeWidth = node.width ?? fallbackWidth;
+  const nodeHeight = node.height ?? fallbackHeight;
+  const centerX = node.position.x + nodeWidth / 2;
+  const centerY = node.position.y + nodeHeight / 2;
+  const shell = document.querySelector(".living-tree-flow-shell");
+  const shellRect = shell?.getBoundingClientRect();
+  const containerWidth = shellRect?.width ?? 600;
+  const containerHeight = shellRect?.height ?? 500;
+  return {
+    x: -centerX * zoom + containerWidth / 2,
+    y: -centerY * zoom + containerHeight / 2,
+    zoom,
+  };
+}
+
+function isVibeCanvasTask(task: DesktopTask) {
+  return Boolean(task.vibeTree && (task.documentType === "pptx" || task.artifact?.documentType === "pptx"));
+}
+
+function shouldRenderVibeWorkspaceForLatestTask(latestTask: DesktopTask, vibeTask: DesktopTask) {
+  if (latestTask.id === vibeTask.id) return true;
+  if (latestTask.conversationId !== vibeTask.conversationId) return false;
+  const latestDocumentType = (latestTask.documentType || latestTask.artifact?.documentType || "").toLowerCase();
+  if (latestDocumentType !== "pptx") return false;
+  const sourceFile = latestTask.userInput?.sourceFile?.trim();
+  if (!sourceFile) return false;
+  if (sourceFile === vibeTask.artifact?.filePath) return true;
+  return Boolean(latestTask.parentTaskId);
+}
+
+function mergeVibeWorkspaceTask(vibeTask: DesktopTask, latestTask: DesktopTask): DesktopTask {
+  if (latestTask.id === vibeTask.id) return vibeTask;
+  return {
+    ...vibeTask,
+    id: latestTask.id,
+    conversationId: latestTask.conversationId,
+    parentTaskId: latestTask.parentTaskId || vibeTask.parentTaskId,
+    status: latestTask.status,
+    documentType: latestTask.documentType || vibeTask.documentType,
+    topic: latestTask.topic || vibeTask.topic,
+    events: [...vibeTask.events, ...latestTask.events],
+    artifact: latestTask.artifact || vibeTask.artifact,
+    userInput: latestTask.userInput || vibeTask.userInput,
+    stages: latestTask.stages || vibeTask.stages,
+    activeStageId: latestTask.activeStageId || vibeTask.activeStageId,
+    error: latestTask.error || vibeTask.error,
+    creditCharged: latestTask.creditCharged ?? vibeTask.creditCharged,
+    creditMode: latestTask.creditMode || vibeTask.creditMode,
+    runtimeSnapshot: latestTask.runtimeSnapshot || vibeTask.runtimeSnapshot,
+    assembleProgress: latestTask.assembleProgress || vibeTask.assembleProgress,
+  };
+}
+
+function isPptCanvasPreparationTask(task: DesktopTask) {
+  const documentType = (task.documentType || task.artifact?.documentType || "").toLowerCase();
+  return Boolean(
+    documentType === "pptx"
+    && task.userInput?.generationMode === "plan"
+    && !task.plan
+    && !task.vibeTree
+    && (task.status === "starting" || task.status === "running")
+  );
+}
+
+function isInitialPptVibeCanvasTask(task: DesktopTask) {
+  const documentType = (task.documentType || task.artifact?.documentType || "").toLowerCase();
+  return Boolean(
+    documentType === "pptx"
+    && task.userInput?.generationMode === "plan"
+    && task.vibeTree
+    && (task.status === "starting" || task.status === "running" || task.status === "question" || task.status === "plan_review")
+  );
+}
+
+function shouldAllowCanvasPreparationForTask(task: DesktopTask, sessionStartedAtMs: number, wasIntroducedThisSession: boolean) {
+  const documentType = (task.documentType || task.artifact?.documentType || "").toLowerCase();
+  if (documentType !== "pptx" || task.userInput?.generationMode !== "plan") return false;
+  const startedAtMs = taskStartedAtMs(task);
+  if (startedAtMs != null) {
+    return startedAtMs >= sessionStartedAtMs - 1000;
+  }
+  return wasIntroducedThisSession;
+}
+
+function shouldAllowVibeNodeAnimationForTask(task: DesktopTask, sessionStartedAtMs: number) {
+  if (!task.vibeTree) return false;
+  const latestVibeTreeEventAtMs = latestTaskEventAtMs(task, "task.vibe_tree");
+  if (latestVibeTreeEventAtMs == null) return false;
+  return latestVibeTreeEventAtMs >= sessionStartedAtMs - 1000;
+}
+
+function taskStartedAtMs(task: DesktopTask) {
+  const ts = latestTaskEventTs(task, "task.started") || task.events[0]?.ts;
+  if (!ts) return null;
+  const ms = Date.parse(ts);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function latestTaskEventAtMs(task: DesktopTask, type: BridgeEvent["type"]) {
+  const ts = latestTaskEventTs(task, type);
+  if (!ts) return null;
+  const ms = Date.parse(ts);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function latestTaskEventTs(task: DesktopTask, type: BridgeEvent["type"]) {
+  for (let index = task.events.length - 1; index >= 0; index -= 1) {
+    const event = task.events[index];
+    if (event.type === type && typeof event.ts === "string") {
+      return event.ts;
+    }
+  }
+  return null;
+}
+
+function VibeCanvasCommandBar({ task, onForceCancel }: { task: DesktopTask; onForceCancel?: (taskId: string) => void }) {
+  const t = useT();
+  const [cancelling, setCancelling] = useState(false);
+
+  return (
+    <div className="docked-composer vibe-canvas-command-bar">
+      <div className="vibe-canvas-command-copy">{t("vibe.task.commandBarHint")}</div>
+      <div className="vibe-canvas-actions">
+        <Button danger icon={<StopOutlined />} loading={cancelling} onClick={async () => {
+          setCancelling(true);
+          try {
+            await officecli.cancel(task.id);
+            onForceCancel?.(task.id);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes("not found") && onForceCancel) {
+              onForceCancel(task.id);
+            } else {
+              message.error(`Cancel failed: ${msg}`);
+            }
+          } finally {
+            setCancelling(false);
+          }
+        }}>
+          {t("dialogue.running.cancel")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function VibeNodePopoverContent({
+  node,
+  kind,
+  confirmationTarget,
+  confirmationTargetKind,
+  confirmationTargetConfirmed,
+  feedback,
+  needsConfirm,
+  submittingRevision,
+  descendantCount,
+  onConfirm,
+  onFeedbackChange,
+  onSubmitRevision,
+}: {
+  node: VibeProjectTreeNode;
+  kind: VibeCanvasNodeKind;
+  confirmationTarget?: VibeProjectTreeNode;
+  confirmationTargetKind?: VibeCanvasNodeKind;
+  confirmationTargetConfirmed: boolean;
+  feedback: string;
+  needsConfirm: boolean;
+  submittingRevision: boolean;
+  descendantCount: number;
+  onConfirm: (nodeId: string) => void;
+  onFeedbackChange: (value: string) => void;
+  onSubmitRevision: () => Promise<boolean>;
+}) {
+  const t = useT();
+  const editId = useId();
+  const confirmationTargetIsSelected = confirmationTarget?.id === node.id;
+  const confirmationPending = Boolean(confirmationTarget && !confirmationTargetConfirmed);
+  const confirmLabel = confirmationTargetIsSelected
+    ? t("vibe.confirm.thisNode")
+    : confirmationTargetKind ? t("vibe.confirm.parentKind", { kind: vibeNodeKindLabel(confirmationTargetKind) }) : "";
+  const confirmTooltip = t("vibe.confirm.tooltip");
+  const feedbackChanged = feedback.trim() !== vibeNodeEditableText(node).trim();
+  const primaryLabel = confirmationPending ? (confirmLabel || t("vibe.confirm.thisNode")) : (needsConfirm ? t("vibe.confirm.regenerateDownstream") : t("vibe.confirm.applyToCurrent"));
+
+  async function handlePrimaryAction() {
+    if (confirmationPending && confirmationTarget) {
+      if (feedbackChanged) {
+        await onSubmitRevision();
+        return;
+      }
+      onConfirm(confirmationTarget.id);
+      return;
+    }
+    await onSubmitRevision();
+  }
+
+  return (
+    <div className="living-tree-popover" data-node-title={node.title} onClick={(event) => event.stopPropagation()}>
+      <div className="living-tree-popover-head">
+        <Tag color={confirmationTarget ? (confirmationTargetConfirmed ? "success" : "gold") : "default"}>
+          {confirmationTarget ? (confirmationTargetConfirmed ? t("vibe.tag.confirmed") : t("vibe.tag.pending")) : t("vibe.tag.nodeDetail")}
+        </Tag>
+        <span>{vibeNodeKindLabel(kind)}</span>
+      </div>
+      {confirmationTarget && (confirmationTargetConfirmed || !confirmationTargetIsSelected) ? (
+        <div className={`living-tree-popover-confirm ${confirmationTargetConfirmed ? "is-confirmed" : ""}`}>
+          {confirmationTargetConfirmed ? (
+            <p>{t("vibe.confirm.alreadyInScope")}</p>
+          ) : (
+            confirmationTargetIsSelected ? null : <p>{t("vibe.confirm.currentTarget", { title: confirmationTarget.title })}</p>
+          )}
+        </div>
+      ) : null}
+      <div className="living-tree-popover-revision">
+        <label className="living-tree-popover-edit-label" htmlFor={editId}>
+          {vibeNodeEditLabel(kind, t)}
+        </label>
+        <ImeTextArea
+          id={editId}
+          value={feedback}
+          onChange={(event) => onFeedbackChange(event.target.value)}
+          placeholder={t("vibe.confirm.placeholder")}
+          autoSize={{ minRows: 4, maxRows: 8 }}
+          disabled={submittingRevision}
+        />
+        {needsConfirm && descendantCount > 0 ? (
+          <div className="living-tree-impact-warning">
+            {t("vibe.confirm.impactWarning", { count: descendantCount })}
+          </div>
+        ) : null}
+        <div className="living-tree-popover-revision-actions">
+          {confirmationPending ? (
+            <Tooltip title={confirmTooltip}>
+              <Button
+                type="primary"
+                onClick={() => { void handlePrimaryAction(); }}
+                loading={submittingRevision}
+                disabled={!feedback.trim()}
+              >
+                {primaryLabel}
+              </Button>
+            </Tooltip>
+          ) : (
+            <Button
+              type="primary"
+              onClick={() => { void handlePrimaryAction(); }}
+              loading={submittingRevision}
+              disabled={!feedback.trim()}
+            >
+              {primaryLabel}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VibeTreeFlowNode({ data, selected }: NodeProps<FlowNode<VibeCanvasData>>) {
+  const t = useT();
+  const { treeNode, kind, label, muted, assembling, ideaDrawing, nodeDrawing, nodeWaiting, confirmed, confirmable, expectedPageCount, thinkingState, thinkingTargetKind, slidePushState, completedArtifact, completedArtifactTitle, onPreviewArtifact } = data;
+  const motionRole = kind === "thinking"
+    ? `thinking-${thinkingState ?? "active"}`
+    : ideaDrawing ? "idea-drawing" : nodeDrawing ? "node-drawing" : nodeWaiting ? "node-waiting" : assembling ? "deck-assembly" : undefined;
+  if (kind === "thinking") {
+    const thinkingClassName = `living-tree-flow-node is-thinking ${selected ? "is-selected" : ""} is-thinking-${thinkingState ?? "active"}`;
+    return (
+      <article
+        className={thinkingClassName}
+        data-vibe-kind={kind}
+        data-motion-role={motionRole}
+      >
+        <Handle type="target" position={Position.Left} />
+        <Handle type="source" position={Position.Right} />
+        <div className="living-tree-thinking-node-head">
+          <span>{thinkingTargetKind ? vibeNodeKindLabel(thinkingTargetKind) : label}</span>
+          <Tag color={thinkingState === "active" ? "processing" : "success"}>{thinkingState === "active" ? "Thinking" : "Done"}</Tag>
+        </div>
+        <strong>{thinkingState === "active" ? "Thinking..." : "Done"}</strong>
+        <div className="living-tree-thinking-node-body">
+          {thinkingState === "active" ? (
+            <span className="living-tree-thinking-dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          ) : (
+            <CheckCircleFilled className="living-tree-thinking-check" aria-hidden="true" />
+          )}
+          <p>{thinkingState === "active" ? `Generating ${label}` : `${label} is ready`}</p>
+        </div>
+      </article>
+    );
+  }
+  const drawingContent = Boolean(ideaDrawing || nodeDrawing);
+  const drawingTexts = drawingContent ? vibeNodeDrawingTexts(label, treeNode) : [];
+  const drawingTimings = drawingContent ? vibeNodeLineTimings(drawingTexts) : [];
+  const visualAssets = treeNode.visualAssets?.slice(0, VIBE_NODE_MAX_VISUAL_ASSETS) ?? [];
+  const visualAssetTimings = drawingContent ? vibeNodeVisualAssetTimings(drawingTimings, visualAssets.length) : [];
+  const pageLabel = treeNode.slideNumber ? `Page ${treeNode.slideNumber}` : null;
+  const renderNodeBadges = () => (
+    <div className="living-tree-flow-node-badges">
+      {confirmable ? <Tag color={confirmed ? "success" : "gold"}>{confirmed ? t("vibe.tag.confirmed") : t("vibe.tag.pending")}</Tag> : null}
+      {kind === "slide_group" && expectedPageCount ? <Tag>{expectedPageCount} {expectedPageCount === 1 ? "Page" : "Pages"}</Tag> : null}
+      {pageLabel ? <Tag>{pageLabel}</Tag> : null}
+    </div>
+  );
+  let drawingLineIndex = 0;
+  const nextDrawingLineProps = () => {
+    const lineIndex = drawingLineIndex++;
+    return {
+      lineIndex,
+      delayMs: drawingTimings[lineIndex]?.delayMs ?? VIBE_NODE_TEXT_START_MS,
+      durationMs: drawingTimings[lineIndex]?.durationMs ?? 180,
+    };
+  };
+  const nodeFrame = drawingContent ? (
+    <span className="living-tree-node-draw-frame" aria-hidden="true">
+      <svg className="living-tree-node-outline-svg" focusable="false" preserveAspectRatio="none">
+        <rect className="living-tree-node-outline-rect" pathLength="1" />
+      </svg>
+    </span>
+  ) : null;
+  const nodeHandles = (
+    <>
+      {kind !== "root" ? <Handle type="target" position={Position.Left} /> : null}
+      {kind !== "deck" ? <Handle type="source" position={Position.Right} /> : null}
+    </>
+  );
+  const nodeClassName = `living-tree-flow-node is-${kind} ${kind === "generated_slide" ? "is-slide-thumbnail" : ""} ${selected ? "is-selected" : ""} ${muted ? "is-muted" : ""} ${assembling ? "is-assembling" : ""} ${nodeWaiting ? "is-node-waiting" : ""} ${nodeDrawing ? "is-node-drawing" : ""} ${ideaDrawing ? "is-idea-drawing" : ""} ${confirmable ? "is-confirmable" : ""} ${confirmable && !confirmed ? "is-pending" : ""} ${confirmed ? "is-confirmed" : ""}`;
+  const nodeCard = kind === "generated_slide" ? (
+    <article
+      className={nodeClassName}
+      data-vibe-kind={kind}
+      data-motion-role={motionRole}
+      data-slide-push={slidePushState}
+    >
+      {nodeFrame}
+      {nodeHandles}
+      <div className="living-tree-slide-thumbnail">
+        {pageLabel ? (
+          <div className="living-tree-slide-thumbnail-badges">
+            <Tag>{pageLabel}</Tag>
+          </div>
+        ) : null}
+        <div className="living-tree-pptx-placeholder" aria-label="PPTX placeholder">
+          <div className="living-tree-pptx-underlay" aria-hidden="true">
+            <strong>{treeNode.title}</strong>
+            {treeNode.summary && treeNode.summary !== treeNode.title ? <p>{treeNode.summary}</p> : null}
+            {treeNode.outline && treeNode.outline.length > 0 ? (
+              <ul>
+                {treeNode.outline.slice(0, 3).map((item, index) => (
+                  <li key={`${treeNode.id}-pptx-underlay-${index}`}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          <div className="living-tree-pptx-placeholder-mask">
+            <div className="living-tree-pptx-placeholder-art" aria-hidden="true">
+              <span className="living-tree-pptx-placeholder-file">
+                <i className="living-tree-pptx-placeholder-fold" />
+                <strong>PPTX</strong>
+                <span className="living-tree-pptx-placeholder-chart">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </span>
+            </div>
+            <div className="living-tree-pptx-placeholder-copy">
+              <strong>暂无缩略图预览</strong>
+              <span>以实际生成的 PPTX 为准</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  ) : kind === "deck" && completedArtifact ? (
+    <article
+      className={`${nodeClassName} has-completed-artifact`}
+      data-vibe-kind={kind}
+      data-motion-role={motionRole}
+      data-slide-push={slidePushState}
+    >
+      {nodeFrame}
+      {nodeHandles}
+      <div className="living-tree-deck-completed-copy">
+        <div className="living-tree-deck-completed-head">
+          <span>{label}</span>
+          <Tag color="success">{vibeStageLabel("completed", t)}</Tag>
+        </div>
+        <strong>{completedArtifactTitle || treeNode.title}</strong>
+      </div>
+      <VibeDeckPptxArt />
+      <VibeArtifactActions artifact={completedArtifact} onPreview={onPreviewArtifact} />
+    </article>
+  ) : (
+    <article
+      className={nodeClassName}
+      data-vibe-kind={kind}
+      data-motion-role={motionRole}
+      data-slide-push={slidePushState}
+    >
+      {nodeFrame}
+      {nodeHandles}
+      <div className="living-tree-flow-node-head">
+        {drawingContent ? <AnimatedTextLine text={label} {...nextDrawingLineProps()} /> : <span>{label}</span>}
+        {renderNodeBadges()}
+      </div>
+      {drawingContent ? <AnimatedTextLine as="strong" text={treeNode.title} {...nextDrawingLineProps()} /> : <strong>{treeNode.title}</strong>}
+      {treeNode.summary && treeNode.summary !== treeNode.title ? (
+        drawingContent
+          ? <AnimatedTextLine as="p" text={treeNode.summary} {...nextDrawingLineProps()} />
+          : <p>{treeNode.summary}</p>
+      ) : null}
+      {treeNode.outline && treeNode.outline.length > 0 ? (
+        <ul>
+          {treeNode.outline.slice(0, 3).map((item, index) => (
+            drawingContent
+              ? <AnimatedTextLine as="li" key={`${treeNode.id}-outline-${index}`} text={item} {...nextDrawingLineProps()} />
+              : <li key={`${treeNode.id}-outline-${index}`}>{item}</li>
+          ))}
+        </ul>
+      ) : null}
+      {visualAssets.length > 0 ? (
+        <div className="living-tree-visuals">
+          {visualAssets.map((asset, index) => (
+            <AnimatedVisualAssetIcon
+              key={`${treeNode.id}-visual-${index}`}
+              asset={asset}
+              index={index}
+              delayMs={visualAssetTimings[index]?.delayMs ?? 0}
+              durationMs={visualAssetTimings[index]?.durationMs ?? VIBE_NODE_VISUAL_ASSET_MS}
+              drawing={drawingContent}
+            />
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+
+  return (
+    <Popover
+      content={data.popoverContent}
+      open={data.popoverOpen}
+      placement="right"
+      trigger="click"
+      autoAdjustOverflow
+      overlayClassName="living-tree-popover-overlay"
+    >
+      {nodeCard}
+    </Popover>
+  );
+}
+
+function VibeTreeLaneNode({ data }: NodeProps<FlowNode<VibeCanvasData>>) {
+  return (
+    <section className={`living-tree-lane is-lane-${data.laneIndex ?? 0}`} aria-label={`${data.treeNode.title} chapter lane`}>
+      <div className="living-tree-lane-label">
+        <span>Chapter Lane</span>
+        <strong>{data.treeNode.title}</strong>
+      </div>
+    </section>
+  );
+}
+
+export function buildVibeFlowModel(snapshot: VibeTreeSnapshot, t?: (key: string, vars?: Record<string, string | number>) => string): {
+  nodes: Array<FlowNode<VibeCanvasData>>;
+  edges: Edge[];
+  nodeMap: Map<string, VibeProjectTreeNode>;
+} {
+  const showDeck = shouldShowDeck(snapshot.stage);
+  const originalNodes = showDeck ? snapshot.tree.nodes : snapshot.tree.nodes.filter((node) => node.kind !== "deck");
+  const nodeMap = new Map(originalNodes.map((node) => [node.id, node]));
+  const generatedSlideNodes: VibeProjectTreeNode[] = [];
+  if (shouldSynthesizeGeneratedSlides(snapshot, nodeMap)) {
+    for (const outline of originalNodes.filter((node) => isOutlineLikeNode(node, nodeMap))) {
+      generatedSlideNodes.push({
+        ...outline,
+        id: `generated-${outline.id}`,
+        parentId: outline.id,
+        kind: "generated_slide",
+        title: outline.title,
+        summary: outline.summary ? (t ? t("vibe.synth.generatedPage", { summary: outline.summary }) : `Generated page: ${outline.summary}`) : (t ? t("vibe.synth.generatedPagePreview") : "Generated page preview."),
+        trace: [...(outline.trace ?? []), outline.id],
+      });
+    }
+  }
+  const outputSlideNodes = [
+    ...originalNodes.filter((node) => kindForVibeNode(node, snapshot.stage) === "generated_slide"),
+    ...generatedSlideNodes,
+  ];
+  for (const s of outputSlideNodes) {
+    if (!nodeMap.has(s.id)) nodeMap.set(s.id, s);
+  }
+  const originalDeckNode = originalNodes.find((node) => node.kind === "deck");
+  const deckNode: VibeProjectTreeNode | undefined = originalDeckNode ?? (showDeck && outputSlideNodes.length > 0
+    ? {
+        id: "deck",
+        kind: "deck",
+        title: t ? t("vibe.synth.deckTitle") : "Full PPTX Deck",
+        summary: snapshot.stage === "completed" ? (t ? t("vibe.synth.deckSummaryCompleted") : "All pages assembled into deliverable PPTX.") : (t ? t("vibe.synth.deckSummaryRendering") : "Assembling pages into final PPTX."),
+      }
+    : undefined);
+  const allNodes = [...originalNodes, ...generatedSlideNodes, ...(deckNode && !originalDeckNode ? [deckNode] : [])];
+  for (const node of allNodes) nodeMap.set(node.id, node);
+
+  const byColumn = new Map<number, VibeProjectTreeNode[]>();
+  for (const node of allNodes) {
+    const column = vibeNodeColumn(kindForVibeNode(node, snapshot.stage));
+    byColumn.set(column, [...(byColumn.get(column) ?? []), node]);
+  }
+
+  const yById = layoutVibeTreeYPositions(byColumn, allNodes, snapshot.stage);
+  const xSpacing = VIBE_NODE_COLUMN_SPACING;
+  const laneNodes = buildVibeLaneNodes(allNodes, yById, snapshot.stage, xSpacing);
+  const flowNodes: Array<FlowNode<VibeCanvasData>> = [];
+  for (const [column, columnNodes] of byColumn.entries()) {
+    for (const node of [...columnNodes].sort(compareVibeNodes)) {
+      const kind = kindForVibeNode(node, snapshot.stage);
+      const nodeHeight = estimateVibeNodeHeight(kind, node);
+      const nodeWidth = vibeNodeWidth(kind);
+      const expectedPageCount = kind === "slide_group" ? countExpectedChapterPages(nodeMap, node.id, snapshot.stage) : undefined;
+      flowNodes.push({
+        id: node.id,
+        type: "vibeNode",
+        position: { x: column * xSpacing, y: yById.get(node.id) ?? VIBE_TREE_CANVAS_CENTER_Y },
+        width: nodeWidth,
+        height: nodeHeight,
+        style: { width: nodeWidth, height: nodeHeight },
+        data: {
+          treeNode: node,
+          kind,
+          label: vibeNodeKindLabel(kind),
+          muted: kind === "generated_slide" && snapshot.stage === "rendering",
+          expectedPageCount,
+        },
+        draggable: false,
+        zIndex: 2,
+      });
+    }
+  }
+
+  const edges: Edge[] = [];
+  for (const node of allNodes) {
+    if (!node.parentId || !nodeMap.has(node.parentId)) continue;
+    edges.push({
+      id: `${node.parentId}-${node.id}`,
+      source: node.parentId,
+      target: node.id,
+      type: "straight",
+      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "rgba(86, 69, 212, 0.58)" },
+      className: "living-tree-edge",
+    });
+  }
+  if (deckNode) {
+    for (const slide of outputSlideNodes) {
+      edges.push({
+        id: `${slide.id}-${deckNode.id}`,
+        source: slide.id,
+        target: deckNode.id,
+        type: "straight",
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+        className: "living-tree-edge",
+      });
+    }
+  }
+
+  return { nodes: [...laneNodes, ...flowNodes], edges, nodeMap };
+}
+
+function storyReadySnapshotForIdeaGate(snapshot: VibeTreeSnapshot, ideaConfirmed: boolean): VibeTreeSnapshot {
+  if (snapshot.stage !== "story_ready" || ideaConfirmed) return snapshot;
+  const rootNode = snapshot.tree.nodes.find((node) => node.id === snapshot.tree.rootId) ?? snapshot.tree.nodes.find((node) => node.kind === "root");
+  if (!rootNode) return snapshot;
+  return {
+    ...snapshot,
+    tree: {
+      ...snapshot.tree,
+      nodes: [rootNode],
+    },
+    confirmation: { nodeIds: [rootNode.id] },
+  };
+}
+
+function buildVibeLaneNodes(allNodes: VibeProjectTreeNode[], yById: Map<string, number>, stage: VibeTreeSnapshot["stage"], xSpacing: number) {
+  const nodeMap = new Map(allNodes.map((node) => [node.id, node]));
+  const laneNodes: Array<FlowNode<VibeCanvasData>> = [];
+  const slideGroups = allNodes.filter((node) => kindForVibeNode(node, stage) === "slide_group").sort(compareVibeNodes);
+  slideGroups.forEach((group, index) => {
+    const descendants = descendantNodes(nodeMap, group.id).filter((node) => yById.has(node.id));
+    const visibleMembers = [group, ...descendants].filter((node) => yById.has(node.id));
+    if (visibleMembers.length <= 1) return;
+
+    const top = Math.min(...visibleMembers.map((node) => yById.get(node.id) ?? VIBE_TREE_CANVAS_CENTER_Y));
+    const bottom = Math.max(...visibleMembers.map((node) => {
+      const kind = kindForVibeNode(node, stage);
+      return (yById.get(node.id) ?? VIBE_TREE_CANVAS_CENTER_Y) + estimateVibeNodeHeight(kind, node);
+    }));
+    const rightmostColumn = Math.max(...visibleMembers.map((node) => vibeNodeColumn(kindForVibeNode(node, stage))));
+    const laneX = vibeNodeColumn("slide_group") * xSpacing - 28;
+    const laneY = top - VIBE_LANE_VERTICAL_PADDING;
+    const rightmostNodeWidth = Math.max(...visibleMembers.map((node) => vibeNodeWidth(kindForVibeNode(node, stage))));
+    const laneWidth = (rightmostColumn * xSpacing + rightmostNodeWidth + 28) - laneX;
+    const laneHeight = bottom - top + VIBE_LANE_VERTICAL_PADDING * 2;
+
+    laneNodes.push({
+      id: `lane-${group.id}`,
+      type: "vibeLane",
+      position: { x: laneX, y: laneY },
+      data: {
+        treeNode: group,
+        kind: "slide_group",
+        label: "Chapter Lane",
+        laneIndex: index,
+      },
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      zIndex: 0,
+      style: { width: laneWidth, height: laneHeight },
+    });
+  });
+  return laneNodes;
+}
+
+function layoutVibeTreeYPositions(byColumn: Map<number, VibeProjectTreeNode[]>, allNodes: VibeProjectTreeNode[], stage: VibeTreeSnapshot["stage"]) {
+  const childrenByParent = new Map<string, VibeProjectTreeNode[]>();
+  for (const node of allNodes) {
+    if (!node.parentId) continue;
+    childrenByParent.set(node.parentId, [...(childrenByParent.get(node.parentId) ?? []), node]);
+  }
+
+  const yById = new Map<string, number>();
+  const columns = [...byColumn.keys()].sort((a, b) => b - a);
+  for (const column of columns) {
+    const sortedNodes = [...(byColumn.get(column) ?? [])].sort(compareVibeNodes);
+    if (sortedNodes.length === 0) continue;
+
+    const compactY = compactVibeColumnPositions(sortedNodes, stage);
+    const desiredY = new Map<string, number>();
+    for (const node of sortedNodes) {
+      const children = [...(childrenByParent.get(node.id) ?? [])].sort(compareVibeNodes).filter((child) => yById.has(child.id));
+      if (children.length === 0) {
+        desiredY.set(node.id, compactY.get(node.id) ?? VIBE_TREE_CANVAS_CENTER_Y);
+        continue;
+      }
+      const childCenters = children.map((child) => {
+        const childKind = kindForVibeNode(child, stage);
+        return (yById.get(child.id) ?? VIBE_TREE_CANVAS_CENTER_Y) + estimateVibeNodeHeight(childKind, child) / 2;
+      });
+      const childClusterCenter = (Math.min(...childCenters) + Math.max(...childCenters)) / 2;
+      const nodeKind = kindForVibeNode(node, stage);
+      desiredY.set(node.id, childClusterCenter - estimateVibeNodeHeight(nodeKind, node) / 2);
+    }
+
+    for (const [id, y] of resolveVibeColumnCollisions(sortedNodes, desiredY, stage)) {
+      yById.set(id, y);
+    }
+  }
+  return yById;
+}
+
+function compactVibeColumnPositions(nodes: VibeProjectTreeNode[], stage: VibeTreeSnapshot["stage"]) {
+  const positions = new Map<string, number>();
+  const heights = nodes.map((node) => estimateVibeNodeHeight(kindForVibeNode(node, stage), node));
+  const gaps = nodes.slice(0, -1).map((node, index) => vibeNodeVerticalGapBetween(node, nodes[index + 1], stage));
+  const totalHeight = heights.reduce((sum, height) => sum + height, 0) + gaps.reduce((sum, gap) => sum + gap, 0);
+  let cursorY = VIBE_TREE_CANVAS_CENTER_Y - totalHeight / 2;
+  nodes.forEach((node, index) => {
+    positions.set(node.id, cursorY);
+    cursorY += (heights[index] ?? VIBE_NODE_HEIGHTS.branch) + (gaps[index] ?? 0);
+  });
+  return positions;
+}
+
+function resolveVibeColumnCollisions(nodes: VibeProjectTreeNode[], desiredY: Map<string, number>, stage: VibeTreeSnapshot["stage"]) {
+  const resolved = new Map<string, number>();
+  let previousBottom = Number.NEGATIVE_INFINITY;
+  let previousNode: VibeProjectTreeNode | undefined;
+  for (const node of nodes) {
+    const desired = desiredY.get(node.id) ?? VIBE_TREE_CANVAS_CENTER_Y;
+    const gap = previousNode ? vibeNodeVerticalGapBetween(previousNode, node, stage) : 0;
+    const y = Math.max(desired, previousBottom + gap);
+    resolved.set(node.id, y);
+    previousBottom = y + estimateVibeNodeHeight(kindForVibeNode(node, stage), node);
+    previousNode = node;
+  }
+  return resolved;
+}
+
+function vibeNodeVerticalGapBetween(a: VibeProjectTreeNode | undefined, b: VibeProjectTreeNode | undefined, stage: VibeTreeSnapshot["stage"]) {
+  const aKind = a ? kindForVibeNode(a, stage) : undefined;
+  const bKind = b ? kindForVibeNode(b, stage) : undefined;
+  return aKind === "generated_slide" || bKind === "generated_slide" ? VIBE_GENERATED_SLIDE_VERTICAL_GAP : VIBE_NODE_VERTICAL_GAP;
+}
+
+function compareVibeNodes(a: VibeProjectTreeNode, b: VibeProjectTreeNode) {
+  if (typeof a.slideNumber === "number" && typeof b.slideNumber === "number") return a.slideNumber - b.slideNumber;
+  if (typeof a.slideNumber === "number") return -1;
+  if (typeof b.slideNumber === "number") return 1;
+  return a.id.localeCompare(b.id);
+}
+
+function estimateVibeNodeHeight(kind: VibeCanvasNodeKind, node: VibeProjectTreeNode) {
+  const fixedHeight = VIBE_NODE_HEIGHTS[kind];
+  if (kind === "generated_slide") return fixedHeight;
+  const contentHeight = estimateVibeNodeContentHeight(node);
+  if (kind === "outline") return Math.max(fixedHeight, contentHeight);
+  const hasExtraContent = Boolean(node.outline?.length || node.visualAssets?.length);
+  return Math.max(hasExtraContent ? fixedHeight + 24 : fixedHeight, contentHeight);
+}
+
+function vibeNodeWidth(kind: VibeCanvasNodeKind) {
+  return VIBE_NODE_WIDTHS[kind] ?? VIBE_NODE_WIDTH;
+}
+
+function estimateVibeNodeTextLines(text: string | undefined, charsPerLine: number, maxLines?: number) {
+  if (!text) return 0;
+  const normalized = text.trim();
+  if (!normalized) return 0;
+  const lineCount = Math.max(1, Math.ceil(Array.from(normalized).length / charsPerLine));
+  return typeof maxLines === "number" ? Math.min(lineCount, maxLines) : lineCount;
+}
+
+function estimateVibeNodeContentHeight(node: VibeProjectTreeNode) {
+  const titleLines = estimateVibeNodeTextLines(node.title, 18);
+  const summaryLines = node.summary && node.summary !== node.title ? estimateVibeNodeTextLines(node.summary, 20, 3) : 0;
+  const outlineLines = (node.outline ?? [])
+    .slice(0, 3)
+    .reduce((sum, item) => sum + estimateVibeNodeTextLines(item, 24), 0);
+  const outlineGaps = Math.max(0, Math.min(node.outline?.length ?? 0, 3) - 1) * 4;
+  const visualRows = Math.min(node.visualAssets?.length ?? 0, VIBE_NODE_MAX_VISUAL_ASSETS) > 0 ? 1 : 0;
+  const paddingY = 24;
+  const headHeight = 18;
+  const headMargin = 8;
+  const titleHeight = titleLines * 19.04;
+  const summaryHeight = summaryLines > 0 ? 7 + summaryLines * 18 : 0;
+  const outlineHeight = outlineLines > 0 ? 8 + outlineLines * 15.62 + outlineGaps : 0;
+  const visualsHeight = visualRows > 0 ? 10 + 34 : 0;
+  return Math.ceil(paddingY + headHeight + headMargin + titleHeight + summaryHeight + outlineHeight + visualsHeight + 14);
+}
+
+function kindForVibeNode(node: VibeProjectTreeNode, stage: VibeTreeSnapshot["stage"]): VibeCanvasNodeKind {
+  if (node.kind === "root") return "root";
+  if (node.kind === "branch") return "branch";
+  if (node.kind === "slide_group") return "slide_group";
+  if (node.kind === "outline") return "outline";
+  if (node.kind === "generated_slide") return "generated_slide";
+  if (node.kind === "slide" && (stage === "slides_ready" || stage === "rendering" || stage === "completed" || node.parentId?.startsWith("outline-"))) return "generated_slide";
+  if (node.kind === "deck") return "deck";
+  return "outline";
+}
+
+function vibeNodeColumn(kind: VibeCanvasNodeKind) {
+  switch (kind) {
+    case "root":
+      return 0;
+    case "branch":
+      return 1;
+    case "slide_group":
+      return 2;
+    case "outline":
+      return 3;
+    case "generated_slide":
+      return 4;
+    case "deck":
+      return 6;
+  }
+}
+
+function vibeNodeKindLabel(kind: VibeCanvasNodeKind) {
+  switch (kind) {
+    case "root":
+      return "Idea";
+    case "branch":
+      return "Story Beat";
+    case "slide_group":
+      return "Chapter";
+    case "outline":
+      return "Outline";
+    case "generated_slide":
+      return "Slide";
+    case "deck":
+      return "Deck";
+  }
+}
+
+function thinkingTargetKindForStage(stage: VibeTreeSnapshot["stage"]): VibeCanvasNodeKind | null {
+  switch (stage) {
+    case "story_ready":
+      return "slide_group";
+    case "outline_ready":
+      return "outline";
+    case "refined_ready":
+      return "generated_slide";
+    default:
+      return null;
+  }
+}
+
+function buildVibeThinkingTransitionElements(
+  flowModel: { nodes: Array<FlowNode<VibeCanvasData>>; edges: Edge[]; nodeMap: Map<string, VibeProjectTreeNode> },
+  stage: VibeTreeSnapshot["stage"],
+  sourceNodeIds: string[],
+  targetKind: VibeCanvasNodeKind,
+  phase: VibeThinkingState,
+): { nodes: Array<FlowNode<VibeCanvasData>>; edges: Edge[] } {
+  if (sourceNodeIds.length === 0) return { nodes: [], edges: [] };
+  const nodes: Array<FlowNode<VibeCanvasData>> = [];
+  const edges: Edge[] = [];
+  const targetColumn = vibeNodeColumn(targetKind);
+  const targetColumnWidth = vibeNodeWidth(targetKind);
+
+  for (const sourceNodeId of sourceNodeIds) {
+    const sourceNode = flowModel.nodes.find((node) => node.id === sourceNodeId);
+    if (!sourceNode || sourceNode.type !== "vibeNode" || sourceNode.data.kind === "thinking") continue;
+    const sourceHeight = Number(sourceNode.height ?? sourceNode.style?.height ?? estimateVibeNodeHeight(sourceNode.data.kind as VibeCanvasNodeKind, sourceNode.data.treeNode));
+    const thinkingNodeId = `thinking-${sourceNodeId}-${stage}`;
+    nodes.push({
+      id: thinkingNodeId,
+      type: "vibeNode",
+      position: {
+        x: targetColumn * VIBE_NODE_COLUMN_SPACING + Math.max(0, (targetColumnWidth - VIBE_THINKING_NODE_WIDTH) / 2),
+        y: sourceNode.position.y + sourceHeight / 2 - VIBE_THINKING_NODE_HEIGHT / 2,
+      },
+      width: VIBE_THINKING_NODE_WIDTH,
+      height: VIBE_THINKING_NODE_HEIGHT,
+      style: { width: VIBE_THINKING_NODE_WIDTH, height: VIBE_THINKING_NODE_HEIGHT },
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      zIndex: phase === "active" ? 4 : 5,
+      data: {
+        treeNode: {
+          id: thinkingNodeId,
+          parentId: sourceNodeId,
+          kind: "thinking",
+          title: "Thinking...",
+          summary: phase === "done" ? "Done" : `Generating ${vibeNodeKindLabel(targetKind)}`,
+        },
+        kind: "thinking",
+        label: vibeNodeKindLabel(targetKind),
+        thinkingState: phase,
+        thinkingTargetKind: targetKind,
+      },
+    });
+    edges.push({
+      id: `${sourceNodeId}-${thinkingNodeId}`,
+      source: sourceNodeId,
+      target: thinkingNodeId,
+      type: "straight",
+      animated: phase === "active",
+      markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: phase === "active" ? "rgba(196, 122, 18, 0.92)" : phase === "done" ? "rgba(22, 163, 74, 0.86)" : "rgba(86, 69, 212, 0.58)" },
+      style: { strokeWidth: 2.6 },
+      className: `living-tree-edge is-thinking is-thinking-${phase}`,
+    });
+  }
+
+  return { nodes, edges };
+}
+
+function shouldShowGeneratedSlides(stage: VibeTreeSnapshot["stage"]) {
+  return stage === "slides_ready" || stage === "rendering" || stage === "completed";
+}
+
+function shouldShowDeck(stage: VibeTreeSnapshot["stage"]) {
+  return stage === "rendering" || stage === "completed";
+}
+
+function shouldSynthesizeGeneratedSlides(snapshot: VibeTreeSnapshot, nodeMap: Map<string, VibeProjectTreeNode>) {
+  if (!shouldShowGeneratedSlides(snapshot.stage)) return false;
+  if (snapshot.tree.nodes.some((node) => node.kind === "slide" || node.kind === "generated_slide")) return false;
+  return !snapshot.tree.nodes.some((node) => node.kind === "slide" && node.parentId && nodeMap.get(node.parentId)?.kind === "outline");
+}
+
+function isOutlineLikeNode(node: VibeProjectTreeNode, nodeMap: Map<string, VibeProjectTreeNode>) {
+  if (node.kind === "outline") return true;
+  return node.kind === "slide" && node.parentId !== undefined && nodeMap.get(node.parentId)?.kind !== "outline";
+}
+
+function descendantNodes(nodeMap: Map<string, VibeProjectTreeNode>, nodeId: string) {
+  const descendants: VibeProjectTreeNode[] = [];
+  const visit = (parentId: string) => {
+    for (const node of nodeMap.values()) {
+      if (node.parentId !== parentId) continue;
+      descendants.push(node);
+      visit(node.id);
+    }
+  };
+  visit(nodeId);
+  return descendants;
+}
+
+function countExpectedChapterPages(nodeMap: Map<string, VibeProjectTreeNode>, nodeId: string, stage: VibeTreeSnapshot["stage"]) {
+  const descendants = descendantNodes(nodeMap, nodeId);
+  const actualPageNodes = descendants.filter((node) => {
+    const kind = kindForVibeNode(node, stage);
+    return kind === "generated_slide" || node.kind === "generated_slide";
+  });
+  if (actualPageNodes.length > 0) return actualPageNodes.length;
+  return descendants.filter((node) => isOutlineLikeNode(node, nodeMap)).length;
+}
+
+function nearestConfirmableAncestor(nodeMap: Map<string, VibeProjectTreeNode>, node: VibeProjectTreeNode, confirmableNodeIds: Set<string>) {
+  let parentId = node.parentId;
+  while (parentId) {
+    const parent = nodeMap.get(parentId);
+    if (!parent) return undefined;
+    if (confirmableNodeIds.has(parent.id)) return parent;
+    parentId = parent.parentId;
+  }
+  return undefined;
+}
+
+function currentStepConfirmableNodeIds(nodes: Array<FlowNode<VibeCanvasData>>, snapshot: VibeTreeSnapshot, overrideKinds?: VibeCanvasNodeKind[]) {
+  const kinds = overrideKinds ?? defaultConfirmableKinds(snapshot.stage);
+  if (snapshot.confirmation?.nodeIds?.length) {
+    if (kinds.length === 0) return new Set<string>();
+    return new Set(snapshot.confirmation.nodeIds);
+  }
+  return new Set(nodes.filter((node) => kinds.includes(node.data.kind as VibeCanvasNodeKind)).map((node) => node.id));
+}
+
+function defaultConfirmableKinds(stage: VibeTreeSnapshot["stage"]): VibeCanvasNodeKind[] {
+  switch (stage) {
+    case "story_ready":
+      return ["branch"];
+    case "outline_ready":
+      return ["slide_group"];
+    case "refined_ready":
+      return ["outline"];
+    case "slides_ready":
+      return [];
+    case "rendering":
+      return [];
+    case "completed":
+      return ["deck"];
+    default:
+      return [];
+  }
+}
+
+function completedVibeKindsForStage(stage: VibeTreeSnapshot["stage"]): VibeCanvasNodeKind[] {
+  switch (stage) {
+    case "story_ready":
+      return ["root"];
+    case "outline_ready":
+      return ["root", "branch"];
+    case "refined_ready":
+      return ["root", "branch", "slide_group"];
+    case "slides_ready":
+    case "rendering":
+      return ["root", "branch", "slide_group", "outline"];
+    case "completed":
+      return ["root", "branch", "slide_group", "outline", "generated_slide", "deck"];
+    default:
+      return [];
+  }
+}
+
+function currentTaskTitle(stage: VibeTreeSnapshot["stage"], ideaGateActive = false, t: (key: string, vars?: Record<string, string | number>) => string) {
+  if (ideaGateActive) return t("vibe.stage.confirmIdea");
+  switch (stage) {
+    case "story_ready":
+      return t("vibe.stage.confirmStoryBeat");
+    case "outline_ready":
+      return t("vibe.stage.confirmChapter");
+    case "refined_ready":
+      return t("vibe.stage.confirmOutline");
+    case "slides_ready":
+      return t("vibe.stage.pptxGenerated");
+    case "rendering":
+      return t("vibe.stage.generatingPptx");
+    case "completed":
+      return t("vibe.stage.pptxCompleted");
+    default:
+      return t("vibe.stage.confirmCurrentNode");
+  }
+}
+
+function currentTaskDescription(stage: VibeTreeSnapshot["stage"], confirmedCount: number, totalCount: number, ideaGateActive = false, t: (key: string, vars?: Record<string, string | number>) => string) {
+  if (totalCount === 0) {
+    if (stage === "slides_ready") return t("vibe.desc.pptxGenerated");
+    if (stage === "rendering") return t("vibe.desc.rendering");
+    if (stage === "completed") return t("vibe.desc.completed");
+    return t("vibe.desc.noNodesToConfirm");
+  }
+  if (ideaGateActive) return t("vibe.desc.confirmIdeaFirst");
+  const remaining = totalCount - confirmedCount;
+  if (remaining <= 0) {
+    switch (stage) {
+      case "story_ready":
+        return t("vibe.desc.storyConfirmedNext");
+      case "outline_ready":
+        return t("vibe.desc.chapterConfirmedNext");
+      case "refined_ready":
+        return t("vibe.desc.outlineConfirmedNext");
+      case "slides_ready":
+        return t("vibe.desc.slidesReady");
+      case "rendering":
+        return t("vibe.desc.rendering");
+      case "completed":
+        return t("vibe.desc.completed");
+      default:
+        return t("vibe.desc.allConfirmedNext");
+    }
+  }
+  return t("vibe.desc.remaining", { remaining });
+}
+
+function vibeMiniMapNodeColor(kind: VibeFlowNodeKind | undefined) {
+  switch (kind) {
+    case "root":
+      return "#5645d4";
+    case "branch":
+      return "#ffb25f";
+    case "slide_group":
+      return "#8f7cf6";
+    case "outline":
+      return "#60c979";
+    case "generated_slide":
+      return "#42a5f5";
+    case "deck":
+      return "#2f855a";
+    case "thinking":
+      return "#c47a12";
+    default:
+      return "#c7c2f5";
+  }
+}
+
+function VibeProgressSteps({ stage, progressIndex, motionPhase, taskCard, autoOpenTaskCard }: {
+  stage: VibeTreeSnapshot["stage"];
+  progressIndex?: number;
+  motionPhase?: string;
+  taskCard?: ReactNode;
+  autoOpenTaskCard?: boolean;
+}) {
+  const activeIndex = progressIndex ?? vibeProgressIndex(stage);
+  const [manualOpen, setManualOpen] = useState(false);
+  const prevActiveIndexRef = useRef(activeIndex);
+  if (prevActiveIndexRef.current !== activeIndex) {
+    prevActiveIndexRef.current = activeIndex;
+    if (manualOpen) setManualOpen(false);
+  }
+  useEffect(() => {
+    if (!autoOpenTaskCard) setManualOpen(false);
+  }, [autoOpenTaskCard]);
+  const popoverOpen = manualOpen || Boolean(autoOpenTaskCard);
+  const steps: Array<{ label: string; key: VibeCanvasNodeKind }> = [
+    { label: "Idea", key: "root" },
+    { label: "Story Beat", key: "branch" },
+    { label: "Chapter", key: "slide_group" },
+    { label: "Outline", key: "outline" },
+    { label: "PPTX", key: "generated_slide" },
+  ];
+  return (
+    <nav className="living-tree-steps" aria-label="Vibe-Officing progress" data-active-index={activeIndex} data-motion-phase={motionPhase ?? "settled"} data-vibe-stage={stage}>
+      {steps.map((step, index) => {
+        const isActive = index === activeIndex;
+        const stepEl = (
+          <div
+            key={step.key}
+            className={`living-tree-step ${index < activeIndex ? "is-done" : ""} ${isActive ? "is-active" : ""}`}
+            data-step-key={step.key}
+            data-step-index={index}
+            data-step-state={index < activeIndex ? "done" : isActive ? "active" : "pending"}
+          >
+            <span>{index < activeIndex ? "✓" : index + 1}</span>
+            <strong>{step.label}</strong>
+          </div>
+        );
+        if (isActive && taskCard) {
+          return (
+            <Popover
+              key={step.key}
+              content={taskCard}
+              open={popoverOpen}
+              onOpenChange={setManualOpen}
+              trigger="click"
+              placement="bottom"
+              overlayClassName="living-tree-step-popover"
+              arrow={{ pointAtCenter: true }}
+              forceRender
+            >
+              {stepEl}
+            </Popover>
+          );
+        }
+        return stepEl;
+      })}
+    </nav>
+  );
+}
+
+function vibeProgressIndex(stage: VibeTreeSnapshot["stage"]) {
+  switch (stage) {
+    case "story_ready":
+      return 1;
+    case "outline_ready":
+      return 2;
+    case "refined_ready":
+      return 3;
+    case "slides_ready":
+      return 4;
+    case "rendering":
+      return 4;
+    case "completed":
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+function vibeStageLabel(stage: VibeTreeSnapshot["stage"], t: (key: string, vars?: Record<string, string | number>) => string) {
+  const key = `vibe.stageLabel.${stage}`;
+  const val = t(key);
+  return val !== key ? val : stage;
+}
+
 function ThinkingMessage() {
   const t = useT();
   return (
@@ -1359,11 +4347,26 @@ function ThinkingMessage() {
   );
 }
 
-type GenerationLoadingVariant = "plan" | "docx" | "pptx" | "xlsx" | "report";
+function useMotionPhase(key: string, durationMs = 720) {
+  const [phase, setPhase] = useState<"entering" | "settled">("entering");
+
+  useEffect(() => {
+    setPhase("entering");
+    const timeout = window.setTimeout(() => setPhase("settled"), durationMs);
+    return () => window.clearTimeout(timeout);
+  }, [durationMs, key]);
+
+  return phase;
+}
+
+type GenerationLoadingVariant = "plan" | "canvas" | "docx" | "pptx" | "xlsx" | "report";
 
 const GENERATION_LOADING_DOCUMENT_TYPES = new Set<GenerationLoadingVariant>(["docx", "pptx", "xlsx", "report"]);
 
-function generationLoadingVariant(task: DesktopTask): GenerationLoadingVariant | null {
+function generationLoadingVariant(task: DesktopTask, allowCanvasPreparation = true): GenerationLoadingVariant | null {
+  if (allowCanvasPreparation && isPptCanvasPreparationTask(task)) {
+    return "canvas";
+  }
   if (task.userInput?.generationMode === "plan" && !task.plan) {
     return "plan";
   }
@@ -1373,19 +4376,52 @@ function generationLoadingVariant(task: DesktopTask): GenerationLoadingVariant |
     : null;
 }
 
-function GenerationLoadingMessage({ task }: { task: DesktopTask }) {
+function GenerationLoadingMessage({ task, allowCanvasPreparation = true }: { task: DesktopTask; allowCanvasPreparation?: boolean }) {
   const t = useT();
-  const variant = generationLoadingVariant(task);
+  const { settings } = useSettings();
+  const variant = generationLoadingVariant(task, allowCanvasPreparation);
+  const stageKey = task.stages?.map((stage) => `${stage.id}:${stage.status}`).join("|") ?? "";
+  const motionPhase = useMotionPhase(`${task.status}:${variant ?? "thinking"}:${task.activeStageId ?? ""}:${stageKey}`);
   if (!variant) return <ThinkingMessage />;
 
   return (
-    <div className={`message ai-message generation-loading-message generation-loading-${variant}`} role="status" aria-live="polite">
+    <div
+      className={`generation-loading-message generation-loading-${variant}`}
+      role="status"
+      aria-live="polite"
+      data-motion-status={task.status}
+      data-motion-phase={motionPhase}
+      data-document-type={variant}
+    >
       <div className="generation-loading-status">
         <span className="generation-loading-status-dot" aria-hidden="true" />
         <span>{t(`dialogue.loading.${variant}`)}</span>
       </div>
+      <GenerationStageRail stages={task.stages} activeStageId={task.activeStageId} />
       <GenerationLoadingVisual variant={variant} stages={task.stages} />
+      {settings.waiting2048Enabled ? <Waiting2048Game /> : null}
     </div>
+  );
+}
+
+function GenerationStageRail({ stages, activeStageId }: { stages?: StageState[]; activeStageId?: string }) {
+  if (!stages || stages.length === 0) return null;
+  const resolvedActiveStageId = activeStageId ?? stages.find((stage) => stage.status === "active")?.id ?? "";
+  return (
+    <ol className="generation-stage-rail" data-active-stage-id={resolvedActiveStageId} data-stage-count={stages.length}>
+      {stages.map((stage, index) => (
+        <li
+          key={stage.id}
+          className={`generation-stage-item is-stage-${stage.status}`}
+          data-stage-id={stage.id}
+          data-stage-index={index}
+          data-stage-status={stage.status}
+        >
+          <span className="generation-stage-marker" aria-hidden="true" />
+          <span className="generation-stage-label">{stage.label}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -1394,6 +4430,7 @@ function GenerationLoadingVisual({ variant, stages }: { variant: GenerationLoadi
     <div className="generation-loading-visual" aria-hidden="true">
       {variant === "docx" ? <DocxGenerationSkeleton /> : null}
       {variant === "pptx" ? <PptxGenerationSkeleton /> : null}
+      {variant === "canvas" ? <PptxCanvasPreparationSkeleton /> : null}
       {variant === "xlsx" ? <XlsxGenerationSkeleton /> : null}
       {variant === "report" ? <ReportGenerationSkeleton /> : null}
       {variant === "plan" ? <PlanGenerationSkeleton stages={stages} /> : null}
@@ -1435,6 +4472,11 @@ function DocxGenerationSkeleton() {
 function PptxGenerationSkeleton() {
   return (
     <div className="generation-loading-artifact generation-loading-slide">
+      <div className="generation-loading-deck-stack" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
       <div className="generation-loading-slide-body">
         <div className="generation-loading-slide-title">
           <GenerationLoadingLine width="58%" height="10px" />
@@ -1457,6 +4499,71 @@ function PptxGenerationSkeleton() {
             />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function PptxCanvasPreparationSkeleton() {
+  return (
+    <div className="generation-loading-canvas-stage">
+      <CanvasPreparationVector />
+    </div>
+  );
+}
+
+function CanvasPreparationVector() {
+  const gradientId = useId().replace(/:/g, "");
+  const surfaceGradientId = `${gradientId}-canvas-surface`;
+  const lineGradientId = `${gradientId}-canvas-line`;
+  return (
+    <svg className="canvas-preparation-vector" viewBox="0 0 294 202" role="img" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id={surfaceGradientId} x1="34" y1="30" x2="248" y2="164" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f8fbff" />
+          <stop offset="0.58" stopColor="#fffdf9" />
+          <stop offset="1" stopColor="#f7fafc" />
+        </linearGradient>
+        <linearGradient id={lineGradientId} x1="72" y1="70" x2="188" y2="70" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#dce4eb" />
+          <stop offset="0.5" stopColor="#edf3f4" />
+          <stop offset="1" stopColor="#d8b986" />
+        </linearGradient>
+      </defs>
+      <rect className="canvas-vector-grid" x="20" y="18" width="254" height="166" rx="18" />
+      <rect className="canvas-vector-frame" x="31" y="31" width="232" height="141" rx="13" />
+      <rect className="canvas-vector-page" x="45" y="44" width="204" height="115" rx="9" fill={`url(#${surfaceGradientId})`} />
+      <g className="canvas-vector-copy">
+        <rect className="canvas-vector-line canvas-vector-line-1" x="64" y="68" width="118" height="9" rx="4.5" fill={`url(#${lineGradientId})`} />
+        <rect className="canvas-vector-line canvas-vector-line-2" x="64" y="88" width="76" height="8" rx="4" fill={`url(#${lineGradientId})`} />
+        <rect className="canvas-vector-line canvas-vector-line-3" x="64" y="118" width="100" height="8" rx="4" fill={`url(#${lineGradientId})`} />
+        <rect className="canvas-vector-line canvas-vector-line-4" x="64" y="138" width="84" height="8" rx="4" fill={`url(#${lineGradientId})`} />
+      </g>
+      <g className="canvas-vector-media">
+        <rect className="canvas-vector-media-card" x="178" y="103" width="58" height="43" rx="8" />
+        <rect className="canvas-vector-thumb canvas-vector-thumb-1" x="188" y="126" width="17" height="12" rx="6" />
+        <rect className="canvas-vector-thumb canvas-vector-thumb-2" x="210" y="122" width="17" height="16" rx="7" />
+        <rect className="canvas-vector-thumb canvas-vector-thumb-3" x="232" y="126" width="17" height="12" rx="6" />
+        <rect className="canvas-vector-floating-card" x="206" y="112" width="43" height="31" rx="6" />
+      </g>
+      <path className="canvas-vector-route canvas-vector-route-1" d="M62 63 C98 36 151 36 183 62" />
+      <path className="canvas-vector-route canvas-vector-route-2" d="M158 135 C178 169 228 166 248 135" />
+    </svg>
+  );
+}
+
+function CanvasPreparationTransition({ durationMs }: { durationMs: number }) {
+  const t = useT();
+  return (
+    <div
+      className="canvas-preparation-transition"
+      role="status"
+      aria-label={t("dialogue.loading.canvas")}
+      style={generationLoadingStyle({ "--canvas-preparation-duration": `${durationMs}ms` })}
+    >
+      <div className="canvas-preparation-transition-visual">
+        <PptxCanvasPreparationSkeleton />
+        <strong className="canvas-preparation-transition-label">{t("dialogue.loading.canvas")}</strong>
       </div>
     </div>
   );
@@ -1630,6 +4737,29 @@ function PlanMarkdown({ markdown }: { markdown: string }) {
 }
 
 const PLAN_REVIEW_EXPANDED_STORAGE_PREFIX = "officedex.planReview.expanded.";
+const PPTIST_ANIMATION_PLAYED_STORAGE_PREFIX = "officedex.pptistAnimation.played.";
+
+function pptistAnimationPlayedStorageKey(taskId: string) {
+  return `${PPTIST_ANIMATION_PLAYED_STORAGE_PREFIX}${taskId}`;
+}
+
+function readPptistAnimationPlayed(storageKey: string) {
+  if (!storageKey || typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(storageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function savePptistAnimationPlayed(storageKey: string) {
+  if (!storageKey || typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(storageKey, "1");
+  } catch {
+    // This only controls cosmetic replay suppression; storage failures should not block generation.
+  }
+}
 
 function planReviewExpandedStorageKey(taskId: string, planId: string, revision?: number) {
   return `${PLAN_REVIEW_EXPANDED_STORAGE_PREFIX}${taskId}:${planId}:${revision ?? 0}`;
@@ -1764,7 +4894,7 @@ function PlanReviewActions({ task, onForceCancel }: { task: DesktopTask; onForce
           <span className="plan-review-option-label">{t("dialogue.planReview.approve")}</span>
         </Button>
         <div className="plan-review-composer-row">
-          <Input
+          <ImeInput
             prefix={<EditOutlined />}
             placeholder={t("dialogue.planReview.revisePlaceholder")}
             value={planRevision}
@@ -2295,14 +5425,14 @@ function MultiQuestionComposer({ task, onForceCancel }: { task: DesktopTask; onF
             disabled={submitting}
           >
             {option.label}
-            {option.recommended ? <Tag style={{ marginLeft: 4 }} color="processing">{t("dialogue.question.recommended")}</Tag> : null}
+            {option.recommended ? <Tag aria-hidden="true" style={{ marginLeft: 4 }} color="processing">{t("dialogue.question.recommended")}</Tag> : null}
           </Button>
         ))}
       </div>
 
       {currentQ.allowFreeform !== false ? (
         <form className={`inline-answer${hasFreeformAnswer ? " user-answer-selected" : ""}`} onSubmit={submitFreeform}>
-          <Input
+          <ImeInput
             placeholder={t("dialogue.question.inputPlaceholder")}
             disabled={submitting}
             value={freeformValue}
@@ -2377,7 +5507,7 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
   if (status === "running" || status === "starting") {
     return (
       <div className="docked-composer readonly">
-        <Input prefix={<PaperClipOutlined />} suffix={<LoadingOutlined />} placeholder={t("dialogue.running.placeholder")} disabled />
+        <ImeInput prefix={<PaperClipOutlined />} suffix={<LoadingOutlined />} placeholder={t("dialogue.running.placeholder")} disabled />
         <Button danger icon={<StopOutlined />} loading={cancelling} onClick={async () => {
           setCancelling(true);
           try {
@@ -2397,6 +5527,10 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
         </Button>
       </div>
     );
+  }
+
+  if (status === "question" && isVibeCanvasTask(latestTask)) {
+    return <VibeCanvasCommandBar task={latestTask} onForceCancel={onForceCancel} />;
   }
 
   // Question: show answer form
@@ -2491,7 +5625,7 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
               </Button>
             </Tooltip>
           ) : null}
-          <Input.TextArea
+          <ImeTextArea
             autoSize={{ minRows: 1, maxRows: 4 }}
             placeholder={artifact && isImageArtifact(artifact) ? t("dialogue.completed.continuationPlaceholder") : isModifiable ? t("dialogue.completed.modifyPlaceholder") : t("dialogue.completed.askPlaceholder")}
             value={continuationPrompt}
@@ -2518,7 +5652,7 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
   // Fallback: readonly composer
   return (
     <div className="docked-composer readonly">
-      <Input disabled suffix={<SendOutlined />} placeholder={t("dialogue.completed.askPlaceholder")} />
+      <ImeInput disabled suffix={<SendOutlined />} placeholder={t("dialogue.completed.askPlaceholder")} />
     </div>
   );
 }

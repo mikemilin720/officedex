@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeEvent, DesktopAPI } from "../shared/types";
 import { applyTaskEvent, createInitialTaskState, reduceStages } from "./taskState";
+import { IDEA_NODE_DRAWING_MS } from "./screens/DialogueScreens";
+
+const DEMO_NODE_SEQUENCE_TIMEOUT_MS = IDEA_NODE_DRAWING_MS * 24 + 3000;
 
 describe("reduceStages", () => {
   it("derives four default stages from task.started + progress events", () => {
@@ -67,12 +70,81 @@ describe("reduceStages", () => {
     expect(task.stages![0].status).toBe("active");
     expect(task.activeStageId).toBe("analyze");
   });
+
+  it("applyTaskEvent stores the latest Vibe Project Tree snapshot", () => {
+    let state = createInitialTaskState();
+    state = applyTaskEvent(state, { task_id: "t", type: "task.started", payload: { document_type: "pptx" } });
+    state = applyTaskEvent(state, {
+      task_id: "t",
+      type: "task.vibe_tree",
+      payload: {
+        stage: "outline_ready",
+        tree: {
+          id: "tree-1",
+          rootId: "root",
+          title: "Rebuild Internal Knowledge Base",
+          nodes: [
+            { id: "root", kind: "root", title: "Rebuild Internal Knowledge Base" },
+            { id: "branch-problem", parentId: "root", kind: "branch", title: "Problem", summary: "Can't find, can't trust, can't use" },
+          ],
+        },
+        actions: [{ id: "refine_slides", label: "Refine Page Content" }],
+      },
+    });
+
+    const task = state.tasks["t"];
+    expect(task.vibeTree?.stage).toBe("outline_ready");
+    expect(task.vibeTree?.tree.nodes[1]?.title).toBe("Problem");
+    expect(task.vibeTree?.actions[0]?.id).toBe("refine_slides");
+  });
 });
 
 describe("App task flow", () => {
+  it("uses the latest prior PPTX artifact as the source for follow-up modify tasks", async () => {
+    const { findModifySourceTask } = await import("./App");
+    const task = findModifySourceTask([
+      {
+        id: "task-vibe",
+        conversationId: "conversation-vibe",
+        status: "completed",
+        documentType: "pptx",
+        events: [],
+        artifact: {
+          taskId: "task-vibe",
+          filePath: "/tmp/deck.pptx",
+          fileName: "deck.pptx",
+          documentType: "pptx",
+        },
+      },
+      {
+        id: "task-edit",
+        conversationId: "conversation-vibe",
+        parentTaskId: "task-vibe",
+        status: "running",
+        documentType: "pptx",
+        events: [],
+        userInput: {
+          prompt: "把最后一页标题改成 hello void",
+          sourceFile: "/tmp/deck.pptx",
+        },
+      },
+    ], "pptx");
+
+    expect(task?.id).toBe("task-vibe");
+    expect(task?.artifact?.filePath).toBe("/tmp/deck.pptx");
+  });
+
+  it("keeps inline preview from toggling native preview mode and resizing the app window", () => {
+    const source = readFileSync("src/renderer/App.tsx", "utf8");
+
+    expect(source).not.toContain("setPreviewMode?.(previewActive)");
+    expect(source).not.toContain("setPreviewMode(previewActive)");
+  });
+
   beforeEach(() => {
     vi.resetModules();
     installDomStubs();
+    window.history.pushState({}, "", "/");
   });
 
   afterEach(() => {
@@ -121,6 +193,57 @@ describe("App task flow", () => {
       generationMode: "plan",
     }));
     expect(bridge.generate).toHaveBeenCalledWith(expect.not.objectContaining({ runtimeMode: expect.anything() }));
+  });
+
+  it("does not render the hardcoded Vibe-Officing demo route", async () => {
+    window.history.pushState({}, "", "/?demo=vibe-officing");
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "From a Single Idea to a Complete PPTX" })).toBeNull();
+    expect(screen.queryByText("OfficeDex Vibe-Officing Demo")).toBeNull();
+    expect(screen.queryByText("Living Tree Cockpit")).toBeNull();
+    expect(bridge.generate).not.toHaveBeenCalled();
+  });
+
+  it("collapses the main sidebar when a real PPT Vibe canvas opens", async () => {
+    const bridge = installBridgeMock();
+    const { App } = await import("./App");
+
+    render(<App />);
+
+    act(() => {
+      bridge.emit({
+        event_id: "event-vibe-started",
+        task_id: "task-vibe-shell",
+        type: "task.started",
+        payload: { document_type: "pptx", topic: "Introduce Shimo Docs" },
+      });
+      bridge.emit({
+        event_id: "event-vibe-tree",
+        task_id: "task-vibe-shell",
+        type: "task.vibe_tree",
+        payload: {
+          stage: "story_ready",
+          tree: {
+            id: "tree-shell",
+            rootId: "root",
+            title: "Introduce Shimo Docs",
+            nodes: [
+              { id: "root", kind: "root", title: "Introduce Shimo Docs" },
+              { id: "branch-1", parentId: "root", kind: "branch", title: "Scale Adoption", summary: "Lower decision barriers with paths and benefits." },
+            ],
+          },
+          actions: [{ id: "generate_chapter", label: "Generate Chapters" }],
+        },
+      });
+    });
+
+    expect(await screen.findByText("Living Tree Cockpit")).toBeTruthy();
+    await waitFor(() => expect(document.querySelector(".app-shell.sidebar-collapsed")).toBeTruthy());
   });
 
   it("keeps a blank new chat selected when an existing running task updates", async () => {
@@ -313,6 +436,7 @@ describe("App task flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /New chat/ })[0]);
 
     expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "DOCX" }));
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a stuck DOCX" },
     });
@@ -360,6 +484,7 @@ describe("App task flow", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "DOCX" }));
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a stuck DOCX" },
     });
@@ -387,6 +512,7 @@ describe("App task flow", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /What should we work on/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "DOCX" }));
     fireEvent.change(screen.getByPlaceholderText(/Enter what you want to generate/), {
       target: { value: "Create a pending DOCX" },
     });
@@ -1204,6 +1330,66 @@ describe("App task flow", () => {
   });
 });
 
+async function confirmDemoNode(title: string) {
+  await waitFor(() => expect(pendingDemoNodeCard(title)).toBeTruthy(), { timeout: DEMO_NODE_SEQUENCE_TIMEOUT_MS });
+  const nodeCard = pendingDemoNodeCard(title) as HTMLElement;
+  const nodeId = nodeCard.closest(".react-flow__node")?.getAttribute("data-id");
+  const nodeSummary = nodeCard.querySelector("p")?.textContent;
+  fireEvent.click(nodeCard);
+  await waitFor(() => {
+    const popover = currentOpenDemoPopover(title, nodeSummary);
+    expect(popover?.querySelector("strong")?.textContent).toBe(title);
+    expect(within(popover as HTMLElement).getByRole("button", { name: "Confirm this node" })).toBeTruthy();
+  }, { timeout: DEMO_NODE_SEQUENCE_TIMEOUT_MS });
+  fireEvent.click(within(currentOpenDemoPopover(title, nodeSummary) as HTMLElement).getByRole("button", { name: "Confirm this node" }));
+  if (nodeId) {
+    await waitFor(() => expect(demoNodeCardById(nodeId)?.classList.contains("is-confirmed")).toBe(true), { timeout: DEMO_NODE_SEQUENCE_TIMEOUT_MS });
+  }
+}
+
+async function waitForDemoNodeTitle(title: string) {
+  await waitFor(() => expect(demoNodeCard(title)).toBeTruthy(), { timeout: DEMO_NODE_SEQUENCE_TIMEOUT_MS });
+}
+
+async function clickReadyDemoStageButton(name: string) {
+  await waitFor(() => {
+    const button = screen.getByRole("button", { name }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  }, { timeout: DEMO_NODE_SEQUENCE_TIMEOUT_MS });
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+
+function demoNodeCard(title: string) {
+  return (Array.from(document.querySelectorAll(".living-tree-flow-node"))
+    .find((node) => node.querySelector("strong")?.textContent === title) as HTMLElement | undefined) ?? null;
+}
+
+function currentOpenDemoPopover(title?: string, summary?: string) {
+  const popovers = Array.from(document.querySelectorAll(".ant-popover:not(.ant-popover-hidden) .living-tree-popover"));
+  if (title) {
+    const matched = popovers.find((popover) => {
+      const text = popover.textContent ?? "";
+      return text.includes(title) && (!summary || text.includes(summary));
+    });
+    if (matched) return matched as HTMLElement;
+    return undefined;
+  }
+  return popovers.at(-1) as HTMLElement | undefined;
+}
+
+function pendingDemoNodeCard(title: string) {
+  return Array.from(document.querySelectorAll(".living-tree-flow-node.is-confirmable.is-pending"))
+    .find((node) => !document.querySelector(".living-tree-flow-node.is-node-drawing") && !node.classList.contains("is-node-drawing") && !node.classList.contains("is-node-waiting") && node.querySelector("strong")?.textContent === title) as HTMLElement | undefined;
+}
+
+function pendingDemoNodeCardById(nodeId: string) {
+  return document.querySelector(`.react-flow__node[data-id="${nodeId}"] .living-tree-flow-node.is-confirmable.is-pending`);
+}
+
+function demoNodeCardById(nodeId: string) {
+  return document.querySelector(`.react-flow__node[data-id="${nodeId}"] .living-tree-flow-node`) as HTMLElement | null;
+}
+
 describe("App auto-update flow", () => {
   beforeEach(() => {
     installDomStubs();
@@ -1505,12 +1691,14 @@ function installBridgeMock() {
     openFileDialog,
     openDirectoryDialog: vi.fn(async () => null),
     openMultiFileDialog,
-    savePastedImage,
-    previewArtifact,
+	    savePastedImage,
+	    savePptx: vi.fn(async () => "/tmp/deck.pptx"),
+	    exportVibeTreePptx: vi.fn(async () => "/tmp/deck.pptx"),
+	    modifyPptistDeck: vi.fn(async () => ({ summary: "updated", ops: [] })),
+	    previewArtifact,
     readArtifactFile: vi.fn(async () => ({ data: new Uint8Array() })),
     readLocalImage: vi.fn(async () => ({ data: new Uint8Array(), mime: "image/png" })),
     copyImageToClipboard: vi.fn(async () => undefined),
-    renderPreviewHtml: vi.fn(async () => ({ html: "<html><body>preview</body></html>" }) as { html: string } | null),
     issuePreviewToken: vi.fn(async (artifact) => ({ token: "test-token", fileName: artifact.fileName, documentType: artifact.documentType })),
     revokePreviewToken: vi.fn(async () => undefined),
     setPreviewMode: vi.fn(async () => undefined),
@@ -1555,6 +1743,7 @@ function installBridgeMock() {
       onboardingCompletedAt: "2026-05-22T00:00:00.000Z",
       proxy: null,
       imageWatermark: { showWatermark: true, preferenceSource: "system" as const },
+      waiting2048Enabled: false,
     })),
     updateSettings: vi.fn(async (patch) => ({
       version: 1,
@@ -1570,6 +1759,7 @@ function installBridgeMock() {
       onboardingCompletedAt: patch.onboardingCompletedAt ?? "2026-05-22T00:00:00.000Z",
       proxy: patch.proxy ?? null,
       imageWatermark: patch.imageWatermark ?? { showWatermark: true, preferenceSource: "system" as const },
+      waiting2048Enabled: patch.waiting2048Enabled ?? false,
     })),
     getDefaultWorkspaceDir: vi.fn(async () => "/Users/test/Library/Application Support/OfficeDex/workspace"),
     listWorkspaces: vi.fn(async () => [{
@@ -1636,6 +1826,7 @@ function installBridgeMock() {
     peekReportContext: vi.fn(async () => ({ requestId: "req-test-123", errorCode: "", errorMessage: "" })),
     getTaskHistory: vi.fn(async () => []),
     getBridgeRuntimeSnapshot: vi.fn(async () => ({ runtimeMode: "hosted" as const, binaryPath: "", envApplied: false })),
+    recordRendererLog: vi.fn(async () => undefined),
     testProvider: vi.fn(async () => ({ ok: true, httpStatus: 200, latencyMs: 12, url: "https://api.openai.com" })),
   };
   window.officecli = api;

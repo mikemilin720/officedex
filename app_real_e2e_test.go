@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"officedex/internal/appupdate"
-	"officedex/internal/extrender"
 	"officedex/internal/localstore"
 	"officedex/internal/netproxy"
 	"officedex/internal/preview"
@@ -211,11 +210,6 @@ func TestRealOfficeDexAppBindings(t *testing.T) {
 		}
 		if len(file.Data) == 0 {
 			t.Fatal("ReadArtifactFile returned empty bytes")
-		}
-		if html, err := app.RenderPreviewHtml(grant.Token); err != nil {
-			t.Fatalf("RenderPreviewHtml: %v", err)
-		} else if html != nil && !strings.Contains(strings.ToLower(html.HTML), "<html") {
-			t.Fatalf("preview html did not look like html: %s", truncateRealApp(html.HTML, 200))
 		}
 		app.RevokePreviewToken(grant.Token)
 		if _, err := app.ReadArtifactFile(grant.Token); err == nil {
@@ -437,7 +431,6 @@ func newRealOfficeDexApp(t *testing.T) *App {
 		proxyPool:      proxyPool,
 		appUpdateMgr:   newRealAppUpdateManager(t, filepath.Join(userDataDir, "updates"), appUpdateFixtureOptions{ManifestPath: "/manifest.json"}),
 		runtimeMgr:     runtimeMgr,
-		extRenderer:    extrender.New(""),
 	}
 	if err := app.initializeWorkspaces(ctx); err != nil {
 		t.Fatalf("initializeWorkspaces: %v", err)

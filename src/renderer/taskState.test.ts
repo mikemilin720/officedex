@@ -358,6 +358,33 @@ describe("taskState", () => {
     expect(state.tasks["task-plan"].userInput).not.toHaveProperty("runtimeMode");
   });
 
+  it("stores Vibe tree confirmation metadata from bridge events", () => {
+    const state = applyTaskEvent(createInitialTaskState(), {
+      event_id: "ev-vibe",
+      task_id: "task-vibe",
+      type: "task.vibe_tree",
+      payload: {
+        stage: "slides_ready",
+        tree: {
+          id: "tree-1",
+          rootId: "root",
+          title: "Confirmation Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Confirmation Test" },
+            { id: "slide-outline-01", parentId: "root", kind: "slide", title: "Slide 1" },
+          ],
+        },
+        actions: [{ id: "export_pptx", label: "Generate PPTX" }],
+        confirmation: { nodeIds: ["slide-outline-01"] },
+      },
+    });
+
+    expect(state.tasks["task-vibe"].vibeTree).toMatchObject({
+      stage: "slides_ready",
+      confirmation: { nodeIds: ["slide-outline-01"] },
+    });
+  });
+
   it("uses attached user prompt for a running task title before bridge topic events arrive", () => {
     const state = attachUserInput(createInitialTaskState(), "task-bridge-123", {
       prompt: "Create a board update deck from the latest revenue notes",

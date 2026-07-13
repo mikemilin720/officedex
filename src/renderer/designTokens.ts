@@ -1,30 +1,32 @@
 import type { ThemeConfig } from "antd";
 
 export const notion = {
-  primary: "#3f57c4",
-  primaryPressed: "#3048a5",
-  primaryDeep: "#263a84",
-  primarySoft: "#eef2ff",
+  primary: "#05101a",
+  primaryPressed: "#1a2530",
+  primaryDeep: "#05101a",
+  primarySoft: "#f0eee6",
   onPrimary: "#ffffff",
-  brandNavy: "#0a1530",
-  linkBlue: "#0075de",
+  brandNavy: "#05101a",
+  linkBlue: "#006876",
+  secondary: "#006876",
+  secondaryContainer: "#9fecfc",
   canvas: "#ffffff",
-  surface: "#f5f5f3",
-  surfaceSoft: "#fafafa",
+  surface: "#f0eee6",
+  surfaceSoft: "#fcfaf2",
   paper: "#ffffff",
   white: "#ffffff",
-  hairline: "#e5e3df",
-  hairlineSoft: "#ede9e4",
-  hairlineStrong: "#c8c4be",
-  ink: "#1a1a1a",
-  charcoal: "#37352f",
-  slate: "#5d5b54",
-  steel: "#787671",
-  stone: "#a4a097",
-  muted: "#bbb8b1",
+  hairline: "#e6e4d8",
+  hairlineSoft: "#eae8e0",
+  hairlineStrong: "#c4c6cc",
+  ink: "#1a2530",
+  charcoal: "#1b1c17",
+  slate: "#44474b",
+  steel: "#74777c",
+  stone: "#c4c6cc",
+  muted: "#c4c6cc",
   success: "#1aae39",
   warning: "#dd5b00",
-  error: "#e03131",
+  error: "#ba1a1a",
   tintPeach: "#ffe8d4",
   tintRose: "#fde0ec",
   tintMint: "#d9f3e1",
@@ -32,16 +34,16 @@ export const notion = {
   tintSky: "#dcecfa",
   tintYellow: "#fef7d6",
   tintYellowBold: "#f9e79f",
-  tintGray: "#f0eeec",
+  tintGray: "#f0eee6",
 } as const;
 
-const fontFamily = "'Plus Jakarta Sans', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif";
-const fontFamilyHeading = fontFamily;
+const fontFamily = "'Inter', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif";
+const fontFamilyHeading = "'Plus Jakarta Sans', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif";
 
 export const theme: ThemeConfig = {
   token: {
     colorPrimary: notion.primary,
-    colorLink: notion.primary,
+    colorLink: notion.secondary,
     colorLinkHover: notion.primaryPressed,
     colorLinkActive: notion.primaryDeep,
     colorSuccess: notion.success,
@@ -65,7 +67,7 @@ export const theme: ThemeConfig = {
     Input: {
       borderRadius: 8,
       controlHeight: 44,
-      activeShadow: `0 0 0 2px rgba(63, 87, 196, 0.12)`,
+      activeShadow: `0 0 0 2px rgba(5, 16, 26, 0.08)`,
     },
     Select: {
       borderRadius: 8,

@@ -162,4 +162,69 @@ describe("Shell sidebar layout", () => {
     expect(css).toMatch(/\.topbar\s*\{[^}]*z-index:\s*40;/s);
     expect(css).toMatch(/\.app-shell\.sidebar-collapsed,[\s\S]*grid-template-columns:\s*0\s+minmax\(0,\s*1fr\)/);
   });
+
+  it("collapses the sidebar once when a PPT canvas task becomes active", async () => {
+    const { rerender } = render(
+      <LocaleProvider value="en">
+        {createElement(
+          Shell as unknown as ComponentType<Record<string, unknown>>,
+          {
+            activeNav: "dialogue",
+            failed: false,
+            workspaces: [],
+            chats: [],
+            activeWorkspaceId: undefined,
+            activeWorkspaceName: undefined,
+            selectedConversationId: undefined,
+            autoCollapseSidebarKey: "task-vibe",
+            onNavChange: vi.fn(),
+            onNewGeneration: vi.fn(),
+            onSelectWorkspace: vi.fn(),
+            onAddWorkspace: vi.fn(),
+            onRevealWorkspace: vi.fn(),
+            onRemoveWorkspace: vi.fn(),
+            onSelectTask: vi.fn(),
+            onDeleteConversation: vi.fn(),
+          },
+          <div />,
+        )}
+      </LocaleProvider>,
+    );
+
+    await screen.findByRole("button", { name: /expand sidebar/i });
+    const shell = document.querySelector(".app-shell");
+    expect(shell?.classList.contains("sidebar-collapsed")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /expand sidebar/i }));
+    expect(shell?.classList.contains("sidebar-collapsed")).toBe(false);
+
+    rerender(
+      <LocaleProvider value="en">
+        {createElement(
+          Shell as unknown as ComponentType<Record<string, unknown>>,
+          {
+            activeNav: "dialogue",
+            failed: false,
+            workspaces: [],
+            chats: [],
+            activeWorkspaceId: undefined,
+            activeWorkspaceName: undefined,
+            selectedConversationId: undefined,
+            autoCollapseSidebarKey: "task-vibe",
+            onNavChange: vi.fn(),
+            onNewGeneration: vi.fn(),
+            onSelectWorkspace: vi.fn(),
+            onAddWorkspace: vi.fn(),
+            onRevealWorkspace: vi.fn(),
+            onRemoveWorkspace: vi.fn(),
+            onSelectTask: vi.fn(),
+            onDeleteConversation: vi.fn(),
+          },
+          <div />,
+        )}
+      </LocaleProvider>,
+    );
+
+    expect(shell?.classList.contains("sidebar-collapsed")).toBe(false);
+  });
 });

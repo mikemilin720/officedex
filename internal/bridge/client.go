@@ -32,12 +32,13 @@ import (
 
 // Defaults mirror the TypeScript constructor defaults.
 const (
-	DefaultRequestTimeout       = 30 * time.Second
-	DefaultTaskInvokeTimeout    = 30 * time.Minute
-	DefaultMaxReconnectAttempts = 8
-	DefaultBaseReconnectDelay   = 1 * time.Second
-	maxReconnectDelay           = 30 * time.Second
-	stderrTailBytes             = 8192
+	DefaultRequestTimeout        = 30 * time.Second
+	DefaultTaskInvokeTimeout     = 30 * time.Minute
+	DefaultPptistPlanEditTimeout = 45 * time.Second
+	DefaultMaxReconnectAttempts  = 8
+	DefaultBaseReconnectDelay    = 1 * time.Second
+	maxReconnectDelay            = 30 * time.Second
+	stderrTailBytes              = 8192
 )
 
 // Options configures a new Client.
@@ -46,16 +47,17 @@ const (
 // to find the officecli executable. Tests supply CreateTransport directly to
 // avoid spawning processes.
 type Options struct {
-	BinaryPath           string
-	ResolveBinary        func() string
-	Cwd                  string
-	Env                  []string
-	CreateTransport      TransportFactory
-	RequestTimeout       time.Duration
-	TaskInvokeTimeout    time.Duration
-	DisableAutoReconnect bool
-	MaxReconnectAttempts int
-	BaseReconnectDelay   time.Duration
+	BinaryPath            string
+	ResolveBinary         func() string
+	Cwd                   string
+	Env                   []string
+	CreateTransport       TransportFactory
+	RequestTimeout        time.Duration
+	TaskInvokeTimeout     time.Duration
+	PptistPlanEditTimeout time.Duration
+	DisableAutoReconnect  bool
+	MaxReconnectAttempts  int
+	BaseReconnectDelay    time.Duration
 	// LogDir, when non-empty, enables async tee of stdout/stderr chunks to
 	// rotating per-day files under that directory (`bridge-YYYYMMDD.log`).
 	// Writes are non-blocking; see Logfile.
@@ -110,6 +112,9 @@ func New(opts Options) *Client {
 	}
 	if opts.TaskInvokeTimeout == 0 {
 		opts.TaskInvokeTimeout = DefaultTaskInvokeTimeout
+	}
+	if opts.PptistPlanEditTimeout == 0 {
+		opts.PptistPlanEditTimeout = DefaultPptistPlanEditTimeout
 	}
 	if opts.MaxReconnectAttempts == 0 {
 		opts.MaxReconnectAttempts = DefaultMaxReconnectAttempts
@@ -539,17 +544,18 @@ func (c *Client) InvokeGenerate(ctx context.Context, input types.GenerateInput) 
 		// on. Renderer code that needs to opt out should be revisited as part
 		// of the Wails binding rewrite.
 		"local_preview": true,
-		// EmitPreview asks officecli to write a `<basename>.preview.html`
-		// sidecar next to the produced artifact. The renderer uses this to
-		// render a high-fidelity preview; see docs/sidecar-preview-html.md
-		// for the expected sidecar contract.
-		"emit_preview": true,
 	}
 	if input.RuntimeMode != "" {
 		args["runtime_mode"] = input.RuntimeMode
 	}
+	if strings.TrimSpace(input.PPTXBackend) != "" {
+		args["pptx_backend"] = input.PPTXBackend
+	}
 	if officeMode != "" {
 		args["mode"] = officeMode
+	}
+	if isOfficeDocumentType(input.DocumentType) && strings.EqualFold(strings.TrimSpace(input.GenerationMode), "plan") {
+		args["generation_mode"] = "plan"
 	}
 	if ratio != "" {
 		args["ratio"] = ratio
@@ -710,10 +716,9 @@ func (c *Client) InvokeModify(ctx context.Context, input types.ModifyInput) (Tas
 		"prompt":      input.Prompt,
 		"format":      input.DocumentType,
 		"out":         input.OutputDir,
-		// Mirror InvokeGenerate: ask officecli to emit a preview sidecar and run
-		// the local preview pipeline so the renderer can show the modified file.
+		// Mirror InvokeGenerate: run the local preview pipeline so the renderer
+		// can show the modified file.
 		"local_preview": true,
-		"emit_preview":  true,
 	}
 	if strings.TrimSpace(input.Language) != "" {
 		args["lang"] = input.Language
@@ -736,6 +741,175 @@ func (c *Client) InvokeModify(ctx context.Context, input types.ModifyInput) (Tas
 		return TaskInvokeResult{}, fmt.Errorf("bridge: decode task/invoke: %w", err)
 	}
 	return result, nil
+}
+
+// PlanPptistEdit asks the bridge-side PPTist planner to convert a natural
+// language edit prompt into PPTist edit operations. It never invokes
+// office.modify and never writes a local PPTX.
+func (c *Client) PlanPptistEdit(ctx context.Context, input PlanPptistEditInput) (PlanPptistEditResult, error) {
+	tool := strings.TrimSpace(input.Tool)
+	if tool == "" {
+		tool = "office.pptist.plan_edit"
+	}
+	params := map[string]any{
+		"tool":     tool,
+		"prompt":   input.Prompt,
+		"snapshot": compactPptistPlannerSnapshot(input.Snapshot),
+	}
+	if input.SelectedSlideID != "" {
+		params["selected_slide_id"] = input.SelectedSlideID
+	}
+	if len(input.SelectedElementIDs) > 0 {
+		params["selected_element_ids"] = append([]string(nil), input.SelectedElementIDs...)
+	}
+	if len(input.History) > 0 {
+		params["history"] = append([]PlanPptistEditTurn(nil), input.History...)
+	}
+	if strings.TrimSpace(input.PptxDataBase64) != "" {
+		params["pptx_data_base64"] = input.PptxDataBase64
+	}
+	if err := validatePptistPlannerRequestSize(params); err != nil {
+		return PlanPptistEditResult{}, err
+	}
+	raw, err := c.requestWithTimeout(ctx, "pptist/plan-edit", params, c.options.PptistPlanEditTimeout)
+	if err != nil {
+		return PlanPptistEditResult{}, err
+	}
+	var result PlanPptistEditResult
+	if err := decodeJSON(raw, &result); err != nil {
+		return PlanPptistEditResult{}, fmt.Errorf("bridge: decode pptist/plan-edit: %w", err)
+	}
+	if len(result.Ops) == 0 {
+		return PlanPptistEditResult{}, errors.New("bridge: pptist planner returned no edit operations")
+	}
+	return result, nil
+}
+
+const (
+	pptistPlannerMaxStringBytes = 4096
+	pptistPlannerMaxListItems   = 80
+	pptistPlannerMaxRequestSize = 2 * 1024 * 1024
+)
+
+func validatePptistPlannerRequestSize(params map[string]any) error {
+	sizeChecked := make(map[string]any, len(params))
+	for key, value := range params {
+		if key == "pptx_data_base64" {
+			continue
+		}
+		sizeChecked[key] = value
+	}
+	raw, err := json.Marshal(sizeChecked)
+	if err != nil {
+		return fmt.Errorf("bridge: encode pptist/plan-edit params: %w", err)
+	}
+	if len(raw) > pptistPlannerMaxRequestSize {
+		return fmt.Errorf("bridge: pptist plan edit request too large after compaction: %d bytes", len(raw))
+	}
+	return nil
+}
+
+func compactPptistPlannerSnapshot(snapshot any) any {
+	normalized, err := normalizePptistPlannerJSON(snapshot)
+	if err != nil {
+		return compactPptistPlannerValue("snapshot", snapshot)
+	}
+	return compactPptistPlannerValue("snapshot", normalized)
+}
+
+func normalizePptistPlannerJSON(value any) (any, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var normalized any
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func compactPptistPlannerValue(key string, value any) any {
+	switch typed := value.(type) {
+	case string:
+		return compactPptistPlannerString(key, typed)
+	case map[string]any:
+		return compactPptistPlannerMap(typed)
+	case []any:
+		return compactPptistPlannerList(key, typed)
+	case []map[string]any:
+		limit := len(typed)
+		if limit > pptistPlannerMaxListItems {
+			limit = pptistPlannerMaxListItems
+		}
+		output := make([]map[string]any, 0, limit)
+		for i := 0; i < limit; i++ {
+			output = append(output, compactPptistPlannerMap(typed[i]))
+		}
+		return output
+	default:
+		return value
+	}
+}
+
+func compactPptistPlannerMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = compactPptistPlannerValue(key, value)
+	}
+	return output
+}
+
+func compactPptistPlannerList(key string, input []any) []any {
+	limit := len(input)
+	if limit > pptistPlannerMaxListItems {
+		limit = pptistPlannerMaxListItems
+	}
+	output := make([]any, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		output = append(output, compactPptistPlannerValue(key, input[i]))
+	}
+	if len(input) > limit {
+		output = append(output, fmt.Sprintf("[%d items omitted]", len(input)-limit))
+	}
+	return output
+}
+
+func compactPptistPlannerString(key string, value string) string {
+	if value == "" {
+		return value
+	}
+	lowerKey := strings.ToLower(key)
+	prefix := strings.ToLower(value)
+	if len(prefix) > 64 {
+		prefix = prefix[:64]
+	}
+	if strings.HasPrefix(prefix, "data:image/") || strings.HasPrefix(prefix, "data:application/") || strings.Contains(lowerKey, "base64") || lowerKey == "src" || lowerKey == "image" || lowerKey == "imageurl" {
+		return fmt.Sprintf("[image omitted: %d bytes]", len(value))
+	}
+	if len(value) <= pptistPlannerMaxStringBytes {
+		return value
+	}
+	return truncatePptistPlannerString(value, pptistPlannerMaxStringBytes) + fmt.Sprintf("… [truncated %d bytes]", len(value)-pptistPlannerMaxStringBytes)
+}
+
+func truncatePptistPlannerString(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	var out strings.Builder
+	out.Grow(maxBytes)
+	for _, r := range value {
+		next := string(r)
+		if out.Len()+len(next) > maxBytes {
+			break
+		}
+		out.WriteString(next)
+	}
+	return out.String()
 }
 
 // RespondTask calls "task/respond".
@@ -764,6 +938,61 @@ func (c *Client) TaskStatus(ctx context.Context, taskID string) (TaskStatusResul
 // CancelTask calls "task/cancel".
 func (c *Client) CancelTask(ctx context.Context, taskID string) ([]byte, error) {
 	return c.Request(ctx, "task/cancel", map[string]any{"task_id": taskID})
+}
+
+// PptxExportResult holds the base64-encoded PPTX and its suggested file name.
+type PptxExportResult struct {
+	DataBase64 string `json:"dataBase64"`
+	FileName   string `json:"fileName"`
+}
+
+type PlanPptistEditTurn struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type PlanPptistEditInput struct {
+	Tool               string               `json:"tool,omitempty"`
+	Prompt             string               `json:"prompt"`
+	Snapshot           any                  `json:"snapshot"`
+	SelectedSlideID    string               `json:"selected_slide_id,omitempty"`
+	SelectedElementIDs []string             `json:"selected_element_ids,omitempty"`
+	History            []PlanPptistEditTurn `json:"history,omitempty"`
+	PptxDataBase64     string               `json:"pptx_data_base64,omitempty"`
+}
+
+type PlanPptistEditConfirmation struct {
+	Title     string   `json:"title,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	Target    string   `json:"target,omitempty"`
+	Changes   []string `json:"changes,omitempty"`
+	Preserved []string `json:"preserved,omitempty"`
+}
+
+type PlanPptistEditResult struct {
+	Summary              string                      `json:"summary"`
+	Ops                  []map[string]any            `json:"ops"`
+	Confidence           string                      `json:"confidence,omitempty"`
+	RequiresConfirmation bool                        `json:"requires_confirmation,omitempty"`
+	Confirmation         *PlanPptistEditConfirmation `json:"confirmation,omitempty"`
+	Warnings             []string                    `json:"warnings,omitempty"`
+}
+
+// ExportPptxFromTree renders a vibe tree into a PPTX file via pptxgenjs on the
+// backend. The tree JSON is forwarded to the bridge's "pptx/export-from-tree"
+// endpoint which handles LLM client creation and rendering.
+func (c *Client) ExportPptxFromTree(ctx context.Context, treeJSON json.RawMessage) (PptxExportResult, error) {
+	raw, err := c.requestWithTimeout(ctx, "pptx/export-from-tree", map[string]any{
+		"tree": json.RawMessage(treeJSON),
+	}, c.options.TaskInvokeTimeout)
+	if err != nil {
+		return PptxExportResult{}, err
+	}
+	var result PptxExportResult
+	if err := decodeJSON(raw, &result); err != nil {
+		return PptxExportResult{}, fmt.Errorf("bridge: decode pptx/export-from-tree: %w", err)
+	}
+	return result, nil
 }
 
 // TaskInvokeResult is the shape returned by InvokeGenerate.

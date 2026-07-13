@@ -1,33 +1,37 @@
-/* ─── Notion-inspired Design System for OfficeDex ─── */
+/* ─── Paper & Ink Design System for OfficeDex ─── */
 
 :root {
-  --n-primary: #3f57c4;
-  --n-primary-pressed: #3048a5;
-  --n-primary-deep: #263a84;
-  --n-primary-soft: #eef2ff;
+  --n-primary: #05101a;
+  --n-primary-pressed: #1a2530;
+  --n-primary-deep: #05101a;
+  --n-primary-soft: #f0eee6;
   --n-on-primary: #ffffff;
-  --n-navy: #0a1530;
-  --n-link: #0075de;
+  --n-navy: #05101a;
+  --n-link: #006876;
+
+  --n-secondary: #006876;
+  --n-secondary-container: #9fecfc;
+  --n-on-secondary: #ffffff;
 
   --n-canvas: #ffffff;
-  --n-surface: #f5f5f3;
-  --n-surface-soft: #fafafa;
+  --n-surface: #f0eee6;
+  --n-surface-soft: #fcfaf2;
   --n-paper: #ffffff;
   --n-white: #ffffff;
-  --n-hairline: #e5e3df;
-  --n-hairline-soft: #ede9e4;
-  --n-hairline-strong: #c8c4be;
+  --n-hairline: #e6e4d8;
+  --n-hairline-soft: #eae8e0;
+  --n-hairline-strong: #c4c6cc;
 
-  --n-ink: #1a1a1a;
-  --n-charcoal: #37352f;
-  --n-slate: #5d5b54;
-  --n-steel: #787671;
-  --n-stone: #a4a097;
-  --n-muted: #bbb8b1;
+  --n-ink: #1a2530;
+  --n-charcoal: #1b1c17;
+  --n-slate: #44474b;
+  --n-steel: #74777c;
+  --n-stone: #c4c6cc;
+  --n-muted: #c4c6cc;
 
   --n-success: #1aae39;
   --n-warning: #dd5b00;
-  --n-error: #e03131;
+  --n-error: #ba1a1a;
 
   --n-tint-peach: #ffe8d4;
   --n-tint-rose: #fde0ec;
@@ -36,10 +40,11 @@
   --n-tint-sky: #dcecfa;
   --n-tint-yellow: #fef7d6;
   --n-tint-yellow-bold: #f9e79f;
-  --n-tint-gray: #f0eeec;
+  --n-tint-gray: #f0eee6;
 
-  --font-body: 'Plus Jakarta Sans', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif;
-  --font-heading: var(--font-body);
+  --font-body: 'Inter', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif;
+  --font-heading: 'Plus Jakarta Sans', -apple-system, system-ui, 'Segoe UI', 'PingFang SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
 
   --radius-xs: 4px;
   --radius-sm: 6px;
@@ -48,10 +53,10 @@
   --radius-xl: 16px;
   --radius-full: 9999px;
 
-  --shadow-subtle: rgba(15, 15, 15, 0.04) 0px 1px 2px 0px;
-  --shadow-card: rgba(15, 15, 15, 0.08) 0px 4px 12px 0px;
-  --shadow-elevated: rgba(15, 15, 15, 0.20) 0px 24px 48px -8px;
-  --shadow-modal: rgba(15, 15, 15, 0.16) 0px 16px 48px -8px;
+  --shadow-subtle: rgba(26, 37, 48, 0.04) 0px 1px 3px 0px;
+  --shadow-card: rgba(26, 37, 48, 0.08) 0px 4px 12px 0px;
+  --shadow-elevated: rgba(26, 37, 48, 0.16) 0px 24px 48px -8px;
+  --shadow-modal: rgba(26, 37, 48, 0.14) 0px 16px 48px -8px;
 }
 
 * {
@@ -88,6 +93,18 @@ select {
   line-height: 1;
 }
 
+/* ─── Paper texture overlay ─── */
+
+.app-shell::before,
+.fluid-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
 /* ─── Status dots ─── */
 
 .status-dot {
@@ -95,7 +112,7 @@ select {
   height: 8px;
   flex: 0 0 auto;
   border-radius: var(--radius-full);
-  background: var(--n-primary);
+  background: var(--n-secondary);
 }
 
 .status-dot.green {
@@ -118,8 +135,8 @@ select {
   width: 12px;
   height: 12px;
   flex: 0 0 auto;
-  border: 2px solid rgba(63, 87, 196, 0.22);
-  border-top-color: var(--n-primary);
+  border: 2px solid rgba(0, 104, 118, 0.22);
+  border-top-color: var(--n-secondary);
   border-radius: var(--radius-full);
   animation: status-spin 900ms linear infinite;
 }

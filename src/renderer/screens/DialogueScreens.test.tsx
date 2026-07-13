@@ -3,11 +3,13 @@ import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within }
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { message as antdMessage } from "antd";
 import { getAttachmentSpec } from "../../shared/types";
-import type { DesktopAPI, DesktopTask, GenerateInput, WorkspaceSummary } from "../../shared/types";
+import type { DesktopAPI, DesktopTask, GenerateInput, UserSettings, WorkspaceSummary } from "../../shared/types";
 import { officecli } from "../bridge";
 import { LocaleProvider, type Locale } from "../i18n";
-import { DialogueScreen, assembleSlots } from "./DialogueScreens";
-import type { ImagePromptSlot } from "../../shared/types";
+import { clearPptistParsedSlidesMemoryCacheForTests, setPptistParsedSlidesPersistentCacheForTests } from "../components/PptistEmbedPanel";
+import { DialogueScreen, IDEA_NODE_DRAWING_MS, assembleSlots, buildVibeFlowModel } from "./DialogueScreens";
+import type { ImagePromptSlot, VibeTreeSnapshot } from "../../shared/types";
+import type { PptistSlide } from "../../shared/pptistProtocol";
 
 let resizeObserverRecords: Array<{ callback: ResizeObserverCallback; observed: Element[] }> = [];
 
@@ -74,16 +76,43 @@ let issuePreviewTokenSpy: ReturnType<typeof vi.fn>;
 let readArtifactFileSpy: ReturnType<typeof vi.fn>;
 let readLocalImageSpy: ReturnType<typeof vi.fn>;
 let revokePreviewTokenSpy: ReturnType<typeof vi.fn>;
+let openPathSpy: ReturnType<typeof vi.fn>;
+let showItemInFolderSpy: ReturnType<typeof vi.fn>;
 let copyImageToClipboardSpy: ReturnType<typeof vi.fn>;
 let savePastedImageSpy: ReturnType<typeof vi.fn>;
+let savePptxSpy: ReturnType<typeof vi.fn>;
+let modifyPptistDeckSpy: ReturnType<typeof vi.fn>;
 let onFileDropSpy: ReturnType<typeof vi.fn>;
 let writeTextSpy: ReturnType<typeof vi.fn>;
+let getSettingsSpy: ReturnType<typeof vi.fn>;
+let getDefaultWorkspaceDirSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 let fileDropCallback: ((paths: string[]) => void) | undefined;
+
+function makeUserSettings(overrides: Partial<UserSettings> = {}): UserSettings {
+  return {
+    version: 1,
+    defaults: {
+      documentType: "pptx",
+      enableImages: true,
+      imageQuality: "premium",
+      ...(overrides.defaults ?? {}),
+    },
+    workspaceDir: overrides.workspaceDir ?? null,
+    outputDir: overrides.outputDir ?? null,
+    llmProvider: overrides.llmProvider ?? null,
+    onboardingCompletedAt: overrides.onboardingCompletedAt ?? "2026-05-22T00:00:00Z",
+    proxy: overrides.proxy ?? { enabled: false, url: "http://127.0.0.1:7890" },
+    imageWatermark: overrides.imageWatermark ?? { showWatermark: true, preferenceSource: "system" },
+    waiting2048Enabled: overrides.waiting2048Enabled ?? false,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  setPptistParsedSlidesPersistentCacheForTests(null);
+  clearPptistParsedSlidesMemoryCacheForTests();
   resizeObserverRecords = [];
   installDomStubs();
   respondSpy = vi.fn(async () => undefined);
@@ -95,14 +124,25 @@ beforeEach(() => {
   readArtifactFileSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]) }));
   readLocalImageSpy = vi.fn(async () => ({ data: new Uint8Array([137, 80, 78, 71]), mime: "image/png" }));
   revokePreviewTokenSpy = vi.fn(async () => undefined);
+  openPathSpy = vi.fn(async () => undefined);
+  showItemInFolderSpy = vi.fn(async () => undefined);
   copyImageToClipboardSpy = vi.fn(async () => undefined);
   savePastedImageSpy = vi.fn(async (_data: Uint8Array, ext: string) => `/tmp/dropped-template-reference.${ext}`);
+  savePptxSpy = vi.fn(async (_data: Uint8Array, fileName: string) => `/tmp/${fileName}`);
+  modifyPptistDeckSpy = vi.fn(async () => ({
+    summary: "Updated title",
+    confidence: "high",
+    requiresConfirmation: false,
+    ops: [{ type: "element:update-text", slideId: "generated-slide-01", elementId: "title", text: "Executive title", preserveStyle: true }],
+  }));
   fileDropCallback = undefined;
   onFileDropSpy = vi.fn((callback: (paths: string[]) => void) => {
     fileDropCallback = callback;
     return vi.fn();
   });
   writeTextSpy = vi.fn(async () => undefined);
+  getSettingsSpy = vi.fn(async () => makeUserSettings());
+  getDefaultWorkspaceDirSpy = vi.fn(async () => "/tmp/default-workspace");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: writeTextSpy },
@@ -117,9 +157,15 @@ beforeEach(() => {
     readArtifactFile: officecli.readArtifactFile,
     readLocalImage: officecli.readLocalImage,
     revokePreviewToken: officecli.revokePreviewToken,
+    openPath: officecli.openPath,
+    showItemInFolder: officecli.showItemInFolder,
     copyImageToClipboard: officecli.copyImageToClipboard,
     savePastedImage: officecli.savePastedImage,
+    savePptx: officecli.savePptx,
+    modifyPptistDeck: officecli.modifyPptistDeck,
     onFileDrop: officecli.onFileDrop,
+    getSettings: officecli.getSettings,
+    getDefaultWorkspaceDir: officecli.getDefaultWorkspaceDir,
   };
   officecli.respond = respondSpy as unknown as DesktopAPI["respond"];
   officecli.cancel = cancelSpy as unknown as DesktopAPI["cancel"];
@@ -130,14 +176,21 @@ beforeEach(() => {
   officecli.readArtifactFile = readArtifactFileSpy as unknown as DesktopAPI["readArtifactFile"];
   officecli.readLocalImage = readLocalImageSpy as unknown as DesktopAPI["readLocalImage"];
   officecli.revokePreviewToken = revokePreviewTokenSpy as unknown as DesktopAPI["revokePreviewToken"];
+  officecli.openPath = openPathSpy as unknown as DesktopAPI["openPath"];
+  officecli.showItemInFolder = showItemInFolderSpy as unknown as DesktopAPI["showItemInFolder"];
   officecli.copyImageToClipboard = copyImageToClipboardSpy as unknown as DesktopAPI["copyImageToClipboard"];
   officecli.savePastedImage = savePastedImageSpy as unknown as DesktopAPI["savePastedImage"];
+  officecli.savePptx = savePptxSpy as unknown as DesktopAPI["savePptx"];
+  officecli.modifyPptistDeck = modifyPptistDeckSpy as unknown as DesktopAPI["modifyPptistDeck"];
   officecli.onFileDrop = onFileDropSpy as unknown as DesktopAPI["onFileDrop"];
+  officecli.getSettings = getSettingsSpy as unknown as DesktopAPI["getSettings"];
+  officecli.getDefaultWorkspaceDir = getDefaultWorkspaceDirSpy as unknown as DesktopAPI["getDefaultWorkspaceDir"];
 });
 
 afterEach(() => {
   cleanup();
   Object.assign(officecli, originals);
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -159,6 +212,16 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof DialogueScreen
     onAddWorkspace: vi.fn(),
     ...overrides,
   };
+}
+
+function expectDialogueBubble(text: string, role: "ai" | "user") {
+  const node = screen.getByText(text);
+  expect(node.closest(`.living-tree-pptx-dialogue-message.is-${role}`)).toBeTruthy();
+}
+
+function expectDialogueBubbleNotLoading(text: string) {
+  const node = screen.getByText(text);
+  expect(node.closest(".living-tree-pptx-dialogue-message")?.querySelector(".anticon-loading")).toBeNull();
 }
 
 function makeCompletedImageTask(overrides: Partial<DesktopTask> = {}): DesktopTask {
@@ -239,6 +302,60 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function currentVibePopoverTitle() {
+  const openPopovers = Array.from(document.querySelectorAll<HTMLElement>(".ant-popover:not(.ant-popover-hidden) .living-tree-popover"));
+  const fallbackPopovers = Array.from(document.querySelectorAll<HTMLElement>(".living-tree-popover"));
+  const popover = openPopovers.at(-1) ?? fallbackPopovers.at(-1);
+  if (popover?.dataset.nodeTitle) return popover.dataset.nodeTitle;
+  return popover?.querySelector("strong")?.textContent;
+}
+
+const VIBE_NODE_SEQUENCE_TIMEOUT_MS = IDEA_NODE_DRAWING_MS * 12 + 1200;
+
+async function waitForVibePopoverTitle(title: string) {
+  await waitFor(() => expect(currentVibePopoverTitle()).toBe(title), { timeout: VIBE_NODE_SEQUENCE_TIMEOUT_MS });
+}
+
+function hasOpenVibeConfirmationPopover() {
+  return Boolean(document.querySelector(".ant-popover:not(.ant-popover-hidden) .living-tree-popover-confirm"));
+}
+
+function activeVibeStepOwnsOpenPopover() {
+  return Boolean(document.querySelector(".living-tree-step.is-active.ant-popover-open"));
+}
+
+function clickCurrentVibeConfirmButton() {
+  const buttons = screen.getAllByRole("button", { name: "Confirm this node" });
+  fireEvent.click(buttons.at(-1) as HTMLElement);
+}
+
+function clickCurrentVibeButton(name: string) {
+  const buttons = screen.getAllByRole("button", { name });
+  fireEvent.click(buttons.at(-1) as HTMLElement);
+}
+
+function currentOpenVibePopover() {
+  const popovers = Array.from(document.querySelectorAll(".ant-popover:not(.ant-popover-hidden) .living-tree-popover"));
+  return popovers.at(-1) as HTMLElement | undefined;
+}
+
+function clickCurrentOpenVibePopoverButton(name: string) {
+  const popover = currentOpenVibePopover();
+  expect(popover).toBeTruthy();
+  fireEvent.click(within(popover as HTMLElement).getByRole("button", { name }));
+}
+
+function flowNodeCard(nodeId: string) {
+  return document.querySelector(`.react-flow__node[data-id="${nodeId}"] .living-tree-flow-node`) as HTMLElement | null;
+}
+
+async function confirmInitialIdeaNode(firstStoryBeatTitle = "Current State") {
+  await waitFor(() => expect(screen.getByText("Confirm Idea")).toBeTruthy());
+  await waitFor(() => expect(screen.getAllByRole("button", { name: "Confirm this node" }).length).toBeGreaterThan(0), { timeout: IDEA_NODE_DRAWING_MS + 5000 });
+  clickCurrentVibeConfirmButton();
+  await waitForVibePopoverTitle(firstStoryBeatTitle);
 }
 
 describe("DialogueScreen state machine", () => {
@@ -691,16 +808,16 @@ describe("DialogueScreen state machine", () => {
     const task = makeRunningTask({
       id: "task-running-thinking",
       conversationId: "task-running-thinking",
-      topic: "介绍大闸蟹",
+      topic: "Introduce Hairy Crabs",
       events: [
-        { task_id: "task-running-thinking", type: "task.started", payload: { document_type: "docx", topic: "介绍大闸蟹" } },
+        { task_id: "task-running-thinking", type: "task.started", payload: { document_type: "docx", topic: "Introduce Hairy Crabs" } },
         { task_id: "task-running-thinking", type: "task.progress", payload: { stage: "Writing content" } },
       ],
     });
 
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
-    expect(screen.getByText("介绍大闸蟹")).toBeTruthy();
+    expect(screen.getByText("Introduce Hairy Crabs")).toBeTruthy();
     expect(screen.getByText("Generating DOCX...")).toBeTruthy();
     expect(document.querySelector(".generation-loading-message")).toBeTruthy();
     expect(document.querySelector(".generation-loading-docx")).toBeTruthy();
@@ -708,9 +825,51 @@ describe("DialogueScreen state machine", () => {
     expect(screen.queryByText(/Task received/i)).toBeNull();
     expect(screen.queryByText(/Target type/i)).toBeNull();
     expect(screen.queryByText("Runtime used")).toBeNull();
-    expect(screen.queryByText("Writing content")).toBeNull();
+    expect(screen.getByText("Writing content")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /play 2048/i })).toBeNull();
+    expect(document.querySelector(".generation-stage-rail")).toBeTruthy();
     expect(document.querySelector("[data-testid='task-runtime-panel']")).toBeNull();
     expect(document.querySelector(".fluid-progress-panel")).toBeNull();
+  });
+
+  it("shows waiting 2048 only when enabled and while a generation is running or starting", async () => {
+    getSettingsSpy.mockResolvedValue(makeUserSettings({ waiting2048Enabled: true }));
+    const runningTask = makeRunningTask({ status: "running" });
+    const questionTask: DesktopTask = {
+      ...runningTask,
+      status: "question",
+      question: {
+        id: "q-waiting-game",
+        question: "Who is the audience?",
+        options: [{ id: "leadership", label: "Leadership" }],
+        allowFreeform: false,
+      },
+    };
+    const planReviewTask: DesktopTask = {
+      ...runningTask,
+      status: "plan_review",
+      plan: {
+        id: "plan-waiting-game",
+        markdown: "Review this plan.",
+        revision: 1,
+        executionPrompt: "Generate after approval.",
+      },
+    };
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[runningTask]} />);
+
+    expect(await screen.findByRole("button", { name: /play 2048/i })).toBeTruthy();
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[{ ...runningTask, status: "starting" }]} />);
+    expect(await screen.findByRole("button", { name: /play 2048/i })).toBeTruthy();
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[questionTask]} />);
+    expect(screen.queryByRole("button", { name: /play 2048/i })).toBeNull();
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[planReviewTask]} />);
+    expect(screen.queryByRole("button", { name: /play 2048/i })).toBeNull();
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[{ ...runningTask, status: "completed" }]} />);
+    expect(screen.queryByRole("button", { name: /play 2048/i })).toBeNull();
   });
 
   it.each([
@@ -728,7 +887,3053 @@ describe("DialogueScreen state machine", () => {
     expect(document.querySelector(".fluid-progress-panel")).toBeNull();
   });
 
-  it("renders the plan writing animation before a plan exists", () => {
+  it("renders the canvas preparation animation for PPT Vibe plan tasks before the tree exists", () => {
+    const task = makeRunningTask({
+      documentType: "pptx",
+      userInput: {
+        prompt: "Make a 10-slide onboarding deck",
+        generationMode: "plan",
+      },
+      events: [
+        { task_id: "task-running-pptx", type: "task.started", ts: new Date().toISOString(), payload: { document_type: "pptx", topic: "Generate pptx" } },
+        { task_id: "task-running-pptx", type: "task.progress", ts: new Date().toISOString(), payload: { stage: "Preparing canvas" } },
+      ],
+    });
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Preparing canvas...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-message")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-canvas")).toBeTruthy();
+    expect((document.querySelector(".generation-loading-message") as HTMLElement)?.dataset.documentType).toBe("canvas");
+    expect(document.querySelector(".generation-loading-plan")).toBeNull();
+    expect(document.querySelector(".generation-loading-pptx")).toBeNull();
+  });
+
+  it("uses a vector canvas preparation transition without scaling the status label", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const now = new Date().toISOString();
+    const task: DesktopTask = {
+      ...makeRunningTask({
+        id: "task-vibe-vector-transition",
+        conversationId: "task-vibe-vector-transition",
+        documentType: "pptx",
+        topic: "Make a crisp vector loading state",
+        userInput: {
+          prompt: "Make a crisp vector loading state",
+          generationMode: "plan",
+        },
+        events: [
+          { task_id: "task-vibe-vector-transition", type: "task.started", ts: now, payload: { document_type: "pptx", topic: "Make a crisp vector loading state" } },
+        ],
+      }),
+      vibeTree: {
+        stage: "story_ready",
+        actions: [],
+        tree: {
+          id: "tree-vector-transition",
+          rootId: "root",
+          title: "Make a crisp vector loading state",
+          nodes: [{ id: "root", kind: "root", title: "Make a crisp vector loading state" }],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const transition = document.querySelector(".canvas-preparation-transition") as HTMLElement;
+    expect(transition).toBeTruthy();
+    expect(transition.querySelector("svg.canvas-preparation-vector")).toBeTruthy();
+    expect(transition.querySelector(".canvas-preparation-transition-visual > strong.canvas-preparation-transition-label")?.textContent).toBe("Preparing canvas...");
+  });
+
+  it("keeps the canvas preparation transition crisp by avoiding large transform scaling", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const expandRule = css.match(/@keyframes canvas-preparation-expand\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const labelRule = css.match(/\.canvas-preparation-transition-label\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(expandRule).not.toMatch(/scale\(\s*(?:2(?:\.\d+)?|[3-9](?:\.\d+)?)\s*\)/);
+    expect(labelRule).toContain("animation:");
+    expect(labelRule).not.toMatch(/scale\(/);
+  });
+
+  it("keeps the plan writing animation for non-PPT plan tasks before a plan exists", () => {
+    const task = makeRunningTask({
+      documentType: "docx",
+      userInput: {
+        prompt: "Make a rollout plan",
+        generationMode: "plan",
+      },
+    });
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Writing plan...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-plan")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-canvas")).toBeNull();
+  });
+
+  it("transitions from PPT canvas preparation into the Living Tree canvas", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const preparingTask = makeRunningTask({
+      id: "task-vibe-transition",
+      conversationId: "task-vibe-transition",
+      documentType: "pptx",
+      topic: "Make a product narrative deck",
+      userInput: {
+        prompt: "Make a product narrative deck",
+        generationMode: "plan",
+      },
+      events: [
+        { task_id: "task-vibe-transition", type: "task.started", ts: new Date().toISOString(), payload: { document_type: "pptx", topic: "Make a product narrative deck" } },
+        { task_id: "task-vibe-transition", type: "task.progress", ts: new Date().toISOString(), payload: { stage: "Preparing canvas" } },
+      ],
+    });
+    const treeTask: DesktopTask = {
+      ...preparingTask,
+      vibeTree: {
+        stage: "story_ready",
+        actions: [],
+        tree: {
+          id: "tree-transition",
+          rootId: "root",
+          title: "Make a product narrative deck",
+          nodes: [
+            { id: "root", kind: "root", title: "Make a product narrative deck" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Why now" },
+          ],
+        },
+      },
+    };
+
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[preparingTask]} />);
+    expect(document.querySelector(".generation-loading-canvas")).toBeTruthy();
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[treeTask]} />);
+
+    const layout = document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement;
+    expect(layout).toBeTruthy();
+    expect(layout.dataset.canvasPhase).toBe("expanding");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeTruthy();
+    expect(screen.getByText("Preparing canvas...")).toBeTruthy();
+    expect(document.querySelector(".living-tree-cockpit")).toBeTruthy();
+    expect((document.querySelector(".living-tree-cockpit") as HTMLElement).dataset.canvasReveal).toBe("pending");
+
+    await act(async () => {
+      vi.advanceTimersByTime(3999);
+    });
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("expanding");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("ready");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeNull();
+    expect((document.querySelector(".living-tree-cockpit") as HTMLElement).dataset.canvasReveal).toBe("ready");
+    vi.useRealTimers();
+  });
+
+  it("plays the canvas preparation transition when a current-session PPT Vibe task first appears already with a tree", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const now = new Date().toISOString();
+    const task: DesktopTask = {
+      ...makeRunningTask({
+        id: "task-vibe-fast-tree",
+        conversationId: "task-vibe-fast-tree",
+        documentType: "pptx",
+        topic: "Make a product narrative deck",
+        userInput: {
+          prompt: "Make a product narrative deck",
+          generationMode: "plan",
+        },
+        events: [
+          { task_id: "task-vibe-fast-tree", type: "task.started", ts: now, payload: { document_type: "pptx", topic: "Make a product narrative deck" } },
+        ],
+      }),
+      status: "question",
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        tree: {
+          id: "tree-fast",
+          rootId: "root",
+          title: "Make a product narrative deck",
+          nodes: [
+            { id: "root", kind: "root", title: "Make a product narrative deck" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Why now" },
+          ],
+        },
+        confirmation: { nodeIds: ["branch"] },
+      },
+    };
+
+    const existingTask = makeRunningTask({
+      id: "task-existing-docx",
+      conversationId: "task-existing-docx",
+      documentType: "docx",
+      events: [
+        { task_id: "task-existing-docx", type: "task.started", ts: "2026-06-01T00:00:00Z", payload: { document_type: "docx", topic: "Existing task" } },
+        { task_id: "task-existing-docx", type: "task.progress", ts: "2026-06-01T00:00:01Z", payload: { stage: "Writing content" } },
+      ],
+    });
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[existingTask]} />);
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("expanding");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeTruthy();
+    expect((document.querySelector(".living-tree-cockpit") as HTMLElement).dataset.canvasReveal).toBe("pending");
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3999);
+    });
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("expanding");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeTruthy();
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("ready");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeNull();
+    const rootNode = flowNodeCard("root");
+    expect(rootNode?.classList.contains("is-idea-drawing")).toBe(true);
+    expect(rootNode?.dataset.motionRole).toBe("idea-drawing");
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+
+    expect(flowNodeCard("root")?.classList.contains("is-idea-drawing")).toBe(false);
+    expect(currentVibePopoverTitle()).toBe("Make a product narrative deck");
+    vi.useRealTimers();
+  });
+
+  it("does not replay the canvas preparation animation when reopening a historical PPT Vibe task", () => {
+    const historicalPreparingTask = makeRunningTask({
+      id: "task-historical-preparing",
+      conversationId: "task-historical-preparing",
+      documentType: "pptx",
+      userInput: {
+        prompt: "Historical PPT task",
+        generationMode: "plan",
+      },
+      events: [
+        { task_id: "task-historical-preparing", type: "task.started", ts: "2026-06-01T00:00:00Z", payload: { document_type: "pptx", topic: "Historical PPT task" } },
+        { task_id: "task-historical-preparing", type: "task.progress", ts: "2026-06-01T00:00:01Z", payload: { stage: "Preparing canvas" } },
+      ],
+    });
+
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[historicalPreparingTask]} />);
+
+    expect(screen.getByText("Writing plan...")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-plan")).toBeTruthy();
+    expect(document.querySelector(".generation-loading-canvas")).toBeNull();
+
+    const historicalTreeTask: DesktopTask = {
+      ...historicalPreparingTask,
+      status: "question",
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        tree: {
+          id: "tree-historical",
+          rootId: "root",
+          title: "Historical PPT task",
+          nodes: [
+            { id: "root", kind: "root", title: "Historical PPT task" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Why now" },
+          ],
+        },
+        confirmation: { nodeIds: ["branch"] },
+      },
+    };
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[historicalTreeTask]} />);
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("ready");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeNull();
+    expect((document.querySelector(".living-tree-cockpit") as HTMLElement).dataset.canvasReveal).toBe("ready");
+    expect(flowNodeCard("root")?.classList.contains("is-idea-drawing")).toBe(false);
+    expect(document.querySelector(".living-tree-flow-node.is-idea-drawing, .living-tree-flow-node.is-node-drawing")).toBeNull();
+  });
+
+  it("does not replay the canvas preparation transition when a Vibe task advances stages", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const now = new Date().toISOString();
+    const storyTask: DesktopTask = {
+      ...makeRunningTask({
+        id: "task-vibe-stage-handoff",
+        conversationId: "task-vibe-stage-handoff",
+        documentType: "pptx",
+        topic: "Make a product narrative deck",
+        userInput: {
+          prompt: "Make a product narrative deck",
+          generationMode: "plan",
+        },
+        events: [
+          { task_id: "task-vibe-stage-handoff", type: "task.started", ts: now, payload: { document_type: "pptx", topic: "Make a product narrative deck" } },
+        ],
+      }),
+      status: "question",
+      question: {
+        id: "vibe_story_ready",
+        question: "Story Beats generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        tree: {
+          id: "tree-stage-handoff",
+          rootId: "root",
+          title: "Make a product narrative deck",
+          nodes: [
+            { id: "root", kind: "root", title: "Make a product narrative deck" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Why now" },
+          ],
+        },
+        confirmation: { nodeIds: ["branch"] },
+      },
+    };
+    const generatingChapterTask: DesktopTask = {
+      ...storyTask,
+      id: "task-vibe-stage-handoff-generating-chapter",
+      status: "running",
+      question: undefined,
+      vibeTree: undefined,
+    };
+    const outlineTask: DesktopTask = {
+      ...storyTask,
+      id: "task-vibe-stage-handoff-outline",
+      question: {
+        id: "vibe_outline_ready",
+        question: "Chapters generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "outline_ready",
+        actions: [{ id: "generate_outline", label: "Generate Outline" }],
+        tree: {
+          id: "tree-stage-handoff",
+          rootId: "root",
+          title: "Make a product narrative deck",
+          nodes: [
+            { id: "root", kind: "root", title: "Make a product narrative deck" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Why now" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter 1" },
+          ],
+        },
+        confirmation: { nodeIds: ["chapter"] },
+      },
+    };
+
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[storyTask]} />);
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("ready");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeNull();
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[generatingChapterTask]} />);
+    rerender(<DialogueScreen {...baseProps()} tasks={[outlineTask]} />);
+
+    expect((document.querySelector(".conversation-layout.is-vibe-canvas-focus") as HTMLElement).dataset.canvasPhase).toBe("ready");
+    expect(document.querySelector(".canvas-preparation-transition")).toBeNull();
+    expect((document.querySelector(".living-tree-cockpit") as HTMLElement).dataset.vibeStage).toBe("outline_ready");
+    expect(flowNodeCard("chapter")?.classList.contains("is-node-drawing")).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("shows a temporary thinking node while the next PPT step waits on LLM output, then fades it before drawing the new node", async () => {
+    const outlineTask: DesktopTask = {
+      id: "task-vibe-outline-thinking",
+      conversationId: "task-vibe-outline-thinking",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_outline_ready",
+        question: "Chapters generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "outline_ready",
+        actions: [{ id: "generate_outline", label: "Generate Outline" }],
+        tree: {
+          id: "tree-outline-thinking",
+          rootId: "root",
+          title: "Awaiting Outline",
+          nodes: [
+            { id: "root", kind: "root", title: "Awaiting Outline" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "group-a", parentId: "branch", kind: "slide_group", title: "Chapter A" },
+          ],
+        },
+        confirmation: { nodeIds: ["group-a"] },
+      },
+    };
+    const runningTask: DesktopTask = {
+      ...outlineTask,
+      id: "task-vibe-outline-thinking-running",
+      status: "running",
+      question: undefined,
+    };
+    const refinedTask: DesktopTask = {
+      ...outlineTask,
+      id: "task-vibe-outline-thinking-refined",
+      status: "question",
+      events: [{ task_id: "task-vibe-outline-thinking-refined", type: "task.vibe_tree", ts: new Date().toISOString(), payload: { stage: "refined_ready" } }],
+      question: {
+        id: "vibe_refined_ready",
+        question: "Outline generated.",
+        allowFreeform: true,
+        options: [{ id: "export_pptx", label: "Generate PPTX", recommended: true }],
+      },
+      vibeTree: {
+        stage: "refined_ready",
+        actions: [{ id: "export_pptx", label: "Generate PPTX" }],
+        tree: {
+          id: "tree-outline-thinking-refined",
+          rootId: "root",
+          title: "Awaiting Outline",
+          nodes: [
+            { id: "root", kind: "root", title: "Awaiting Outline" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "group-a", parentId: "branch", kind: "slide_group", title: "Chapter A" },
+            { id: "outline-a", parentId: "group-a", kind: "outline", title: "Outline A" },
+          ],
+        },
+        confirmation: { nodeIds: ["outline-a"] },
+      },
+    };
+
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[outlineTask]} />);
+
+    await waitForVibePopoverTitle("Chapter A");
+    clickCurrentVibeConfirmButton();
+    await waitFor(() => expect(screen.getByText("Confirmed 1/1")).toBeTruthy());
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[runningTask]} />);
+
+    const thinkingNodeId = "thinking-group-a-outline_ready";
+    expect(flowNodeCard(thinkingNodeId)?.classList.contains("is-thinking")).toBe(true);
+    expect(flowNodeCard(thinkingNodeId)?.classList.contains("is-thinking-active")).toBe(true);
+
+    vi.useFakeTimers();
+    rerender(<DialogueScreen {...baseProps()} tasks={[refinedTask]} />);
+
+    expect(flowNodeCard(thinkingNodeId)?.classList.contains("is-thinking-done")).toBe(true);
+    expect(flowNodeCard("outline-a")).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1200);
+    });
+
+    expect(flowNodeCard(thinkingNodeId)).toBeNull();
+    expect(flowNodeCard("outline-a")?.classList.contains("is-node-drawing")).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("shows the thinking node immediately while confirming Idea waits for the LLM to return Story Beat", async () => {
+    const respondDeferred = deferred<unknown>();
+    respondSpy.mockReturnValueOnce(respondDeferred.promise);
+    const task: DesktopTask = {
+      id: "task-vibe-idea-thinking",
+      conversationId: "task-vibe-idea-thinking",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        tree: {
+          id: "tree-idea-thinking",
+          rootId: "root",
+          title: "Introduce Shimo Docs",
+          nodes: [
+            { id: "root", kind: "root", title: "Introduce Shimo Docs" },
+          ],
+        },
+        confirmation: { nodeIds: ["root"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await waitForVibePopoverTitle("Introduce Shimo Docs");
+    clickCurrentVibeConfirmButton();
+
+    const thinkingNodeId = "thinking-root-story_ready";
+    await waitFor(() => expect(flowNodeCard(thinkingNodeId)?.classList.contains("is-thinking-active")).toBe(true));
+    expect(flowNodeCard(thinkingNodeId)?.textContent).toContain("Thinking");
+    expect((document.querySelector(`.react-flow__node[data-id="${thinkingNodeId}"]`) as HTMLElement | null)?.style.height).toBe("108px");
+
+    respondDeferred.resolve(undefined);
+  });
+
+  it("exposes motion state for running PPT generation stages", () => {
+    const task = makeRunningTask({
+      documentType: "pptx",
+      stages: [
+        { id: "analyze", label: "Analyzing request", status: "completed" },
+        { id: "outline", label: "Drafting outline", status: "active" },
+        { id: "writing", label: "Writing content", status: "pending" },
+      ],
+      activeStageId: "outline",
+    });
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const loading = document.querySelector(".generation-loading-message") as HTMLElement;
+    expect(loading.dataset.motionStatus).toBe("running");
+    expect(loading.dataset.documentType).toBe("pptx");
+    const rail = document.querySelector(".generation-stage-rail") as HTMLElement;
+    expect(rail.dataset.activeStageId).toBe("outline");
+    expect(rail.dataset.stageCount).toBe("3");
+    expect(document.querySelector(".generation-stage-item[data-stage-id='analyze']")?.classList.contains("is-stage-completed")).toBe(true);
+    expect(document.querySelector(".generation-stage-item[data-stage-id='outline']")?.classList.contains("is-stage-active")).toBe(true);
+  });
+
+  it("renders a backend Vibe Project Tree snapshot as a canvas-first task without the old question composer", async () => {
+    vi.useFakeTimers();
+    const task: DesktopTask = {
+      id: "task-vibe",
+      conversationId: "task-vibe",
+      status: "question",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe", type: "task.vibe_tree", payload: { stage: "refined_ready" } },
+        { task_id: "task-vibe", type: "task.question", payload: { id: "vibe_refined_ready", question: "Ready to generate PPTX", options: [{ id: "export_pptx", label: "Generate PPTX" }], allow_freeform: true } },
+      ],
+      question: {
+        id: "vibe_refined_ready",
+        question: "Ready to generate PPTX, or type a message to adjust direction.",
+        allowFreeform: true,
+        options: [{ id: "export_pptx", label: "Generate PPTX", recommended: true }],
+      },
+      vibeTree: {
+        stage: "refined_ready",
+        tree: {
+          id: "tree-1",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          direction: "More like a version for the boss",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base", summary: "Raw request" },
+            { id: "branch-problem", parentId: "root", kind: "branch", title: "Problem", summary: "Can't find, can't trust, can't use" },
+            { id: "group-problem", parentId: "branch-problem", kind: "slide_group", title: "Problem Breakdown", slideRange: "3-5" },
+            {
+              id: "slide-03",
+              parentId: "group-problem",
+              kind: "slide",
+              title: "Hidden cost 1: Search and repeated questions consume attention",
+              summary: "Convert the inability to find knowledge into discussable time and efficiency costs.",
+              slideNumber: 3,
+              outline: ["Finding materials requires searching across multiple systems each time", "Repeated questions consume expert time"],
+              visualAssets: [{ kind: "chart", description: "Bar chart comparing time spent searching for materials" }],
+              trace: ["root", "branch-problem", "group-problem"],
+            },
+          ],
+        },
+        actions: [{ id: "export_pptx", label: "Generate PPTX" }],
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    await act(async () => {
+      vi.advanceTimersByTime(12000);
+    });
+
+    expect(screen.getByText("Living Tree Cockpit")).toBeTruthy();
+    const cockpit = screen.getByLabelText("Living Tree Cockpit") as HTMLElement;
+    expect(cockpit.dataset.vibeStage).toBe("refined_ready");
+    expect(cockpit.dataset.vibeActiveIndex).toBe("3");
+    expect(document.querySelector(".living-tree-steps")?.getAttribute("data-active-index")).toBe("3");
+    expect(document.querySelector(".living-tree-step[data-step-key='outline']")?.classList.contains("is-active")).toBe(true);
+    expect(screen.getAllByText("I want to explain why we need to rebuild our internal knowledge base").length).toBeGreaterThan(0);
+    expect(flowNodeCard("group-problem")?.querySelector("strong")?.textContent).toBe("Problem Breakdown");
+    expect(flowNodeCard("slide-03")?.querySelector("strong")?.textContent).toBe("Hidden cost 1: Search and repeated questions consume attention");
+    expect(flowNodeCard("slide-03")?.querySelector(".living-tree-visual-asset-icon.is-chart")).toBeTruthy();
+    expect(screen.getByLabelText("Chart: Bar chart comparing time spent searching for materials")).toBeTruthy();
+    expect(within(flowNodeCard("slide-03") as HTMLElement).getByText("Page 3")).toBeTruthy();
+    expect(within(flowNodeCard("slide-03") as HTMLElement).queryByText("P3")).toBeNull();
+    expect(screen.queryByText("Q1")).toBeNull();
+    expect(screen.queryByPlaceholderText(/custom answer if none of the options fit/i)).toBeNull();
+    expect(document.querySelector(".conversation-layout.is-vibe-canvas-focus")).toBeTruthy();
+    expect(document.querySelector(".react-flow__minimap")).toBeTruthy();
+    expect(document.querySelector(".chat-thread")).toBeNull();
+    expect(document.querySelector(".conversation-footer")).toBeNull();
+    expect(screen.queryByText("Generation History")).toBeNull();
+    expect(screen.queryByText("Rebuild Internal Knowledge Base")).toBeNull();
+
+    fireEvent.click(flowNodeCard("slide-03") as Element);
+    expect(currentVibePopoverTitle()).toBe("Hidden cost 1: Search and repeated questions consume attention");
+    clickCurrentVibeConfirmButton();
+    fireEvent.click(screen.getByRole("button", { name: "Generate PPTX" }));
+
+    expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-vibe",
+      questionId: "vibe_refined_ready",
+      optionId: "export_pptx",
+    }));
+    vi.useRealTimers();
+  });
+
+  it("places parent tree nodes at the center of their expanded child groups", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "refined_ready",
+      actions: [],
+      tree: {
+        id: "tree-layout",
+        rootId: "root",
+        title: "Layout test",
+        nodes: [
+          { id: "root", kind: "root", title: "Idea" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Story Beat" },
+          { id: "group-a", parentId: "branch", kind: "slide_group", title: "Short Chapter" },
+          { id: "group-b", parentId: "branch", kind: "slide_group", title: "Long Chapter" },
+          { id: "slide-a-1", parentId: "group-a", kind: "slide", title: "A1", slideNumber: 1 },
+          { id: "slide-a-2", parentId: "group-a", kind: "slide", title: "A2", slideNumber: 2 },
+          { id: "slide-b-1", parentId: "group-b", kind: "slide", title: "B1", slideNumber: 3 },
+          { id: "slide-b-2", parentId: "group-b", kind: "slide", title: "B2", slideNumber: 4 },
+          { id: "slide-b-3", parentId: "group-b", kind: "slide", title: "B3", slideNumber: 5 },
+          { id: "slide-b-4", parentId: "group-b", kind: "slide", title: "B4", slideNumber: 6 },
+          { id: "slide-b-5", parentId: "group-b", kind: "slide", title: "B5", slideNumber: 7 },
+        ],
+      },
+    };
+
+    const flowModel = buildVibeFlowModel(snapshot);
+    const positions = new Map(flowModel.nodes.map((node) => [node.id, node.position.y]));
+    const nodeCenterY = (id: string, height: number) => (positions.get(id) ?? 0) + height / 2;
+    const groupAChildren = ["slide-a-1", "slide-a-2"].map((id) => nodeCenterY(id, 258));
+    const groupBChildren = ["slide-b-1", "slide-b-2", "slide-b-3", "slide-b-4", "slide-b-5"].map((id) => nodeCenterY(id, 258));
+    const center = (values: number[]) => (Math.min(...values) + Math.max(...values)) / 2;
+
+    expect(nodeCenterY("group-a", 124)).toBeCloseTo(center(groupAChildren), 1);
+    expect(nodeCenterY("group-b", 124)).toBeCloseTo(center(groupBChildren), 1);
+    expect((positions.get("group-b") ?? 0) - (positions.get("group-a") ?? 0)).toBeGreaterThan(500);
+  });
+
+  it("creates visible chapter lanes that span each chapter's outline group", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "refined_ready",
+      actions: [],
+      tree: {
+        id: "tree-lanes",
+        rootId: "root",
+        title: "Lane test",
+        nodes: [
+          { id: "root", kind: "root", title: "Idea" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Story Beat" },
+          { id: "group-a", parentId: "branch", kind: "slide_group", title: "Context Setting" },
+          { id: "group-b", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+          { id: "slide-a-1", parentId: "group-a", kind: "slide", title: "A1", slideNumber: 1 },
+          { id: "slide-a-2", parentId: "group-a", kind: "slide", title: "A2", slideNumber: 2 },
+          { id: "slide-b-1", parentId: "group-b", kind: "slide", title: "B1", slideNumber: 3 },
+          { id: "slide-b-2", parentId: "group-b", kind: "slide", title: "B2", slideNumber: 4 },
+          { id: "slide-b-3", parentId: "group-b", kind: "slide", title: "B3", slideNumber: 5 },
+        ],
+      },
+    };
+
+    const flowModel = buildVibeFlowModel(snapshot);
+    const lanes = flowModel.nodes.filter((node) => node.type === "vibeLane").sort((a, b) => a.position.y - b.position.y);
+    const positions = new Map(flowModel.nodes.map((node) => [node.id, node.position.y]));
+
+    expect(lanes).toHaveLength(2);
+    expect(lanes[0].id).toBe("lane-group-a");
+    expect(lanes[1].id).toBe("lane-group-b");
+    expect(lanes[0].data.treeNode.title).toBe("Context Setting");
+    expect(lanes[1].data.treeNode.title).toBe("Problem Breakdown");
+    expect(lanes[0].position.y).toBeLessThan(positions.get("slide-a-1") ?? 0);
+    expect(lanes[1].position.y).toBeLessThan(positions.get("slide-b-1") ?? 0);
+    expect(Number(lanes[0].style?.height)).toBeGreaterThan(258);
+    expect(Number(lanes[1].style?.height)).toBeGreaterThan(Number(lanes[0].style?.height));
+  });
+
+  it("shows the expected generated page count on each Chapter node", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "refined_ready",
+      actions: [],
+      tree: {
+        id: "tree-chapter-page-count",
+        rootId: "root",
+        title: "Chapter page count",
+        nodes: [
+          { id: "root", kind: "root", title: "Idea" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Story Beat" },
+          { id: "group-a", parentId: "branch", kind: "slide_group", title: "Context Setting" },
+          { id: "group-b", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+          { id: "slide-a-1", parentId: "group-a", kind: "slide", title: "A1", slideNumber: 1 },
+          { id: "slide-a-2", parentId: "group-a", kind: "slide", title: "A2", slideNumber: 2 },
+          { id: "outline-b-1", parentId: "group-b", kind: "outline", title: "B1" },
+          { id: "outline-b-2", parentId: "group-b", kind: "outline", title: "B2" },
+          { id: "outline-b-3", parentId: "group-b", kind: "outline", title: "B3" },
+        ],
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[{
+      id: "task-chapter-page-count",
+      conversationId: "task-chapter-page-count",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_refined_ready",
+        question: "Ready to generate PPTX.",
+        allowFreeform: true,
+        options: [{ id: "export_pptx", label: "Generate PPTX" }],
+      },
+      vibeTree: snapshot,
+    }]} />);
+
+    expect(within(flowNodeCard("group-a") as HTMLElement).getByText("2 Pages")).toBeTruthy();
+    expect(within(flowNodeCard("group-b") as HTMLElement).getByText("3 Pages")).toBeTruthy();
+  });
+
+  it("does not show Deck or Deck edges while Slides are still awaiting confirmation", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "slides_ready",
+      actions: [{ id: "export_pptx", label: "Generate PPTX" }],
+      confirmation: { nodeIds: ["slide-01", "slide-02"] },
+      tree: {
+        id: "tree-slides-confirming",
+        rootId: "root",
+        title: "Deck visibility",
+        nodes: [
+          { id: "root", kind: "root", title: "Idea" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Story Beat" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+          { id: "slide-01", parentId: "outline-01", kind: "slide", title: "P1", slideNumber: 1 },
+          { id: "outline-02", parentId: "chapter", kind: "outline", title: "P2" },
+          { id: "slide-02", parentId: "outline-02", kind: "slide", title: "P2", slideNumber: 2 },
+        ],
+      },
+    };
+
+    const flowModel = buildVibeFlowModel(snapshot);
+
+    expect(flowModel.nodes.some((node) => node.id === "deck")).toBe(false);
+    expect(flowModel.edges.some((edge) => edge.source === "deck" || edge.target === "deck")).toBe(false);
+  });
+
+  it("shows Deck and connects generated Slides after the flow advances to rendering", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "rendering",
+      actions: [],
+      tree: {
+        id: "tree-rendering-deck",
+        rootId: "root",
+        title: "Deck visibility",
+        nodes: [
+          { id: "root", kind: "root", title: "Idea" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Story Beat" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+          { id: "slide-01", parentId: "outline-01", kind: "slide", title: "P1", slideNumber: 1 },
+          { id: "outline-02", parentId: "chapter", kind: "outline", title: "P2" },
+          { id: "slide-02", parentId: "outline-02", kind: "slide", title: "P2", slideNumber: 2 },
+        ],
+      },
+    };
+
+    const flowModel = buildVibeFlowModel(snapshot);
+
+    expect(flowModel.nodes.some((node) => node.id === "deck")).toBe(true);
+    expect(flowModel.edges.some((edge) => edge.source === "slide-01" && edge.target === "deck")).toBe(true);
+    expect(flowModel.edges.some((edge) => edge.source === "slide-02" && edge.target === "deck")).toBe(true);
+  });
+
+  it("renders generated Slide nodes as horizontal PPTX placeholder thumbnails", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "rendering",
+      actions: [],
+      tree: {
+        id: "tree-slide-thumbnail",
+        rootId: "root",
+        title: "Slide thumbnail",
+        nodes: [
+          { id: "root", kind: "root", title: "Slide thumbnail" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+          {
+            id: "slide-01",
+            parentId: "outline-01",
+            kind: "slide",
+            title: "Rebuilding the internal knowledge base: from tool upgrade to organizational collaboration upgrade",
+            summary: "Establish the reporting thesis: the essence of rebuilding the knowledge base is reducing collaboration friction.",
+            outline: ["Clarify that today's discussion is not about switching storage tools", "Point out that knowledge workflow efficiency directly impacts cross-team decisions"],
+            visualAssets: [{ kind: "chart", description: "Collaboration efficiency comparison chart" }],
+            slideNumber: 1,
+          },
+        ],
+      },
+    };
+
+    const flowModel = buildVibeFlowModel(snapshot);
+    const slideNode = flowModel.nodes.find((node) => node.id === "slide-01");
+
+    expect(slideNode).toEqual(expect.objectContaining({ width: 416, height: 234 }));
+    expect(slideNode?.style).toEqual(expect.objectContaining({ width: 416, height: 234 }));
+
+    render(<DialogueScreen {...baseProps()} tasks={[{
+      id: "task-slide-thumbnail",
+      conversationId: "task-slide-thumbnail",
+      status: "running",
+      documentType: "pptx",
+      events: [],
+      vibeTree: snapshot,
+    }]} />);
+
+    const slideCard = flowNodeCard("slide-01") as HTMLElement;
+    expect(slideCard.classList.contains("is-slide-thumbnail")).toBe(true);
+    expect(slideCard.querySelector(".living-tree-slide-thumbnail")).toBeTruthy();
+    expect(slideCard.querySelector(".living-tree-pptx-placeholder")).toBeTruthy();
+    expect(slideCard.querySelector(".living-tree-pptx-underlay")).toBeTruthy();
+    expect(slideCard.querySelector(".living-tree-pptx-placeholder-mask")).toBeTruthy();
+    expect(slideCard.querySelector(".living-tree-slide-preview-iframe")).toBeNull();
+    expect(within(slideCard).queryByText("Page 1")).toBeTruthy();
+    expect(within(slideCard).queryByText("Rebuilding the internal knowledge base: from tool upgrade to organizational collaboration upgrade")).toBeTruthy();
+    expect(within(slideCard).queryByText("Establish the reporting thesis: the essence of rebuilding the knowledge base is reducing collaboration friction.")).toBeTruthy();
+    expect(within(slideCard).queryByText("Clarify that today's discussion is not about switching storage tools")).toBeTruthy();
+    expect(within(slideCard).queryByText("Point out that knowledge workflow efficiency directly impacts cross-team decisions")).toBeTruthy();
+  });
+
+  it("keeps generated Slide thumbnails separated with strict PowerPoint proportions", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "rendering",
+      actions: [],
+      tree: {
+        id: "tree-slide-thumbnail-spacing",
+        rootId: "root",
+        title: "Slide thumbnail spacing",
+        nodes: [
+          { id: "root", kind: "root", title: "Slide thumbnail spacing" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+          { id: "slide-01", parentId: "outline-01", kind: "slide", title: "P1", slideNumber: 1 },
+          { id: "outline-02", parentId: "chapter", kind: "outline", title: "P2" },
+          { id: "slide-02", parentId: "outline-02", kind: "slide", title: "P2", slideNumber: 2 },
+        ],
+      },
+    };
+    const model = buildVibeFlowModel(snapshot);
+    const firstSlide = model.nodes.find((node) => node.id === "slide-01");
+    const secondSlide = model.nodes.find((node) => node.id === "slide-02");
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const slideRule = css.match(/^\.living-tree-flow-node\.is-generated_slide\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const pageRule = css.match(/^\.living-tree-slide-thumbnail-page\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const underlayRule = css.match(/^\.living-tree-pptx-underlay\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const maskRule = css.match(/^\.living-tree-pptx-placeholder-mask\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const deckRule = css.match(/^\.living-tree-flow-node\.is-deck\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const deckPptxArtRule = css.match(/^\.living-tree-deck-pptx-art\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const deckActionsRule = css.match(/^\.living-tree-flow-node\.is-deck\.has-completed-artifact \.living-tree-artifact-actions\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const deckButtonRule = css.match(/^\.living-tree-flow-node\.is-deck\.has-completed-artifact \.living-tree-artifact-actions \.ant-btn\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+
+    expect(firstSlide).toEqual(expect.objectContaining({ width: 416, height: 234 }));
+    expect(secondSlide).toEqual(expect.objectContaining({ width: 416, height: 234 }));
+    expect((secondSlide?.position.y ?? 0) - (firstSlide?.position.y ?? 0)).toBeGreaterThanOrEqual(306);
+    expect(slideRule).toContain("aspect-ratio: 16 / 9");
+    expect(slideRule).toContain("overflow: visible");
+    expect(pageRule).toContain("box-sizing: border-box");
+    expect(pageRule).toContain("overflow: hidden");
+    expect(underlayRule).toContain("filter: blur(0.55px)");
+    expect(underlayRule).toContain("opacity: 0.76");
+    expect(underlayRule).toContain("z-index: 0");
+    expect(maskRule).toContain("z-index: 1");
+    expect(deckRule).toContain("width: 100%");
+    expect(deckActionsRule).toContain("display: grid");
+    expect(deckActionsRule).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(deckActionsRule).toContain("align-self: end");
+    expect(css).toContain("grid-template-rows: auto minmax(0, 1fr) auto");
+    expect(css).toContain(".living-tree-deck-pptx-art");
+    expect(css).toContain(".living-tree-deck-slide-fan");
+    expect(css).toContain(".living-tree-deck-fan-slide");
+    expect(css).toContain(".living-tree-deck-pptx-chip");
+    expect(css).toContain("@keyframes living-tree-deck-fan-left");
+    expect(css).toContain("@keyframes living-tree-deck-fan-right");
+    expect(css).toContain("@keyframes living-tree-deck-fan-float");
+    expect(css).not.toContain(".living-tree-deck-slide-tiles");
+    expect(css).not.toContain("@keyframes living-tree-deck-tile-wave");
+    expect(deckPptxArtRule).toContain("border: none");
+    expect(deckPptxArtRule).toContain("background: transparent");
+    expect(deckPptxArtRule).toContain("box-shadow: none");
+    expect(css).not.toContain("grid-template-columns: minmax(0, 1fr) 236px");
+    expect(css).toContain(".living-tree-deck-completed-copy");
+    expect(deckButtonRule).toContain("width: 100%");
+    expect(deckButtonRule).toContain("min-width: 0");
+  });
+
+  it("does not synthesize duplicate generated Slides when slide nodes already exist", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "rendering",
+      actions: [],
+      tree: {
+        id: "tree-existing-slides",
+        rootId: "root",
+        title: "Existing slides",
+        nodes: [
+          { id: "root", kind: "root", title: "Existing slides" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          { id: "slide-01", parentId: "chapter", kind: "slide", title: "P1", slideNumber: 1 },
+          { id: "slide-02", parentId: "chapter", kind: "slide", title: "P2", slideNumber: 2 },
+        ],
+      },
+    };
+
+    const flowModel = buildVibeFlowModel(snapshot);
+    const generatedSlides = flowModel.nodes.filter((node) => node.data.kind === "generated_slide");
+
+    expect(generatedSlides.map((node) => node.id)).toEqual(["slide-01", "slide-02"]);
+    expect(flowModel.nodes.some((node) => node.id.startsWith("generated-slide-"))).toBe(false);
+  });
+
+  it("marks generated slides and deck for assembly motion while rendering", () => {
+    const task: DesktopTask = {
+      id: "task-vibe-rendering-motion",
+      conversationId: "task-vibe-rendering-motion",
+      status: "running",
+      documentType: "pptx",
+      events: [],
+      vibeTree: {
+        stage: "rendering",
+        actions: [],
+        tree: {
+          id: "tree-rendering-motion",
+          rootId: "root",
+          title: "Deck assembly",
+          nodes: [
+            { id: "root", kind: "root", title: "Idea" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Story Beat" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "P1", slideNumber: 1 },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(document.querySelector(".living-tree-flow-shell")?.classList.contains("is-deck-assembling")).toBe(true);
+    expect(flowNodeCard("slide-01")?.classList.contains("is-assembling")).toBe(true);
+    // Deck node is hidden in the PPTist embed view during rendering stage
+    expect(flowNodeCard("deck")).toBeNull();
+  });
+
+  it("turns completed Vibe PPTX into an Edit with AI workspace after every page is generated", async () => {
+    const onPreview = vi.fn();
+    const onContinueModify = vi.fn();
+    const artifact = {
+      taskId: "task-vibe-completed",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-completed",
+      conversationId: "task-vibe-completed",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-completed", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck", summary: "All pages assembled into deliverable PPTX." },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps({ onPreview, onContinueModify })} tasks={[task]} />);
+
+    expect(document.querySelector(".conversation-layout.is-vibe-canvas-focus")).toBeTruthy();
+    expect(screen.getByText("Living Tree Cockpit")).toBeTruthy();
+    expect(document.querySelector(".chat-thread")).toBeNull();
+    expect(document.querySelector(".conversation-footer")).toBeNull();
+    expect(screen.queryByText("Generation Complete")).toBeNull();
+
+    // When a PPTX file artifact exists, the animated PPTist surface owns the
+    // completed-state artifact actions while the Deck node stays hidden.
+    const pptxToolbar = document.querySelector(".living-tree-pptx-toolbar");
+    const pptistEmbed = document.querySelector(".living-tree-pptist-embed");
+    expect(pptxToolbar).toBeTruthy();
+    expect(pptxToolbar?.parentElement?.classList.contains("living-tree-header")).toBe(true);
+    expect(pptistEmbed?.previousElementSibling).not.toBe(pptxToolbar);
+    expect(document.querySelector(".living-tree-completed-bar")).toBeNull();
+    expect(pptistEmbed).toBeTruthy();
+    expect(flowNodeCard("deck")).toBeNull();
+    expect(screen.getAllByText("I want to explain why we need to rebuild our internal knowledge base").length).toBeGreaterThan(0);
+    expect(screen.queryByText("0/1 pages generated")).toBeNull();
+    const openFileButton = screen.getByRole("button", { name: "Open internal-knowledge-base.pptx" });
+    const openCanvasTreeButton = screen.getByRole("button", { name: "Open canvas tree" });
+    const exportButton = screen.getByRole("button", { name: "Export PPTX" }) as HTMLButtonElement;
+    const showInFolderButton = screen.getByRole("button", { name: "Show in folder" }) as HTMLButtonElement;
+    const openPreviewButton = screen.getByRole("button", { name: "Open Preview" }) as HTMLButtonElement;
+    expect(openPreviewButton.textContent).toBe("");
+    expect(openFileButton).toHaveAttribute("title", "Open internal-knowledge-base.pptx");
+    expect(screen.queryByRole("button", { name: "AI conversation" })).toBeNull();
+    expect(openCanvasTreeButton).toHaveAttribute("title", "Open canvas tree");
+    expect(exportButton).toHaveAttribute("title", "Export PPTX");
+    expect(showInFolderButton).toHaveAttribute("title", "Show in folder");
+    expect(openPreviewButton).toHaveAttribute("title", "Open Preview");
+    fireEvent.click(openFileButton);
+    expect(openPathSpy).toHaveBeenCalledWith(artifact.filePath);
+    expect(exportButton.disabled).toBe(true);
+    expect(showInFolderButton.disabled).toBe(false);
+    fireEvent.click(showInFolderButton);
+    expect(showItemInFolderSpy).toHaveBeenCalledWith(artifact.filePath);
+    expect(openPreviewButton.disabled).toBe(false);
+    fireEvent.click(openPreviewButton);
+    expect(onPreview).toHaveBeenCalledWith(artifact);
+    expect(screen.getByText("Edit with AI")).toBeTruthy();
+    const editInput = screen.getByPlaceholderText("Ask to modify this PPT...");
+    const sendButton = screen.getByRole("button", { name: "Send edit request" }) as HTMLButtonElement;
+    expect(editInput).toBeDisabled();
+    expect(sendButton.disabled).toBe(true);
+    expect(showInFolderButton.disabled).toBe(false);
+    expect(exportButton.disabled).toBe(true);
+    expect(screen.queryByText("PPTX generated: internal-knowledge-base.pptx")).toBeNull();
+	    expect(screen.getByText("The deck is generated. Preparing the editor for follow-up edits...")).toBeTruthy();
+		    const iframe = pptistEmbed?.querySelector("iframe") as HTMLIFrameElement;
+		    await act(async () => {
+		      window.dispatchEvent(new MessageEvent("message", {
+		        data: { type: "pptist:embed-ready" },
+		        source: iframe.contentWindow,
+		      }));
+		    });
+		    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        data: { type: "pptist:slide-typed", index: 0, slideId: "generated-slide-01" },
+	        source: iframe.contentWindow,
+	      }));
+	    });
+
+	    expect(screen.queryByText("1/1 pages generated")).toBeNull();
+	    expect(editInput).toBeEnabled();
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        data: {
+	          type: "pptist:selection-changed",
+	          selection: {
+	            slideId: "generated-slide-01",
+	            slideIndex: 0,
+	            elementIds: ["shape-1"],
+	            elements: [{ id: "shape-1", type: "shape", textPreview: "Main point", fill: "#112233" }],
+	          },
+	        },
+	        source: iframe.contentWindow,
+	      }));
+	    });
+	    const selectionChip = screen.getByRole("button", { name: "Show referenced shape: Shape Main point" });
+	    expect(selectionChip.closest(".living-tree-pptx-edit-composer")).toBeTruthy();
+	    expect(selectionChip).toHaveClass("living-tree-pptx-reference-chip-main");
+	    expect(selectionChip.closest(".living-tree-pptx-reference-chip")).toBeTruthy();
+	    expect(selectionChip.closest(".living-tree-pptx-edit-composer")).toHaveClass("has-inline-reference");
+	    expect(screen.queryByText("PPT reference")).toBeNull();
+	    expect(screen.queryByText("Locate")).toBeNull();
+	    expect(screen.queryByRole("button", { name: "Use selection" })).toBeNull();
+	    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+	    fireEvent.click(selectionChip);
+	    expect(postMessage).toHaveBeenCalledWith({
+	      type: "pptist:select-elements",
+	      slideId: "generated-slide-01",
+	      slideIndex: 0,
+	      elementIds: ["shape-1"],
+	    }, "*");
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        data: {
+	          type: "pptist:selection-changed",
+	          selection: {
+	            slideId: "generated-slide-02",
+	            slideIndex: 1,
+	            elementIds: [],
+	            elements: [],
+	          },
+	        },
+	        source: iframe.contentWindow,
+	      }));
+	    });
+	    expect(screen.getByRole("button", { name: "Show referenced shape: Shape Main point" })).toBeTruthy();
+	    const removeSelectionButton = screen.getByRole("button", { name: "Remove referenced shape: Shape Main point" });
+	    expect(removeSelectionButton).toHaveClass("living-tree-pptx-reference-chip-remove");
+	    postMessage.mockClear();
+	    fireEvent.click(removeSelectionButton);
+	    expect(screen.queryByRole("button", { name: "Show referenced shape: Shape Main point" })).toBeNull();
+	    expect(screen.queryByRole("button", { name: "Remove referenced shape: Shape Main point" })).toBeNull();
+	    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "pptist:select-elements" }), "*");
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        data: {
+	          type: "pptist:selection-changed",
+	          selection: {
+	            slideId: "generated-slide-01",
+	            slideIndex: 0,
+	            elementIds: ["shape-1"],
+	            elements: [{ id: "shape-1", type: "shape", textPreview: "Main point", fill: "#112233" }],
+	          },
+	        },
+	        source: iframe.contentWindow,
+	      }));
+	    });
+			    fireEvent.change(editInput, { target: { value: "Make slide 1 more executive." } });
+			    expect(sendButton.disabled).toBe(false);
+			    fireEvent.click(sendButton);
+			    expect(screen.queryByRole("button", { name: "Show referenced shape: Shape Main point" })).toBeNull();
+			    expect(screen.queryByRole("button", { name: "Remove referenced shape: Shape Main point" })).toBeNull();
+			    expectDialogueBubble("Make slide 1 more executive.", "user");
+			    expectDialogueBubble("Reading the current PPTist deck...", "ai");
+			    const snapshotMessage = postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:get-snapshot")?.[0] as { requestId: string };
+			    expect(snapshotMessage.requestId).toBeTruthy();
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        source: iframe.contentWindow,
+	        data: {
+	          type: "pptist:snapshot-result",
+	          requestId: snapshotMessage.requestId,
+	          snapshot: {
+	            slides: [{ id: "generated-slide-01", elements: [{ id: "title", type: "text", content: "<p>Old</p>" }] }],
+	            title: "Deck",
+	            theme: {},
+	            viewportSize: 1000,
+	            viewportRatio: 0.5625,
+	            slideIndex: 0,
+	          },
+	        },
+		      }));
+		    });
+			    const internalExportMessage = postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:export-pptx")?.[0] as { requestId: string; fileName?: string; targetFilePath?: string };
+	    expect(internalExportMessage.requestId).toBeTruthy();
+	    expect(internalExportMessage.fileName).toBe(artifact.fileName);
+	    expect(internalExportMessage.targetFilePath).toBeUndefined();
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        source: iframe.contentWindow,
+	        data: {
+	          type: "pptist:export-result",
+	          requestId: internalExportMessage.requestId,
+	          buffer: new Uint8Array([80, 75, 3, 4]).buffer,
+	          fileName: artifact.fileName,
+	        },
+		      }));
+		      await Promise.resolve();
+		    });
+			    await waitFor(() => expectDialogueBubble("Planning edits from the current PPTist content...", "ai"));
+			    await waitFor(() => expect(modifyPptistDeckSpy).toHaveBeenCalledWith(expect.objectContaining({
+		      prompt: "Make slide 1 more executive.",
+	      snapshot: expect.objectContaining({ title: "Deck" }),
+	      selectedSlideId: "generated-slide-01",
+	      selectedElementIds: ["shape-1"],
+		      pptxDataBase64: "UEsDBA==",
+			    })));
+			    expectDialogueBubble("Updated title", "ai");
+			    expectDialogueBubbleNotLoading("Reading the current PPTist deck...");
+			    expectDialogueBubbleNotLoading("Planning edits from the current PPTist content...");
+			    const applyMessage = postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:apply-edit-ops")?.[0] as { runId: string; ops: unknown[] };
+				    expect(applyMessage.ops).toEqual([{
+				      type: "element:update-text",
+				      slideId: "generated-slide-01",
+				      elementId: "title",
+				      text: "Executive title",
+				      preserveStyle: true,
+				      animation: { mode: "typewriter", clearFirst: true, showCaret: true },
+				    }]);
+		    await act(async () => {
+		      window.dispatchEvent(new MessageEvent("message", {
+		        source: iframe.contentWindow,
+		        data: { type: "pptist:edit-op-started", runId: applyMessage.runId, index: 0, op: applyMessage.ops[0] },
+		      }));
+		      await Promise.resolve();
+		    });
+			    await waitFor(() => expectDialogueBubble("Applying edit 1 in PPTist...", "ai"));
+		    vi.useFakeTimers();
+		    await act(async () => {
+		      window.dispatchEvent(new MessageEvent("message", {
+		        source: iframe.contentWindow,
+		        data: { type: "pptist:edit-run-completed", runId: applyMessage.runId, ok: true, applied: 1 },
+		      }));
+		      await Promise.resolve();
+			    });
+			    expectDialogueBubbleNotLoading("Applying edit 1 in PPTist...");
+			    expect(screen.queryByText("Edits applied. Saving locally...")).toBeNull();
+		    expect(screen.queryByText("Changes pending local save...")).toBeNull();
+		    fireEvent.change(editInput, { target: { value: "Make the deck shorter." } });
+		    expect(sendButton.disabled).toBe(false);
+		    await act(async () => {
+		      await vi.advanceTimersByTimeAsync(2000);
+		    });
+	    expect(postMessage.mock.calls.some(([msg]) => {
+	      const payload = msg as { type?: string; targetFilePath?: string };
+	      return payload.type === "pptist:export-pptx" && payload.targetFilePath;
+	    })).toBe(false);
+	    expect(savePptxSpy).not.toHaveBeenCalled();
+	    expect(exportButton.disabled).toBe(false);
+	    fireEvent.click(exportButton);
+	    const exportMessages = postMessage.mock.calls.filter(([msg]) => (msg as { type?: string }).type === "pptist:export-pptx");
+	    const exportMessage = exportMessages[exportMessages.length - 1]?.[0] as { requestId?: string; targetFilePath?: string; fileName?: string };
+	    expect(exportMessage.requestId).toBeUndefined();
+	    expect(exportMessage.fileName).toBe(artifact.fileName);
+	    expect(exportMessage.targetFilePath).toBeUndefined();
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        source: iframe.contentWindow,
+	        data: { type: "pptist:export-result", buffer: new Uint8Array([1, 2, 3]).buffer, fileName: artifact.fileName },
+	      }));
+	      await Promise.resolve();
+	    });
+	    expect(savePptxSpy).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), artifact.fileName, undefined);
+	    expect(screen.getByText("Saved locally.")).toBeTruthy();
+	    expect(onContinueModify).not.toHaveBeenCalled();
+	    expect(showInFolderButton.disabled).toBe(false);
+	  });
+
+  it("renders referenced PPT shapes as inline composer tokens without nested input chrome", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const inlineComposerRule = css.match(/\.living-tree-pptx-edit-composer\.has-inline-reference\s*\{[^}]*\}/)?.[0] ?? "";
+    const inlineInputRule = css.match(/\.living-tree-pptx-edit-composer\.has-inline-reference \.living-tree-pptx-edit-input\s*\{[^}]*\}/)?.[0] ?? "";
+    const chipRule = css.match(/\.living-tree-pptx-reference-chip\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(inlineComposerRule).toContain("background: var(--n-canvas)");
+    expect(inlineInputRule).toContain("background: transparent");
+    expect(inlineInputRule).toContain("background-color: transparent");
+    expect(inlineInputRule).toContain("box-shadow: none");
+    expect(inlineInputRule).toContain("outline: none");
+    expect(chipRule).toContain("#2563eb");
+    expect(chipRule).not.toContain("var(--n-surface)");
+  });
+
+	  it("asks for confirmation before applying a low-confidence PPTist AI edit", async () => {
+    modifyPptistDeckSpy.mockResolvedValueOnce({
+      summary: "This may affect multiple title-like elements.",
+      confidence: "low",
+      requiresConfirmation: true,
+      confirmation: {
+        title: "Confirm AI edit",
+        message: "Update the first slide title while preserving style.",
+        target: "Slide 1 title",
+        changes: ["Set text to 石墨文档介绍123"],
+        preserved: ["Font", "Color"],
+      },
+      ops: [{ type: "element:update-text", slideId: "generated-slide-01", elementId: "title", text: "石墨文档介绍123", preserveStyle: true }],
+    });
+    const artifact = {
+      taskId: "task-vibe-confirm",
+      filePath: "/tmp/confirm.pptx",
+      fileName: "confirm.pptx",
+      documentType: "pptx",
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-confirm",
+      conversationId: "task-vibe-confirm",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Confirm Edit",
+      artifact,
+      events: [
+        { task_id: "task-vibe-confirm", type: "task.started", payload: { document_type: "pptx", topic: "Confirm Edit" } },
+        { task_id: "task-vibe-confirm", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-confirm", type: "task.completed", payload: { message: "done" } },
+      ],
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-confirm",
+          rootId: "root",
+          title: "Confirm Edit",
+          nodes: [
+            { id: "root", kind: "root", title: "Confirm Edit" },
+            { id: "slide-01", parentId: "root", kind: "slide", title: "Slide 1", slideNumber: 1 },
+          ],
+        },
+      },
+    };
+
+	    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+	    const iframe = document.querySelector(".living-tree-pptist-embed iframe") as HTMLIFrameElement;
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", { data: { type: "pptist:embed-ready" }, source: iframe.contentWindow }));
+	      window.dispatchEvent(new MessageEvent("message", { data: { type: "pptist:slide-typed", index: 0, slideId: "generated-slide-01" }, source: iframe.contentWindow }));
+	    });
+	    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+    const editInput = screen.getByPlaceholderText("Ask to modify this PPT...");
+    fireEvent.change(editInput, { target: { value: "把第一页的标题改为石墨文档介绍123，但字体和颜色不变" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send edit request" }));
+
+    const snapshotMessage = await waitFor(() => postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:get-snapshot")?.[0] as { requestId: string });
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        source: iframe.contentWindow,
+        data: {
+          type: "pptist:snapshot-result",
+          requestId: snapshotMessage.requestId,
+          snapshot: {
+            slides: [{ id: "generated-slide-01", elements: [{ id: "title", type: "text", content: "<p><span style=\"color:#f00\">Old</span></p>" }] }],
+            slideIndex: 0,
+          },
+        },
+      }));
+    });
+    const internalExportMessage = await waitFor(() => postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:export-pptx")?.[0] as { requestId: string; fileName?: string; targetFilePath?: string });
+    expect(internalExportMessage.fileName).toBe(artifact.fileName);
+    expect(internalExportMessage.targetFilePath).toBeUndefined();
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        source: iframe.contentWindow,
+        data: {
+          type: "pptist:export-result",
+          requestId: internalExportMessage.requestId,
+          buffer: new Uint8Array([80, 75, 3, 4]).buffer,
+          fileName: artifact.fileName,
+        },
+      }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(modifyPptistDeckSpy).toHaveBeenCalledWith(expect.objectContaining({
+      pptxDataBase64: "UEsDBA==",
+    })));
+
+	    await waitFor(() => expect(screen.getByText("Confirm AI edit")).toBeTruthy());
+	    expectDialogueBubble("This may affect multiple title-like elements.", "ai");
+	    expect(screen.getByText("Slide 1 title")).toBeTruthy();
+    expect(postMessage.mock.calls.some(([msg]) => (msg as { type?: string }).type === "pptist:apply-edit-ops")).toBe(false);
+    expect(editInput).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply edit" }));
+    const applyMessage = await waitFor(() => postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:apply-edit-ops")?.[0] as { ops: unknown[] });
+			    expect(applyMessage.ops).toEqual([{
+			      type: "element:update-text",
+			      slideId: "generated-slide-01",
+			      elementId: "title",
+			      text: "石墨文档介绍123",
+			      preserveStyle: true,
+			      animation: { mode: "typewriter", clearFirst: true, showCaret: true },
+			    }]);
+	  });
+
+	  it("shows a failed PPTist follow-up edit as an AI workflow bubble", async () => {
+	    modifyPptistDeckSpy.mockRejectedValueOnce(new Error("Planner unavailable"));
+	    const artifact = {
+	      taskId: "task-vibe-failed-edit",
+	      filePath: "/tmp/failed-edit.pptx",
+	      fileName: "failed-edit.pptx",
+	      documentType: "pptx",
+	    };
+	    const task: DesktopTask = {
+	      id: "task-vibe-failed-edit",
+	      conversationId: "task-vibe-failed-edit",
+	      status: "completed",
+	      documentType: "pptx",
+	      topic: "Failed Edit",
+	      artifact,
+	      events: [
+	        { task_id: "task-vibe-failed-edit", type: "task.started", payload: { document_type: "pptx", topic: "Failed Edit" } },
+	        { task_id: "task-vibe-failed-edit", type: "task.vibe_tree", payload: { stage: "completed" } },
+	        { task_id: "task-vibe-failed-edit", type: "task.completed", payload: { message: "done" } },
+	      ],
+	      vibeTree: {
+	        stage: "completed",
+	        actions: [],
+	        tree: {
+	          id: "tree-failed-edit",
+	          rootId: "root",
+	          title: "Failed Edit",
+	          nodes: [
+	            { id: "root", kind: "root", title: "Failed Edit" },
+	            { id: "slide-01", parentId: "root", kind: "slide", title: "Slide 1", slideNumber: 1 },
+	          ],
+	        },
+	      },
+	    };
+
+	    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+	    const iframe = document.querySelector(".living-tree-pptist-embed iframe") as HTMLIFrameElement;
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", { data: { type: "pptist:embed-ready" }, source: iframe.contentWindow }));
+	      window.dispatchEvent(new MessageEvent("message", { data: { type: "pptist:slide-typed", index: 0, slideId: "generated-slide-01" }, source: iframe.contentWindow }));
+	    });
+		    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+	    const editInput = screen.getByPlaceholderText("Ask to modify this PPT...");
+	    fireEvent.change(editInput, { target: { value: "Make it clearer." } });
+	    fireEvent.click(screen.getByRole("button", { name: "Send edit request" }));
+	    expectDialogueBubble("Make it clearer.", "user");
+
+	    const snapshotMessage = await waitFor(() => postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:get-snapshot")?.[0] as { requestId: string });
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        source: iframe.contentWindow,
+	        data: {
+	          type: "pptist:snapshot-result",
+	          requestId: snapshotMessage.requestId,
+	          snapshot: {
+	            slides: [{ id: "generated-slide-01", elements: [{ id: "title", type: "text", content: "<p>Old</p>" }] }],
+	            slideIndex: 0,
+	          },
+	        },
+	      }));
+	    });
+	    const internalExportMessage = await waitFor(() => postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:export-pptx")?.[0] as { requestId: string; fileName?: string });
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        source: iframe.contentWindow,
+	        data: {
+	          type: "pptist:export-result",
+	          requestId: internalExportMessage.requestId,
+	          buffer: new Uint8Array([80, 75, 3, 4]).buffer,
+	          fileName: artifact.fileName,
+	        },
+	      }));
+	      await Promise.resolve();
+	    });
+
+	    await waitFor(() => expect(modifyPptistDeckSpy).toHaveBeenCalled());
+	    expectDialogueBubble("Edit failed. The current PPTist deck was kept.", "ai");
+	    expect(postMessage.mock.calls.some(([msg]) => (msg as { type?: string }).type === "pptist:apply-edit-ops")).toBe(false);
+	  });
+
+	  it("keeps the Vibe PPTX workspace while a follow-up edit is running", () => {
+    const artifact = {
+      taskId: "task-vibe-completed",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    const vibeTask: DesktopTask = {
+      id: "task-vibe-completed",
+      conversationId: "conversation-vibe",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-completed", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "outline-01", parentId: "root", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck" },
+          ],
+        },
+      },
+    };
+    const editTask: DesktopTask = {
+      id: "task-edit-running",
+      conversationId: "conversation-vibe",
+      parentTaskId: "task-vibe-completed",
+      status: "running",
+      documentType: "pptx",
+      topic: "Make slide 1 more executive.",
+      events: [
+        { task_id: "task-edit-running", type: "task.started", payload: { document_type: "pptx", topic: "Make slide 1 more executive." } },
+        { task_id: "task-edit-running", type: "task.progress", payload: { step: "modify_pptx", status: "calling_llm" } },
+      ],
+      userInput: {
+        prompt: "Make slide 1 more executive.",
+        sourceFile: artifact.filePath,
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[vibeTask, editTask]} />);
+
+    expect(document.querySelector(".conversation-layout.is-vibe-canvas-focus")).toBeTruthy();
+    expect(screen.getByText("Living Tree Cockpit")).toBeTruthy();
+    expect(document.querySelector(".chat-thread")).toBeNull();
+    expect(document.querySelector(".conversation-footer")).toBeNull();
+    expect(screen.queryByText("Generation Complete")).toBeNull();
+    expect(screen.queryByText("Generating PPTX...")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open internal-knowledge-base.pptx" })).toBeTruthy();
+    expect(screen.getByText("Edit with AI")).toBeTruthy();
+  });
+
+  it("keeps the Vibe PPTX workspace on the modified artifact after a follow-up edit completes", async () => {
+    const originalArtifact = {
+      taskId: "task-vibe-completed",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    const modifiedArtifact = {
+      taskId: "task-edit-completed",
+      filePath: "/tmp/internal-knowledge-base.modified.pptx",
+      fileName: "internal-knowledge-base.modified.pptx",
+      documentType: "pptx",
+    };
+    const vibeTask: DesktopTask = {
+      id: "task-vibe-completed",
+      conversationId: "conversation-vibe",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-completed", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact: originalArtifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "outline-01", parentId: "root", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck" },
+          ],
+        },
+      },
+    };
+    const editTask: DesktopTask = {
+      id: "task-edit-completed",
+      conversationId: "conversation-vibe",
+      parentTaskId: "task-vibe-completed",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Make slide 1 more executive.",
+      events: [
+        { task_id: "task-edit-completed", type: "task.started", payload: { document_type: "pptx", topic: "Make slide 1 more executive." } },
+        { task_id: "task-edit-completed", type: "task.completed", payload: { result: { file_path: modifiedArtifact.filePath, file_name: modifiedArtifact.fileName, document_type: "pptx" } } },
+      ],
+      artifact: modifiedArtifact,
+      userInput: {
+        prompt: "Make slide 1 more executive.",
+        sourceFile: originalArtifact.filePath,
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[vibeTask, editTask]} />);
+
+    expect(document.querySelector(".conversation-layout.is-vibe-canvas-focus")).toBeTruthy();
+    expect(document.querySelector(".chat-thread")).toBeNull();
+    expect(screen.queryByText("Generation Complete")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open internal-knowledge-base.modified.pptx" })).toBeTruthy();
+  });
+
+  it("keeps the animated PPTist embed after the final PPTX artifact exists when streamed slides are available", () => {
+    const artifact = {
+      taskId: "task-vibe-completed-streamed",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    const slide: PptistSlide = {
+      id: "backend-slide-01",
+      elements: [
+        {
+          id: "title-01",
+          type: "text",
+          left: 80,
+          top: 80,
+          width: 420,
+          height: 60,
+          content: "<p>Legacy knowledge base is creating decision friction</p>",
+        },
+      ],
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-completed-streamed",
+      conversationId: "task-vibe-completed-streamed",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-completed-streamed", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed-streamed", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed-streamed", type: "task.vibe_slide", payload: { index: 0, slide } },
+        { task_id: "task-vibe-completed-streamed", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeSlides: [slide],
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed-streamed",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "outline-02", parentId: "chapter", kind: "outline", title: "P2" },
+            { id: "slide-02", parentId: "outline-02", kind: "slide", title: "Search and ownership gaps", slideNumber: 2 },
+            { id: "outline-03", parentId: "chapter", kind: "outline", title: "P3" },
+            { id: "slide-03", parentId: "outline-03", kind: "slide", title: "Rebuild proposal", slideNumber: 3 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck", summary: "All pages assembled into deliverable PPTX." },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(document.querySelector(".living-tree-pptist-embed")).toBeTruthy();
+    expect(document.querySelector(".living-tree-pptx-toolbar")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open internal-knowledge-base.pptx" })).toBeTruthy();
+    expect(screen.getByText("Edit with AI")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open Preview" }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Show in folder" })).toBeTruthy();
+    expect(flowNodeCard("deck")).toBeNull();
+    expect(document.querySelector(".living-tree-slide-preview-iframe")).toBeNull();
+  });
+
+  it("defaults completed Vibe PPTX tasks to the PPTist review layout with a summonable canvas tree", () => {
+    const artifact = {
+      taskId: "task-vibe-completed-review",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    const slide: PptistSlide = {
+      id: "backend-slide-01",
+      elements: [
+        {
+          id: "title-01",
+          type: "text",
+          left: 80,
+          top: 80,
+          width: 420,
+          height: 60,
+          content: "<p>Legacy knowledge base is creating decision friction</p>",
+        },
+      ],
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-completed-review",
+      conversationId: "task-vibe-completed-review",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      userInput: { prompt: "Build a ten page pitch about rebuilding the internal knowledge base." },
+      events: [
+        { task_id: "task-vibe-completed-review", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed-review", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed-review", type: "task.vibe_slide", payload: { index: 0, slide } },
+        { task_id: "task-vibe-completed-review", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeSlides: [slide],
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed-review",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "outline-02", parentId: "chapter", kind: "outline", title: "P2" },
+            { id: "slide-02", parentId: "outline-02", kind: "slide", title: "Search and ownership gaps", slideNumber: 2 },
+            { id: "outline-03", parentId: "chapter", kind: "outline", title: "P3" },
+            { id: "slide-03", parentId: "outline-03", kind: "slide", title: "Rebuild proposal", slideNumber: 3 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck", summary: "All pages assembled into deliverable PPTX." },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const workbench = document.querySelector(".living-tree-workbench");
+    const pptistEmbed = document.querySelector(".living-tree-pptist-embed");
+    const toolbar = document.querySelector(".living-tree-pptx-toolbar");
+    expect(workbench?.classList.contains("is-completed-review")).toBe(true);
+    expect(document.querySelector(".living-tree-flow-shell")).toBeNull();
+    expect(pptistEmbed?.getAttribute("aria-label")).toBe("PPT editor with slide thumbnails and current slide");
+    expect(toolbar?.classList.contains("is-focus-toolbar")).toBe(true);
+    expect(toolbar?.parentElement?.classList.contains("living-tree-header")).toBe(true);
+    expect(pptistEmbed?.previousElementSibling).not.toBe(toolbar);
+    expect(toolbar?.textContent).not.toContain("AI conversation");
+    expect(toolbar?.textContent).not.toContain("internal-knowledge-base.pptx");
+    expect(screen.queryByRole("list", { name: "Slide thumbnails" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open slide 1: Legacy knowledge base is creating decision friction" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open slide 2: Search and ownership gaps" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open slide 3: Rebuild proposal" })).toBeNull();
+    expect(document.querySelector(".living-tree-pptx-ai-drawer")).toBeTruthy();
+    expect(screen.getByText("Focus on follow-up edit instructions")).toBeTruthy();
+    expect(screen.getByText("What would you like to change in this PPT?")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "More sales-focused" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "AI conversation" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open internal-knowledge-base.pptx" })).toBeTruthy();
+    expect(screen.queryByText("internal-knowledge-base.pptx")).toBeNull();
+    expect(screen.queryByText("Build a ten page pitch about rebuilding the internal knowledge base.")).toBeNull();
+    expect(screen.queryByText("PPTX generated: internal-knowledge-base.pptx")).toBeNull();
+    expect(screen.queryByText("3/3 pages generated")).toBeNull();
+    expect(screen.getByText("Edit with AI")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open canvas tree" }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Show in folder" }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Open Preview" }).textContent).toBe("");
+    expect(screen.getByPlaceholderText("Ask to modify this PPT...")).toBeTruthy();
+
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const cockpitRule = css.match(/^\.living-tree-cockpit\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const focusWorkbenchRule = css.match(/\.living-tree-workbench\.is-completed-review\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const focusToolbarRule = css.match(/\.living-tree-header > \.living-tree-pptx-toolbar\.is-focus-toolbar\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const aiDrawerRule = css.match(/\.living-tree-pptx-ai-drawer\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const editPanelRule = css.match(/^\.living-tree-pptx-edit-panel\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const openCanvasDrawerRule = css.match(/\.living-tree-workbench\.is-completed-review\.is-canvas-tree-open \.living-tree-flow-shell\.is-canvas-tree-drawer\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const thumbnailRailRule = css.match(/^\.living-tree-pptx-thumbnail-rail\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+	    const dialogueLogRule = css.match(/^\.living-tree-pptx-dialogue-log\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+	    const dialogueHeadRule = css.match(/^\.living-tree-pptx-dialogue-log-head\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+	    const dialogueBodyRule = css.match(/^\.living-tree-pptx-dialogue-log-body\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+	    const dialogueWorkingBubbleRule = css.match(/^\.living-tree-pptx-dialogue-message\.is-ai\.is-working\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+	    const dialogueFooterRule = css.match(/^\.living-tree-pptx-dialogue-footer\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+	    const editRowRule = css.match(/^\.living-tree-pptx-edit-row\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const actionCardRule = css.match(/^\.living-tree-pptx-action-card\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const actionCardButtonsRule = css.match(/^\.living-tree-pptx-action-card-buttons\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    expect(cockpitRule).toContain("width: 100%");
+    expect(cockpitRule).not.toContain("1360px");
+    expect(focusWorkbenchRule).toContain("grid-template-columns: minmax(0, 1fr) minmax(380px, 420px)");
+    expect(focusWorkbenchRule).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(focusToolbarRule).toContain("position: static");
+    expect(focusToolbarRule).toContain("margin-left: auto");
+    expect(focusToolbarRule).toContain("max-width: min(360px, 42vw)");
+    expect(aiDrawerRule).toContain("grid-column: 2");
+    expect(aiDrawerRule).toContain("position: relative");
+    expect(aiDrawerRule).toContain("width: 100%");
+    expect(openCanvasDrawerRule).toContain("visibility: visible");
+    expect(openCanvasDrawerRule).toContain("pointer-events: auto");
+    expect(thumbnailRailRule).toBe("");
+    expect(editPanelRule).toContain("height: 100%");
+    expect(editPanelRule).toContain("overflow: hidden");
+    expect(dialogueLogRule).toContain("flex: 1 1 0");
+	    expect(dialogueLogRule).toContain("min-height: 0");
+	    expect(dialogueHeadRule).toContain("min-height: 52px");
+	    expect(dialogueBodyRule).toContain("flex: 1 1 auto");
+	    expect(dialogueBodyRule).toContain("overflow-y: auto");
+	    expect(dialogueWorkingBubbleRule).toContain("var(--n-primary-soft)");
+	    expect(dialogueFooterRule).toContain("flex: 0 0 auto");
+	    expect(editRowRule).toContain("flex: 0 0 auto");
+    expect(actionCardRule).toContain("align-items: center");
+    expect(actionCardRule).toContain("justify-content: flex-end");
+    expect(actionCardRule).toContain("padding: 4px");
+    expect(actionCardButtonsRule).toContain("display: flex");
+    expect(actionCardButtonsRule).toContain("flex-wrap: nowrap");
+
+    expect(document.querySelector(".living-tree-pptx-ai-drawer-close")).toBeNull();
+
+    const iframe = pptistEmbed?.querySelector("iframe") as HTMLIFrameElement;
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "pptist:slide-changed", index: 1, slideId: "generated-slide-02" },
+        source: iframe.contentWindow,
+      }));
+    });
+    expect(document.querySelector(".living-tree-flow-shell")).toBeNull();
+    expect(document.querySelector(".living-tree-popover")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open canvas tree" }));
+
+    const openFlowShell = document.querySelector(".living-tree-flow-shell");
+    expect(openFlowShell?.classList.contains("is-canvas-tree-drawer")).toBe(true);
+    expect(openFlowShell?.getAttribute("aria-hidden")).toBe("false");
+    expect(screen.getByRole("button", { name: "Close canvas tree" })).toBeTruthy();
+    fireEvent.click(flowNodeCard("outline-02") as Element);
+    expect(currentVibePopoverTitle()).toBe("P2");
+  });
+
+  it("loads the final PPTX artifact for animated PPTist replay when streamed slides are absent", async () => {
+    const artifact = {
+      taskId: "task-vibe-completed",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-completed",
+      conversationId: "task-vibe-completed",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-completed", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck", summary: "All pages assembled into deliverable PPTX." },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(document.querySelector(".living-tree-pptist-embed")).toBeTruthy();
+    expect(document.querySelector(".living-tree-pptx-toolbar")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open internal-knowledge-base.pptx" })).toBeTruthy();
+    expect(screen.getByText("Edit with AI")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open Preview" }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Show in folder" })).toBeTruthy();
+    expect(flowNodeCard("deck")).toBeNull();
+    expect(document.querySelector(".living-tree-slide-preview-iframe")).toBeNull();
+    const iframe = document.querySelector(".living-tree-pptist-embed iframe") as HTMLIFrameElement;
+    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "pptist:embed-ready" },
+        source: iframe.contentWindow,
+      }));
+    });
+    await waitFor(() => expect(postMessage.mock.calls.some(([msg]) => (msg as { type?: string }).type === "pptist:load-slides-cache")).toBe(true));
+    const loadMessage = postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:load-slides-cache")?.[0] as { animate?: boolean };
+    expect(loadMessage.animate).toBe(false);
+  });
+
+  it("does not replay PPTist generation animation for a completed task whose animation was already consumed", async () => {
+    const artifact = {
+      taskId: "task-vibe-completed",
+      filePath: "/tmp/internal-knowledge-base.pptx",
+      fileName: "internal-knowledge-base.pptx",
+      documentType: "pptx",
+    };
+    localStorage.setItem("officedex.pptistAnimation.played.task-vibe-completed", "1");
+    const task: DesktopTask = {
+      id: "task-vibe-completed",
+      conversationId: "task-vibe-completed",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-completed", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-completed", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-completed", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-completed",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Legacy knowledge base is creating decision friction", slideNumber: 1 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck", summary: "All pages assembled into deliverable PPTX." },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    const pptistEmbed = document.querySelector(".living-tree-pptist-embed") as HTMLElement;
+    const iframe = pptistEmbed.querySelector("iframe") as HTMLIFrameElement;
+    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "pptist:embed-ready" },
+        source: iframe.contentWindow,
+      }));
+    });
+
+    await waitFor(() => expect(postMessage.mock.calls.some(([msg]) => (msg as { type?: string }).type === "pptist:load-slides-cache")).toBe(true));
+    const loadMessage = postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:load-slides-cache")?.[0] as { animate?: boolean };
+    expect(loadMessage.animate).toBe(false);
+  });
+
+  it("does not replay PPTist generation animation by default for a completed task", async () => {
+    const artifact = {
+      taskId: "task-vibe-first-play",
+      filePath: "/tmp/first-play.pptx",
+      fileName: "first-play.pptx",
+      documentType: "pptx",
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-first-play",
+      conversationId: "task-vibe-first-play",
+      status: "completed",
+      documentType: "pptx",
+      topic: "First play deck",
+      events: [
+        { task_id: "task-vibe-first-play", type: "task.started", payload: { document_type: "pptx", topic: "First play deck" } },
+        { task_id: "task-vibe-first-play", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-first-play", type: "task.completed", payload: { message: "done" } },
+      ],
+      artifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-first-play",
+          rootId: "root",
+          title: "First play deck",
+          nodes: [
+            { id: "root", kind: "root", title: "First play deck" },
+            { id: "outline-01", parentId: "root", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "First slide", slideNumber: 1 },
+            { id: "deck", kind: "deck", title: "Complete PPTX Deck" },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+    const iframe = document.querySelector(".living-tree-pptist-embed iframe") as HTMLIFrameElement;
+    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "pptist:embed-ready" },
+        source: iframe.contentWindow,
+      }));
+    });
+
+    await waitFor(() => expect(postMessage.mock.calls.some(([msg]) => (msg as { type?: string }).type === "pptist:load-slides-cache")).toBe(true));
+    const loadMessage = postMessage.mock.calls.find(([msg]) => (msg as { type?: string }).type === "pptist:load-slides-cache")?.[0] as { animate?: boolean };
+    expect(loadMessage.animate).toBe(false);
+    expect(localStorage.getItem("officedex.pptistAnimation.played.task-vibe-first-play")).toBeNull();
+  });
+
+  it("shows pptxgenjs assembling panel instead of empty PPTist when rendering without slides", () => {
+    const task: DesktopTask = {
+      id: "task-vibe-assembling",
+      conversationId: "task-vibe-assembling",
+      status: "running",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-assembling", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-assembling", type: "task.vibe_tree", payload: { stage: "completed" } },
+        { task_id: "task-vibe-assembling", type: "task.progress", payload: { step: "assemble", status: "running", content: "Generating pptxgenjs code via LLM..." } },
+      ],
+      assembleProgress: { step: "assemble", status: "running", content: "Generating pptxgenjs code via LLM..." },
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-assembling",
+          rootId: "root",
+          title: "Rebuild Internal Knowledge Base",
+          nodes: [
+            { id: "root", kind: "root", title: "Rebuild Internal Knowledge Base" },
+            { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+            { id: "chapter", parentId: "branch", kind: "slide_group", title: "Problem Breakdown" },
+            { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Page 1", slideNumber: 1 },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(document.querySelector(".living-tree-pptx-toolbar")).toBeNull();
+    expect(document.querySelector(".living-tree-pptist-embed")).toBeNull();
+    expect(document.querySelector(".pptxgenjs-assembling-panel")).toBeTruthy();
+    expect(screen.getByText(/Assembling your presentation/)).toBeTruthy();
+    expect(screen.getByText(/Generating slide code/)).toBeTruthy();
+  });
+
+  it("submits direct Vibe node text edits through the node popover instead of the inspector", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-direction",
+      conversationId: "task-vibe-direction",
+      status: "question",
+      documentType: "pptx",
+      topic: "Rebuild Internal Knowledge Base",
+      events: [
+        { task_id: "task-vibe-direction", type: "task.started", payload: { document_type: "pptx", topic: "Rebuild Internal Knowledge Base" } },
+        { task_id: "task-vibe-direction", type: "task.vibe_tree", payload: { stage: "story_ready" } },
+        { task_id: "task-vibe-direction", type: "task.question", payload: { id: "vibe_story_ready", question: "Project Map generated", options: [{ id: "generate_outline", label: "Expand to Slide Leaves" }], allow_freeform: true } },
+      ],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated. You can expand into a PPT outline, or type a message to adjust direction.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Expand to Slide Leaves", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-1",
+          rootId: "root",
+          title: "I want to explain why we need to rebuild our internal knowledge base",
+          nodes: [
+            { id: "root", kind: "root", title: "I want to explain why we need to rebuild our internal knowledge base", summary: "Raw request" },
+            { id: "branch-status", parentId: "root", kind: "branch", title: "Current State", summary: "Knowledge scattered across multiple places" },
+          ],
+        },
+        actions: [{ id: "generate_outline", label: "Expand to Slide Leaves" }],
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    // Node Inspector is no longer rendered as a separate section
+    expect(screen.queryByLabelText("Node Inspector")).toBeNull();
+
+    await confirmInitialIdeaNode("Current State");
+    respondSpy.mockClear();
+    let popover = currentOpenVibePopover() as HTMLElement;
+    const confirmButton = within(popover).getByRole("button", { name: "Confirm this node" });
+    expect(within(popover).queryByText("Edit current content")).toBeNull();
+    expect(within(popover).getByLabelText("Story Beat: Describe the key point this narrative segment advances")).toBeTruthy();
+    expect(within(popover).queryByRole("button", { name: "Apply to current node" })).toBeNull();
+    expect(within(popover).getAllByRole("button")).toHaveLength(1);
+    expect(popover.dataset.nodeTitle).toBe("Current State");
+    expect(popover.querySelector(":scope > strong")).toBeNull();
+    expect(Array.from(popover.children).some((child) => child.tagName === "P" && child.textContent === `Rewrite with “23J”: First show the audience how legacy knowledge workflows have slowed collaboration.`)).toBe(false);
+    expect(within(popover).queryByText("After confirming this node, it will be used to generate the next level of content.")).toBeNull();
+    fireEvent.mouseEnter(confirmButton);
+    await waitFor(() => expect(screen.getByText("After confirming this node, it will be used to generate the next level of content.")).toBeTruthy());
+    expect(within(popover).queryByRole("button", { name: "Suggest Changes" })).toBeNull();
+    expect(popover.lastElementChild?.querySelector("button")?.textContent).toBe("Confirm this node");
+
+    const rootNode = flowNodeCard("root");
+    expect(rootNode).toBeTruthy();
+    fireEvent.click(rootNode as Element);
+    await waitForVibePopoverTitle("I want to explain why we need to rebuild our internal knowledge base");
+    popover = currentOpenVibePopover() as HTMLElement;
+    expect(popover.dataset.nodeTitle).toBe("I want to explain why we need to rebuild our internal knowledge base");
+    expect(popover.querySelector(":scope > strong")).toBeNull();
+    expect(Array.from(popover.children).some((child) => child.tagName === "P" && child.textContent === "Raw request")).toBe(false);
+    expect(within(popover).queryByRole("button", { name: "Suggest Changes" })).toBeNull();
+    expect(within(popover).queryByText("Edit current content")).toBeNull();
+    const input = within(popover).getByLabelText("Idea: Describe the core message of this PPT");
+    expect(input).toHaveValue("I want to explain why we need to rebuild our internal knowledge base\n\nRaw request");
+    fireEvent.change(input, { target: { value: "More like a version for the boss" } });
+    clickCurrentOpenVibePopoverButton("Apply to current node");
+    expect(respondSpy).not.toHaveBeenCalled();
+    expect(screen.getByText("Editing this node will regenerate 1 downstream nodes.")).toBeTruthy();
+    clickCurrentOpenVibePopoverButton("Confirm & regenerate downstream");
+
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-vibe-direction",
+      questionId: "vibe_story_ready",
+      answer: JSON.stringify({
+        kind: "vibe_node_feedback",
+        nodeId: "root",
+        feedback: "More like a version for the boss",
+      }),
+    })));
+    expect(screen.queryByText("Q1")).toBeNull();
+  });
+
+  it("uses backend confirmation node ids instead of deriving confirmable nodes locally", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-confirmation",
+      conversationId: "task-vibe-confirmation",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate PPT Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-confirmation",
+          rootId: "root",
+          title: "Confirmation Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Confirmation Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem" },
+          ],
+        },
+        actions: [{ id: "generate_outline", label: "Generate PPT Outline" }],
+        confirmation: { nodeIds: ["branch-a"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Confirmed 0/1")).toBeTruthy();
+    expect(flowNodeCard("branch-a")).toBeNull();
+    await confirmInitialIdeaNode("Current State");
+    fireEvent.click(flowNodeCard("branch-a") as Element);
+    expect(document.querySelector(".living-tree-flow-node.is-confirmable.is-pending")).toBeTruthy();
+    clickCurrentVibeConfirmButton();
+    expect(screen.getByText("Confirmed 1/1")).toBeTruthy();
+  });
+
+  it("starts story_ready with only the Idea node and reveals Story Beats after confirming it", async () => {
+    const now = new Date().toISOString();
+    const task: DesktopTask = {
+      id: "task-vibe-idea-first",
+      conversationId: "task-vibe-idea-first",
+      status: "question",
+      documentType: "pptx",
+      events: [{ task_id: "task-vibe-idea-first", type: "task.vibe_tree", ts: now, payload: { stage: "story_ready" } }],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-idea-first",
+          rootId: "root",
+          title: "Auto-locate Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Auto-locate Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State", summary: "Confirm current state first", outline: ["First current state point"], visualAssets: [{ kind: "image", description: "A current state illustration" }] },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem", summary: "Then confirm problems" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a", "branch-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(flowNodeCard("root")).toBeTruthy();
+    expect(flowNodeCard("branch-a")).toBeNull();
+    expect(flowNodeCard("branch-b")).toBeNull();
+    await waitForVibePopoverTitle("Auto-locate Test");
+    expect(screen.getByText("Confirmed 0/1")).toBeTruthy();
+
+    clickCurrentVibeConfirmButton();
+
+    await waitFor(() => expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-vibe-idea-first",
+      questionId: "vibe_story_ready",
+      answer: JSON.stringify({ kind: "vibe_node_confirmed", nodeId: "root" }),
+    })));
+    await waitFor(() => expect(flowNodeCard("branch-a")).toBeTruthy());
+    expect(flowNodeCard("root")?.classList.contains("is-confirmed")).toBe(true);
+    expect(flowNodeCard("branch-b")).toBeNull();
+    await waitForVibePopoverTitle("Current State");
+    expect(flowNodeCard("branch-b")).toBeTruthy();
+    expect(screen.getByText("Confirmed 0/2")).toBeTruthy();
+  });
+
+  it("keeps node drawing slow enough to show the generation process", () => {
+    expect(IDEA_NODE_DRAWING_MS).toBeGreaterThanOrEqual(1400);
+  });
+
+  it("draws newly generated Story Beat nodes one by one from top to bottom before opening their popover", async () => {
+    vi.useFakeTimers();
+    const now = new Date().toISOString();
+    const task: DesktopTask = {
+      id: "task-vibe-branch-drawing",
+      conversationId: "task-vibe-branch-drawing",
+      status: "question",
+      documentType: "pptx",
+      events: [{ task_id: "task-vibe-branch-drawing", type: "task.vibe_tree", ts: now, payload: { stage: "story_ready" } }],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-branch-drawing",
+          rootId: "root",
+          title: "Node Drawing Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Node Drawing Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State", summary: "Confirm current state first", outline: ["First current state point"], visualAssets: [{ kind: "image", description: "A current state illustration" }] },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem", summary: "Then confirm problems" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a", "branch-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    clickCurrentVibeConfirmButton();
+    await act(async () => undefined);
+
+    expect(flowNodeCard("branch-a")?.classList.contains("is-node-drawing")).toBe(true);
+    expect((document.querySelector(".living-tree-flow-shell") as HTMLElement)?.dataset.cameraFocusNodeId).toBe("branch-a");
+    expect(flowNodeCard("branch-b")).toBeNull();
+    expect(document.querySelector('.react-flow__node[data-id="branch-b"]')).toBeNull();
+    expect(flowNodeCard("branch-a")?.dataset.motionRole).toBe("node-drawing");
+    expect(flowNodeCard("branch-a")?.querySelectorAll(".living-tree-node-outline-rect").length).toBe(1);
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-node-outline-svg")).toBeTruthy();
+    expect(flowNodeCard("branch-a")?.querySelectorAll(".living-tree-animated-line").length).toBeGreaterThanOrEqual(3);
+    expect(flowNodeCard("branch-a")?.querySelectorAll(".living-tree-animated-char").length).toBe(0);
+    expect(flowNodeCard("branch-a")?.querySelector("li.living-tree-animated-line")?.getAttribute("data-has-content")).toBe("false");
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-visual-asset-icon")).toBeNull();
+    expect(flowNodeCard("branch-a")?.querySelector("strong")?.textContent).not.toBe("Current State");
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-animated-line.is-streaming")).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-animated-line.is-streaming")?.textContent ?? "").not.toBe("");
+
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(flowNodeCard("branch-a")?.querySelector("strong")?.textContent).toBe("Current State");
+    expect(flowNodeCard("branch-a")?.querySelector("li.living-tree-animated-line")?.getAttribute("data-has-content")).toBe("false");
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-visual-asset-icon")).toBeNull();
+
+    for (let i = 0; i < 8 && flowNodeCard("branch-a")?.querySelector("li.living-tree-animated-line")?.getAttribute("data-has-content") !== "true"; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+    }
+    expect(flowNodeCard("branch-a")?.querySelector("li.living-tree-animated-line")?.getAttribute("data-has-content")).toBe("true");
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-visual-asset-icon")).toBeNull();
+
+    for (let i = 0; i < 6 && !flowNodeCard("branch-a")?.querySelector(".living-tree-visual-asset-icon.is-image"); i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+    }
+    expect(flowNodeCard("branch-a")?.querySelector(".living-tree-visual-asset-icon.is-image")).toBeTruthy();
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    expect(flowNodeCard("branch-a")?.classList.contains("is-node-drawing")).toBe(false);
+    expect(flowNodeCard("branch-b")?.classList.contains("is-node-drawing")).toBe(true);
+    expect((document.querySelector(".living-tree-flow-shell") as HTMLElement)?.dataset.cameraFocusNodeId).toBe("branch-b");
+    expect(flowNodeCard("branch-b")?.querySelectorAll(".living-tree-node-outline-rect").length).toBe(1);
+    expect(flowNodeCard("branch-b")?.querySelector(".living-tree-node-outline-svg")).toBeTruthy();
+    expect(flowNodeCard("branch-b")?.querySelectorAll(".living-tree-animated-char").length).toBe(0);
+    expect(flowNodeCard("branch-b")?.querySelector("strong")?.textContent).not.toBe("Problem");
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(flowNodeCard("branch-b")?.classList.contains("is-node-drawing")).toBe(false);
+    expect(currentVibePopoverTitle()).toBe("Current State");
+    vi.useRealTimers();
+  });
+
+  it("automatically opens the first pending Story Beat popover when a Vibe stage starts", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-auto-open",
+      conversationId: "task-vibe-auto-open",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-auto-open",
+          rootId: "root",
+          title: "Auto-locate Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Auto-locate Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State", summary: "Confirm current state first" },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem", summary: "Then confirm problems" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a", "branch-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await confirmInitialIdeaNode("Current State");
+    expect(screen.getAllByRole("button", { name: "Confirm this node" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Confirmed 0/2")).toBeTruthy();
+  });
+
+  it("moves the popover to the next pending node after each confirmation", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-auto-next",
+      conversationId: "task-vibe-auto-next",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-auto-next",
+          rootId: "root",
+          title: "Auto-locate Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Auto-locate Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State", summary: "Confirm current state first" },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem", summary: "Then confirm problems" },
+            { id: "branch-c", parentId: "root", kind: "branch", title: "Solution", summary: "Finally confirm solution" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a", "branch-b", "branch-c"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await confirmInitialIdeaNode("Current State");
+    clickCurrentVibeConfirmButton();
+
+    await waitForVibePopoverTitle("Problem");
+    // Open the task card popover by clicking the active step so the Confirmed text is rendered in the portal
+    const activeStep = document.querySelector(".living-tree-step.is-active") as HTMLElement;
+    if (activeStep) fireEvent.click(activeStep);
+    await waitFor(() => expect(screen.getByText("Confirmed 1/3")).toBeTruthy());
+  });
+
+  it("closes the confirmation popover and enables the next stage action after the last pending node is confirmed", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-auto-complete",
+      conversationId: "task-vibe-auto-complete",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-auto-complete",
+          rootId: "root",
+          title: "Auto-locate Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Auto-locate Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a", "branch-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.queryByRole("button", { name: "Generate Chapters" })).toBeNull();
+    await confirmInitialIdeaNode("Current State");
+    const stageButton = screen.getByRole("button", { name: "Generate Chapters" });
+    expect(stageButton.classList.contains("living-tree-stage-cta-ready")).toBe(false);
+
+    clickCurrentVibeConfirmButton();
+    await waitForVibePopoverTitle("Problem");
+    clickCurrentVibeConfirmButton();
+
+    await waitFor(() => expect(hasOpenVibeConfirmationPopover()).toBe(false));
+    expect(screen.getByText("Confirmed 2/2")).toBeTruthy();
+    expect(stageButton).not.toBeDisabled();
+    expect(stageButton.classList.contains("living-tree-stage-cta-ready")).toBe(true);
+  });
+
+  it("dismisses the current task popover after Generate Slides is submitted", async () => {
+    const actionResponse = deferred<void>();
+    respondSpy.mockReturnValueOnce(actionResponse.promise);
+    const task: DesktopTask = {
+      id: "task-vibe-generate-slides",
+      conversationId: "task-vibe-generate-slides",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_refined_ready",
+        question: "Outlines confirmed.",
+        allowFreeform: true,
+        options: [{ id: "generate_slides", label: "Generate Slides", recommended: true }],
+      },
+      vibeTree: {
+        stage: "refined_ready",
+        tree: {
+          id: "tree-generate-slides",
+          rootId: "root",
+          title: "Generate Slides Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Generate Slides Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Story Beat" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Chapter" },
+            { id: "outline-01", parentId: "group-a", kind: "outline", title: "Page 1" },
+          ],
+        },
+        actions: [{ id: "generate_slides", label: "Generate Slides" }],
+        confirmation: { nodeIds: ["outline-01"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await waitForVibePopoverTitle("Page 1");
+    clickCurrentVibeConfirmButton();
+    await waitFor(() => expect(activeVibeStepOwnsOpenPopover()).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Slides" }));
+
+    await waitFor(() => expect(activeVibeStepOwnsOpenPopover()).toBe(false));
+    expect(screen.queryByRole("button", { name: "Generate Slides" })).toBeNull();
+
+    actionResponse.resolve();
+    await act(async () => {});
+
+    expect(respondSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Generate Slides" })).toBeNull();
+  });
+
+  it("shows PPTX generation copy while a completed Vibe tree is still assembling the file", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-assembling-pptx",
+      conversationId: "task-vibe-assembling-pptx",
+      status: "running",
+      documentType: "pptx",
+      events: [],
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-assembling-pptx",
+          rootId: "root",
+          title: "Assembling PPTX Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Assembling PPTX Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Story Beat" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Chapter" },
+            { id: "outline-01", parentId: "group-a", kind: "outline", title: "Page 1" },
+            { id: "slide-01", parentId: "outline-01", kind: "slide", title: "Page 1" },
+            { id: "deck", parentId: "root", kind: "deck", title: "Full Deck" },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await waitFor(() => expect(screen.getByText("Generating PPTX")).toBeTruthy());
+    expect(screen.queryByText("PPTX Completed")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
+    expect(screen.queryByText("Confirmed 1/1")).toBeNull();
+  });
+
+  it("automatically focuses the first pending Chapter during outline_ready instead of completed Story Beats", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-auto-chapter",
+      conversationId: "task-vibe-auto-chapter",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_outline_ready",
+        question: "Chapters generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "outline_ready",
+        tree: {
+          id: "tree-auto-chapter",
+          rootId: "root",
+          title: "Auto-locate Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Auto-locate Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Context Setting" },
+            { id: "group-b", parentId: "branch-a", kind: "slide_group", title: "Problem Breakdown" },
+          ],
+        },
+        actions: [{ id: "generate_outline", label: "Generate Outline" }],
+        confirmation: { nodeIds: ["group-a", "group-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await waitForVibePopoverTitle("Context Setting");
+    expect(screen.getByRole("button", { name: "Confirm this node" })).toBeTruthy();
+  });
+
+  it("draws newly generated Chapter nodes one by one before opening their popover", async () => {
+    vi.useFakeTimers();
+    const now = new Date().toISOString();
+    const task: DesktopTask = {
+      id: "task-vibe-chapter-drawing",
+      conversationId: "task-vibe-chapter-drawing",
+      status: "question",
+      documentType: "pptx",
+      events: [{ task_id: "task-vibe-chapter-drawing", type: "task.vibe_tree", ts: now, payload: { stage: "outline_ready" } }],
+      question: {
+        id: "vibe_outline_ready",
+        question: "Chapters generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "outline_ready",
+        tree: {
+          id: "tree-chapter-drawing",
+          rootId: "root",
+          title: "Chapter Drawing Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Chapter Drawing Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Context Setting" },
+            { id: "group-b", parentId: "branch-a", kind: "slide_group", title: "Problem Breakdown" },
+          ],
+        },
+        actions: [{ id: "generate_outline", label: "Generate Outline" }],
+        confirmation: { nodeIds: ["group-a", "group-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(flowNodeCard("group-a")?.classList.contains("is-node-drawing")).toBe(true);
+    expect(flowNodeCard("group-b")).toBeNull();
+    expect(document.querySelector('.react-flow__node[data-id="group-b"]')).toBeNull();
+    expect(flowNodeCard("group-a")?.dataset.motionRole).toBe("node-drawing");
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(flowNodeCard("group-a")?.classList.contains("is-node-drawing")).toBe(false);
+    expect(flowNodeCard("group-b")?.classList.contains("is-node-drawing")).toBe(true);
+    expect(hasOpenVibeConfirmationPopover()).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(flowNodeCard("group-b")?.classList.contains("is-node-drawing")).toBe(false);
+    expect(currentVibePopoverTitle()).toBe("Context Setting");
+    vi.useRealTimers();
+  });
+
+  it("continues automatic guidance after the user manually inspects a non-pending node", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-auto-manual",
+      conversationId: "task-vibe-auto-manual",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-auto-manual",
+          rootId: "root",
+          title: "Auto-locate Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Auto-locate Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+            { id: "branch-b", parentId: "root", kind: "branch", title: "Problem" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a", "branch-b"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await confirmInitialIdeaNode("Current State");
+    // Popover should be at first pending branch
+    expect(currentVibePopoverTitle()).toBe("Current State");
+    // Click root node to manually inspect it
+    fireEvent.click(flowNodeCard("root") as Element);
+    await waitForVibePopoverTitle("Auto-locate Test");
+
+    // Click branch-a to return to it and confirm
+    fireEvent.click(flowNodeCard("branch-a") as Element);
+    await waitForVibePopoverTitle("Current State");
+    clickCurrentVibeConfirmButton();
+    await waitForVibePopoverTitle("Problem");
+    expect(currentVibePopoverTitle()).toBe("Problem");
+  });
+
+  it("preserves confirmed Outline nodes after same-stage node feedback refreshes the tree snapshot", async () => {
+    vi.useFakeTimers();
+    const makeOutlineTask = (treeId: string, p4Title = "P4: The new knowledge base must upgrade from a document repository to a decision system"): DesktopTask => ({
+      id: "task-vibe-outline-feedback",
+      conversationId: "task-vibe-outline-feedback",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_refined_ready",
+        question: "Outline generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_slides", label: "Generate Slides", recommended: true }],
+      },
+      vibeTree: {
+        stage: "refined_ready",
+        tree: {
+          id: treeId,
+          rootId: "root",
+          title: "Confirmation Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Confirmation Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Solution" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Solution Closure" },
+            { id: "outline-01", parentId: "group-a", kind: "outline", title: "P1: Rebuilding the knowledge base is essential for decision efficiency" },
+            { id: "outline-02", parentId: "group-a", kind: "outline", title: "P2: Legacy knowledge workflows are creating alignment costs" },
+            { id: "outline-03", parentId: "group-a", kind: "outline", title: "P3: Hidden cost 1: Search and repeated questions consume attention" },
+            { id: "outline-04", parentId: "group-a", kind: "outline", title: p4Title },
+          ],
+        },
+        actions: [{ id: "generate_slides", label: "Generate Slides" }],
+        confirmation: { nodeIds: ["outline-01", "outline-02", "outline-03", "outline-04"] },
+      },
+    });
+
+    const { rerender } = render(<DialogueScreen {...baseProps()} tasks={[makeOutlineTask("tree-outline-before")]} />);
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {});
+    expect(currentVibePopoverTitle()).toBe("P1: Rebuilding the knowledge base is essential for decision efficiency");
+    clickCurrentVibeConfirmButton();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    await act(async () => {});
+    expect(currentVibePopoverTitle()).toBe("P2: Legacy knowledge workflows are creating alignment costs");
+    clickCurrentVibeConfirmButton();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    await act(async () => {});
+    expect(currentVibePopoverTitle()).toBe("P3: Hidden cost 1: Search and repeated questions consume attention");
+    clickCurrentVibeConfirmButton();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    await act(async () => {});
+    expect(currentVibePopoverTitle()).toBe("P4: The new knowledge base must upgrade from a document repository to a decision system");
+    // Open the task card popover by clicking the active step so the Confirmed text is rendered in the portal
+    const activeStep = document.querySelector(".living-tree-step.is-active") as HTMLElement;
+    if (activeStep) fireEvent.click(activeStep);
+    expect(screen.getByText("Confirmed 3/4")).toBeTruthy();
+
+    expect(screen.queryByRole("button", { name: "Suggest Changes" })).toBeNull();
+    const currentPopover = currentOpenVibePopover() as HTMLElement;
+    expect(within(currentPopover).queryByText("Edit current content")).toBeNull();
+    const editInput = within(currentPopover).getByLabelText("Outline: Describe the key content this page presents");
+    expect(editInput).toHaveValue("P4: The new knowledge base must upgrade from a document repository to a decision system");
+    fireEvent.change(editInput, {
+      target: { value: "Make this page more like a version for the boss" },
+    });
+    expect(within(currentPopover).queryByRole("button", { name: "Apply to current node" })).toBeNull();
+    expect(within(currentPopover).getAllByRole("button")).toHaveLength(1);
+    clickCurrentOpenVibePopoverButton("Confirm this node");
+
+    expect(respondSpy).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-vibe-outline-feedback",
+      questionId: "vibe_refined_ready",
+      answer: JSON.stringify({
+        kind: "vibe_node_feedback",
+        nodeId: "outline-04",
+        feedback: "Make this page more like a version for the boss",
+      }),
+    }));
+
+    rerender(<DialogueScreen {...baseProps()} tasks={[makeOutlineTask("tree-outline-after", "P4: Upgrade the knowledge base to a decision system for executives")]} />);
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await act(async () => {});
+    expect(currentVibePopoverTitle()).toBe("P4: Upgrade the knowledge base to a decision system for executives");
+    // Re-open the task card popover after rerender so the Confirmed text is in the portal
+    const activeStep2 = document.querySelector(".living-tree-step.is-active") as HTMLElement;
+    if (activeStep2) fireEvent.click(activeStep2);
+    expect(screen.getByText("Confirmed 3/4")).toBeTruthy();
+    expect(flowNodeCard("outline-01")?.classList.contains("is-confirmed")).toBe(true);
+    expect(flowNodeCard("outline-02")?.classList.contains("is-confirmed")).toBe(true);
+    expect(flowNodeCard("outline-03")?.classList.contains("is-confirmed")).toBe(true);
+    expect(flowNodeCard("outline-04")?.classList.contains("is-pending")).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("uses yellow for pending nodes and green for confirmed nodes instead of reusing story orange", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const pendingRule = css.match(/\.living-tree-flow-node\.is-pending\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const confirmedRule = css.match(/\.living-tree-flow-node\.is-confirmed:not\(\.is-deck\)\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const drawingBeforeRule = css.match(/\.living-tree-flow-node\.is-node-drawing::before,\n\.living-tree-flow-node\.is-idea-drawing::before\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const drawingPendingRule = css.match(/\.living-tree-flow-node\.is-node-drawing\.is-pending,\n\.living-tree-flow-node\.is-idea-drawing\.is-pending\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const drawingOutlineRule = css.match(/\.living-tree-node-outline-rect\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const visualAssetIconRule = css.match(/^\.living-tree-visual-asset-icon\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const slideThumbnailRule = css.match(/^\.living-tree-flow-node\.is-generated_slide\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
+    const outlineKeyframes = css.match(/@keyframes living-tree-node-outline-draw\s*\{(?<body>.*?)\n\}/s)?.groups?.body ?? "";
+
+    expect(pendingRule).toContain("245, 196, 0");
+    expect(pendingRule).not.toContain("221, 91, 0");
+    expect(confirmedRule).toContain("22, 163, 74");
+    expect(drawingBeforeRule).toContain("content: none");
+    expect(drawingPendingRule).toContain("border-color: transparent");
+    expect(drawingPendingRule).toContain("background: transparent");
+    expect(drawingPendingRule).toContain("box-shadow: none");
+    expect(drawingPendingRule).not.toContain("86, 69, 212");
+    expect(drawingPendingRule).not.toContain("245, 196, 0");
+    expect(drawingOutlineRule).toContain("245, 196, 0");
+    expect(drawingOutlineRule).toContain("stroke-dasharray: 1");
+    expect(drawingOutlineRule).toContain("stroke-dashoffset: 1");
+    expect(visualAssetIconRule).toContain("width: 52px");
+    expect(visualAssetIconRule).toContain("height: 34px");
+    expect(visualAssetIconRule).toContain("font-size: 20px");
+    expect(slideThumbnailRule).toContain("width: 416px");
+    expect(slideThumbnailRule).toContain("min-height: 234px");
+    expect(outlineKeyframes).toContain("stroke-dashoffset: 0");
+    expect(css).toContain('.living-tree-flow-node li.living-tree-animated-line[data-has-content="true"]::before');
+    expect(css).toContain(".living-tree-flow-node.is-node-drawing .react-flow__handle");
+    expect(css).toContain(".living-tree-node-outline-svg");
+    expect(css).not.toContain(".living-tree-node-outline-top");
+    expect(css).not.toContain(".living-tree-node-outline-right");
+    expect(css).not.toContain(".living-tree-node-outline-bottom");
+    expect(css).not.toContain(".living-tree-node-outline-left");
+  });
+
+  it("gives the Living Tree minimap stable node dimensions and visible contrast", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "completed",
+      actions: [],
+      tree: {
+        id: "tree-minimap",
+        rootId: "root",
+        title: "Minimap visibility",
+        nodes: [
+          { id: "root", kind: "root", title: "Minimap visibility" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          { id: "outline-01", parentId: "chapter", kind: "outline", title: "P1" },
+          { id: "slide-01", parentId: "outline-01", kind: "slide", title: "P1", slideNumber: 1 },
+          { id: "deck", kind: "deck", title: "Complete PPTX Deck" },
+        ],
+      },
+    };
+    const model = buildVibeFlowModel(snapshot);
+    const rootNode = model.nodes.find((node) => node.id === "root");
+    const deckNode = model.nodes.find((node) => node.id === "deck");
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+
+    expect(rootNode).toEqual(expect.objectContaining({ width: 320, height: 116 }));
+    expect(deckNode).toEqual(expect.objectContaining({ width: 520, height: 320 }));
+    expect(deckNode?.position.x).toBe(3024);
+    expect(rootNode?.style).toEqual(expect.objectContaining({ width: 320, height: 116 }));
+    expect(deckNode?.style).toEqual(expect.objectContaining({ width: 520, height: 320 }));
+    expect(css).toMatch(/\.living-tree-flow-shell\s+\.react-flow__minimap-svg\s*\{/);
+    expect(css).toMatch(/\.living-tree-flow-shell\s+\.react-flow__minimap-node\s*\{/);
+    expect(css).toMatch(/\.living-tree-flow-shell\s+\.react-flow__minimap-mask\s*\{/);
+  });
+
+  it("expands PPT canvas nodes vertically when their text and visual assets need more room", () => {
+    const snapshot: VibeTreeSnapshot = {
+      stage: "refined_ready",
+      actions: [],
+      tree: {
+        id: "tree-tall-node",
+        rootId: "root",
+        title: "Tall node test",
+        nodes: [
+          { id: "root", kind: "root", title: "Tall node test" },
+          { id: "branch", parentId: "root", kind: "branch", title: "Problem" },
+          { id: "chapter", parentId: "branch", kind: "slide_group", title: "Chapter" },
+          {
+            id: "outline-long",
+            parentId: "chapter",
+            kind: "slide",
+            slideNumber: 2,
+            title: "Legacy knowledge workflows have created a high-friction work environment",
+            summary: "Illustrate knowledge scattering, search difficulty, and repeated verification through concrete scenarios.",
+            outline: [
+              "Materials scattered across chat, documents, meeting notes, and personal experience, causing increasing information fragmentation",
+              "New members and cross-team colleagues must repeatedly ask to locate context, greatly reducing collaboration efficiency and team productivity",
+              "Critical decisions rely on a few people's memory rather than reusable systems, posing serious knowledge loss and single point of failure risks",
+            ],
+            visualAssets: [{ kind: "image", description: "On-site workflow illustration" }],
+          },
+        ],
+      },
+    };
+
+    const model = buildVibeFlowModel(snapshot);
+    const tallNode = model.nodes.find((node) => node.id === "outline-long");
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const outlineRule = css.match(/\.living-tree-flow-node\.is-outline\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const generatedSlideRule = css.match(/\.living-tree-flow-node\.is-generated_slide\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+
+    expect(tallNode?.height).toBeGreaterThan(258);
+    expect(tallNode?.style).toEqual(expect.objectContaining({ width: 320, height: tallNode?.height }));
+    expect(outlineRule).not.toContain("overflow: hidden");
+    expect(generatedSlideRule).not.toContain("overflow: hidden");
+  });
+
+  it("shows upstream Story Beat nodes as confirmed after Chapters are generated", () => {
+    const task: DesktopTask = {
+      id: "task-vibe-upstream-confirmed",
+      conversationId: "task-vibe-upstream-confirmed",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_outline_ready",
+        question: "Chapters generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "outline_ready",
+        tree: {
+          id: "tree-upstream-confirmed",
+          rootId: "root",
+          title: "Confirmation Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Confirmation Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Context Setting" },
+          ],
+        },
+        actions: [{ id: "generate_outline", label: "Generate Outline" }],
+        confirmation: { nodeIds: ["group-a"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const branch = flowNodeCard("branch-a");
+    const chapter = flowNodeCard("group-a");
+    expect(branch?.classList.contains("is-confirmed")).toBe(true);
+    expect(branch?.classList.contains("is-pending")).toBe(false);
+    expect(chapter?.classList.contains("is-pending")).toBe(true);
+  });
+
+  it("lets users confirm the current Chapter from a selected Outline child without typing feedback", async () => {
+    vi.useFakeTimers();
+    const now = new Date().toISOString();
+    const task: DesktopTask = {
+      id: "task-vibe-outline-child",
+      conversationId: "task-vibe-outline-child",
+      status: "question",
+      documentType: "pptx",
+      events: [{ task_id: "task-vibe-outline-child", type: "task.vibe_tree", ts: now, payload: { stage: "outline_ready" } }],
+      question: {
+        id: "vibe_outline_ready",
+        question: "Outline generated.",
+        allowFreeform: true,
+        options: [{ id: "refine_slides", label: "Refine Page Content", recommended: true }],
+      },
+      vibeTree: {
+        stage: "outline_ready",
+        tree: {
+          id: "tree-outline-child",
+          rootId: "root",
+          title: "Confirmation Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Confirmation Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Solution" },
+            { id: "group-a", parentId: "branch-a", kind: "slide_group", title: "Solution Closure" },
+            { id: "outline-a-1", parentId: "group-a", kind: "outline", title: "Implementation Path and Expected Benefits" },
+          ],
+        },
+        actions: [{ id: "refine_slides", label: "Refine Page Content" }],
+        confirmation: { nodeIds: ["group-a"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    expect(screen.getByText("Confirmed 0/1")).toBeTruthy();
+    fireEvent.click(screen.getByText("Implementation Path and Expected Benefits"));
+    expect(screen.queryByText("Current stage confirmation target: Solution Closure")).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    fireEvent.click(screen.getByText("Implementation Path and Expected Benefits"));
+    expect(screen.getByText("Current stage confirmation target: Solution Closure")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm parent Chapter" }));
+    expect(screen.getByText("Confirmed 1/1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Refine Page Content" })).not.toBeDisabled();
+  });
+
+  it("shows a cancel action inside the Vibe canvas task card", async () => {
+    const onForceCancel = vi.fn();
+    const task: DesktopTask = {
+      id: "task-vibe-cancel",
+      conversationId: "task-vibe-cancel",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_outline", label: "Generate PPT Outline", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-cancel",
+          rootId: "root",
+          title: "Cancel Test",
+          nodes: [
+            { id: "root", kind: "root", title: "Cancel Test" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State" },
+          ],
+        },
+        actions: [{ id: "generate_outline", label: "Generate PPT Outline" }],
+        confirmation: { nodeIds: ["branch-a"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps({ onForceCancel })} tasks={[task]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("task-vibe-cancel"));
+    expect(onForceCancel).toHaveBeenCalledWith("task-vibe-cancel");
+  });
+
+  it("uses the animated loading surface as the only visible generation bubble", () => {
     const task = makeRunningTask({
       documentType: "pptx",
       userInput: {
@@ -739,10 +3944,30 @@ describe("DialogueScreen state machine", () => {
 
     render(<DialogueScreen {...baseProps()} tasks={[task]} />);
 
-    expect(screen.getByText("Writing plan...")).toBeTruthy();
-    expect(document.querySelector(".generation-loading-message")).toBeTruthy();
-    expect(document.querySelector(".generation-loading-plan")).toBeTruthy();
-    expect(document.querySelector(".generation-loading-pptx")).toBeNull();
+    const loadingMessage = document.querySelector(".generation-loading-message");
+    expect(loadingMessage).toBeTruthy();
+    expect(loadingMessage?.classList.contains("message")).toBe(false);
+    expect(loadingMessage?.classList.contains("ai-message")).toBe(false);
+    expect(loadingMessage?.querySelector(".generation-loading-visual")).toBeTruthy();
+  });
+
+  it("does not draw a lined background bubble behind the generation animation", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const visualRule = css.match(/\.generation-loading-visual\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+
+    expect(visualRule).not.toMatch(/\bborder(?:-radius)?:/);
+    expect(visualRule).not.toMatch(/\bbackground(?:-size)?:/);
+    expect(visualRule).not.toMatch(/overflow:\s*hidden;/);
+  });
+
+  it("keeps active conversation bubbles clear of the scrollbar and loading art aligned", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const chatThreadRule = css.match(/\.chat-thread\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const visualRule = css.match(/\.generation-loading-visual\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+
+    expect(chatThreadRule).toMatch(/padding-right:\s*(?:1[2-9]|[2-9]\d)px;/);
+    expect(visualRule).toMatch(/justify-items:\s*start;/);
+    expect(visualRule).not.toMatch(/place-items:\s*center;/);
   });
 
   it("renders the target document animation after a reviewed plan returns to running", () => {
@@ -861,7 +4086,7 @@ describe("DialogueScreen state machine", () => {
         markdown: [
           "# Proposed Plan",
           "",
-          "- **任务类型**：新建文档",
+          "- **Task type**: New document",
           "- Use `pptx` output",
           "",
           "Keep the review readable.",
@@ -876,11 +4101,11 @@ describe("DialogueScreen state machine", () => {
     const markdown = document.querySelector(".plan-review-markdown");
     expect(markdown).toBeTruthy();
     expect(within(markdown as HTMLElement).getByRole("heading", { name: "Proposed Plan" })).toBeTruthy();
-    expect(within(markdown as HTMLElement).getByText("任务类型").tagName).toBe("STRONG");
+    expect(within(markdown as HTMLElement).getByText("Task type").tagName).toBe("STRONG");
     expect(within(markdown as HTMLElement).getByText("Use", { exact: false }).closest("li")).toBeTruthy();
     expect(markdown?.querySelector("code")?.textContent).toBe("pptx");
     expect(markdown?.textContent).not.toContain("# Proposed Plan");
-    expect(markdown?.textContent).not.toContain("**任务类型**");
+    expect(markdown?.textContent).not.toContain("**Task type**");
   });
 
   it("keeps a reviewed plan expanded after the same plan card remounts", () => {
@@ -1498,7 +4723,7 @@ describe("DialogueScreen state machine", () => {
     fireEvent.submit(screen.getByPlaceholderText(/Enter what you want to generate/i).closest("form")!);
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ documentType: "pptx", prompt: "Build a deck" }));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ documentType: "pptx", prompt: "Build a deck", generationMode: "plan" }));
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("imageRatio");
   });
 

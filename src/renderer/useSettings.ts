@@ -16,6 +16,7 @@ const FALLBACK: UserSettings = {
   onboardingCompletedAt: null,
   proxy: { ...defaultProxySettings },
   imageWatermark: { showWatermark: true, preferenceSource: "system" },
+  waiting2048Enabled: false,
 };
 
 // Cross-instance broadcast: multiple components call useSettings() independently

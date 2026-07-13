@@ -18,6 +18,7 @@ const baseSettings: UserSettings = {
   onboardingCompletedAt: null,
   proxy: null,
   imageWatermark: { showWatermark: true, preferenceSource: "system" },
+  waiting2048Enabled: false,
 };
 
 let updateSettingsSpy: ReturnType<typeof vi.fn>;

@@ -20,6 +20,7 @@
     "dev": "wails dev",
     "dev:browser": "vite --host=0.0.0.0 --port=3100",
     "bundle:officecli:mac": "node scripts/codesign-bundled-officecli.mjs --app build/bin/OfficeDex.app --source build/officecli/officecli",
+    "build:local": "bash scripts/build-local-app.sh",
     "build": "wails build -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\" && npm run bundle:officecli:mac",
     "dist:mac": "npm run prefetch:officecli && wails build -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\" && node scripts/bundle-runtime.mjs && npm run bundle:officecli:mac && node scripts/notarize.mjs build/bin/OfficeDex.app",
     "dist:win": "npm run prefetch:officecli && wails build -platform windows/amd64 -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\"",
@@ -35,6 +36,7 @@
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
     "@tanstack/react-query": "^5.66.9",
+    "@xyflow/react": "^12.11.1",
     "antd": "^6.4.2",
     "clsx": "^2.1.1",
     "docx-preview": "^0.3.7",
@@ -42,6 +44,7 @@
     "pdfjs-dist": "^3.11.174",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "weboffice-design": "^0.3.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

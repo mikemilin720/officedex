@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,7 +35,6 @@ import (
 	"officedex/internal/binresolver"
 	"officedex/internal/bridge"
 	"officedex/internal/diagnostics"
-	"officedex/internal/extrender"
 	"officedex/internal/localstore"
 	"officedex/internal/login"
 	"officedex/internal/mask"
@@ -74,6 +74,10 @@ type desktopNotificationRuntime interface {
 	SendNotification(context.Context, wailsruntime.NotificationOptions) error
 }
 
+type pptistDeckPlanner interface {
+	PlanPptistEdit(context.Context, bridge.PlanPptistEditInput) (bridge.PlanPptistEditResult, error)
+}
+
 type wailsDesktopNotificationRuntime struct{}
 
 func (wailsDesktopNotificationRuntime) IsNotificationAvailable(ctx context.Context) bool {
@@ -106,6 +110,7 @@ type App struct {
 	mu                     sync.Mutex
 	cachedSettings         types.UserSettings
 	bridgeClient           *bridge.Client
+	pptistPlanner          pptistDeckPlanner
 	bridgeCwd              string
 	loginManager           *login.Manager
 	loginUnsub             func()
@@ -116,7 +121,6 @@ type App struct {
 	appUpdateMgr           *appupdate.Manager
 	runtimeMgr             *runtimemgr.Manager
 	proxyPool              *netproxy.Pool
-	extRenderer            *extrender.Renderer
 
 	// resolver cache. binresolver.Resolve stats the filesystem on every call;
 	// runCommandOptions / ensureBridge run on every RPC. We cache the resolved
@@ -234,10 +238,6 @@ func (a *App) startup(ctx context.Context) {
 		wailsruntime.LogErrorf(ctx, "open local store: %v", err)
 	} else if err := a.initializeWorkspaces(ctx); err != nil {
 		wailsruntime.LogErrorf(ctx, "init workspace: %v", err)
-	}
-	if binPath := a.resolveExtrenderBinary(); binPath != "" {
-		a.extRenderer = extrender.New(binPath)
-		wailsruntime.LogInfof(ctx, "extrender: %s", binPath)
 	}
 }
 
@@ -1102,6 +1102,793 @@ func (a *App) SavePastedImage(input PastedImageInput) (string, error) {
 	return dest, nil
 }
 
+// SavePptxInput carries a base64-encoded .pptx plus its desired file name.
+type SavePptxInput struct {
+	DataBase64     string `json:"dataBase64"`
+	FileName       string `json:"fileName"`
+	TargetFilePath string `json:"targetFilePath,omitempty"`
+}
+
+// SavePptx writes a client-exported .pptx (produced in the PPTist embed) to the
+// user's Downloads folder and returns the path. Desktop webviews can't surface
+// blob downloads from inside an iframe, so the embed hands the bytes back and the
+// host persists them natively.
+func (a *App) SavePptx(input SavePptxInput) (string, error) {
+	if input.DataBase64 == "" {
+		return "", errors.New("save pptx: empty data")
+	}
+	data, err := base64.StdEncoding.DecodeString(input.DataBase64)
+	if err != nil {
+		return "", fmt.Errorf("decode pptx: %w", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("save pptx: empty data")
+	}
+	dest, err := a.resolveSavePptxDestination(input)
+	if err != nil {
+		return "", err
+	}
+	if err := writeFileAtomic(dest, data, 0o644); err != nil {
+		return "", fmt.Errorf("write pptx: %w", err)
+	}
+	if a.previewReg != nil {
+		_ = a.previewReg.AllowArtifact(types.Artifact{FilePath: dest, FileName: filepath.Base(dest), DocumentType: "pptx"})
+	}
+	return dest, nil
+}
+
+func (a *App) resolveSavePptxDestination(input SavePptxInput) (string, error) {
+	if strings.TrimSpace(input.TargetFilePath) != "" {
+		dest, err := filepath.Abs(input.TargetFilePath)
+		if err != nil {
+			return "", fmt.Errorf("save pptx: target path: %w", err)
+		}
+		if strings.ToLower(filepath.Ext(dest)) != ".pptx" {
+			return "", errors.New("save pptx: target file must be .pptx")
+		}
+		if a.previewReg != nil {
+			if err := a.previewReg.AllowArtifact(types.Artifact{FilePath: dest, FileName: filepath.Base(dest), DocumentType: "pptx"}); err != nil {
+				return "", fmt.Errorf("save pptx: %w", err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return "", fmt.Errorf("save pptx: mkdir target: %w", err)
+		}
+		return dest, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("save pptx: home dir: %w", err)
+	}
+	dir := filepath.Join(home, "Downloads")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("save pptx: mkdir: %w", err)
+	}
+	name := normalizePptxFileName(input.FileName)
+	dest := filepath.Join(dir, name)
+	if _, statErr := os.Stat(dest); statErr == nil {
+		base := strings.TrimSuffix(name, ".pptx")
+		dest = filepath.Join(dir, fmt.Sprintf("%s-%d.pptx", base, time.Now().UnixNano()))
+	}
+	return dest, nil
+}
+
+func writeFileAtomic(dest string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, dest); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+type ModifyPptistDeckInput struct {
+	Prompt             string             `json:"prompt"`
+	Snapshot           PptistDeckSnapshot `json:"snapshot"`
+	SelectedSlideID    string             `json:"selectedSlideId,omitempty"`
+	SelectedElementIDs []string           `json:"selectedElementIds,omitempty"`
+	History            []PptistEditTurn   `json:"history,omitempty"`
+	PptxDataBase64     string             `json:"pptxDataBase64,omitempty"`
+}
+
+type PptistEditTurn struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type PptistDeckSnapshot struct {
+	Slides        []PptistSlide  `json:"slides"`
+	Title         string         `json:"title,omitempty"`
+	Theme         map[string]any `json:"theme,omitempty"`
+	ViewportSize  float64        `json:"viewportSize,omitempty"`
+	ViewportRatio float64        `json:"viewportRatio,omitempty"`
+	SlideIndex    int            `json:"slideIndex,omitempty"`
+}
+
+type PptistSlide struct {
+	ID         string           `json:"id"`
+	Elements   []map[string]any `json:"elements"`
+	Background map[string]any   `json:"background,omitempty"`
+	Rest       map[string]any   `json:"-"`
+}
+
+type ModifyPptistDeckResult struct {
+	Summary              string                  `json:"summary"`
+	Ops                  []map[string]any        `json:"ops"`
+	Confidence           string                  `json:"confidence,omitempty"`
+	RequiresConfirmation bool                    `json:"requiresConfirmation,omitempty"`
+	Confirmation         *PptistEditConfirmation `json:"confirmation,omitempty"`
+	Warnings             []string                `json:"warnings,omitempty"`
+}
+
+type PptistEditConfirmation struct {
+	Title     string   `json:"title,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	Target    string   `json:"target,omitempty"`
+	Changes   []string `json:"changes,omitempty"`
+	Preserved []string `json:"preserved,omitempty"`
+}
+
+// ModifyPptistDeck plans edits against the live PPTist deck model. It returns
+// PPTist edit operations only; the renderer applies them inside the iframe.
+// The current PPTX bytes, when supplied, are used only as planner context.
+func (a *App) ModifyPptistDeck(input ModifyPptistDeckInput) (ModifyPptistDeckResult, error) {
+	prompt := strings.TrimSpace(input.Prompt)
+	if prompt == "" {
+		return ModifyPptistDeckResult{}, errors.New("modify pptist: prompt is required")
+	}
+	if len(input.Snapshot.Slides) == 0 {
+		return ModifyPptistDeckResult{}, errors.New("modify pptist: snapshot has no slides")
+	}
+	if result, ok, err := planDeterministicPptistTitleEdit(input); ok || err != nil {
+		if err != nil {
+			return ModifyPptistDeckResult{}, err
+		}
+		return result, nil
+	}
+	planner := a.pptistPlanner
+	if planner == nil {
+		client, err := a.ensureBridge()
+		if err != nil {
+			return ModifyPptistDeckResult{}, fmt.Errorf("modify pptist: bridge unavailable: %w", err)
+		}
+		planner = client
+	}
+	history := make([]bridge.PlanPptistEditTurn, 0, len(input.History))
+	for _, turn := range input.History {
+		history = append(history, bridge.PlanPptistEditTurn{Role: turn.Role, Content: turn.Content})
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := planner.PlanPptistEdit(ctx, bridge.PlanPptistEditInput{
+		Tool:               "office.pptist.plan_edit",
+		Prompt:             prompt,
+		Snapshot:           compactPptistSnapshotForPlanner(input.Snapshot),
+		SelectedSlideID:    input.SelectedSlideID,
+		SelectedElementIDs: append([]string(nil), input.SelectedElementIDs...),
+		History:            history,
+		PptxDataBase64:     input.PptxDataBase64,
+	})
+	if err != nil {
+		if isPptistNoEditOpsError(err) {
+			op, summary, fallbackErr := planPptistEditOp(input)
+			if fallbackErr != nil {
+				return ModifyPptistDeckResult{}, fmt.Errorf("modify pptist: %w", err)
+			}
+			if validateErr := validatePptistEditOpsAgainstSelectedElements([]map[string]any{op}, input.SelectedElementIDs); validateErr != nil {
+				return ModifyPptistDeckResult{}, validateErr
+			}
+			return ModifyPptistDeckResult{
+				Summary:              firstNonEmptyPptist(summary, "Prepared a conservative text edit."),
+				Ops:                  []map[string]any{op},
+				Confidence:           "low",
+				RequiresConfirmation: true,
+				Confirmation: &PptistEditConfirmation{
+					Title:     "Confirm AI edit",
+					Message:   "The AI planner returned no operations, so OfficeDex prepared a conservative edit for review.",
+					Target:    "Current PPTist deck",
+					Changes:   []string{firstNonEmptyPptist(summary, "Apply one text edit.")},
+					Preserved: []string{"Existing style and layout"},
+				},
+				Warnings: []string{"AI planner returned no operations; used conservative fallback."},
+			}, nil
+		}
+		return ModifyPptistDeckResult{}, fmt.Errorf("modify pptist: %w", err)
+	}
+	if err := validatePptistEditOpsAgainstSelectedElements(result.Ops, input.SelectedElementIDs); err != nil {
+		return ModifyPptistDeckResult{}, err
+	}
+	return ModifyPptistDeckResult{
+		Summary:              result.Summary,
+		Ops:                  result.Ops,
+		Confidence:           result.Confidence,
+		RequiresConfirmation: result.RequiresConfirmation,
+		Confirmation:         pptistEditConfirmationFromBridge(result.Confirmation),
+		Warnings:             append([]string(nil), result.Warnings...),
+	}, nil
+}
+
+func isPptistNoEditOpsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no edit operations")
+}
+
+func validatePptistEditOpsAgainstSelectedElements(ops []map[string]any, selectedElementIDs []string) error {
+	if len(selectedElementIDs) == 0 {
+		return nil
+	}
+	selected := make(map[string]struct{}, len(selectedElementIDs))
+	for _, id := range selectedElementIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			selected[id] = struct{}{}
+		}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	for i, op := range ops {
+		elementID, _ := op["elementId"].(string)
+		elementID = strings.TrimSpace(elementID)
+		if elementID == "" {
+			return fmt.Errorf("modify pptist: planner returned op outside selected elements at index %d: missing elementId", i)
+		}
+		if _, ok := selected[elementID]; !ok {
+			return fmt.Errorf("modify pptist: planner returned op outside selected elements at index %d: %s", i, elementID)
+		}
+	}
+	return nil
+}
+
+func firstNonEmptyPptist(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func planDeterministicPptistTitleEdit(input ModifyPptistDeckInput) (ModifyPptistDeckResult, bool, error) {
+	prompt := strings.TrimSpace(input.Prompt)
+	if !pptistPromptMentionsTitle(prompt) {
+		return ModifyPptistDeckResult{}, false, nil
+	}
+	newText := requestedTitleText(prompt)
+	if newText == "" {
+		return ModifyPptistDeckResult{}, false, nil
+	}
+	targetSlideIndex := resolvePptistTargetSlideIndex(input)
+	if targetSlideIndex < 0 || targetSlideIndex >= len(input.Snapshot.Slides) {
+		return ModifyPptistDeckResult{}, false, nil
+	}
+	targetSlide := input.Snapshot.Slides[targetSlideIndex]
+	element, _ := firstEditableTitleElement(targetSlide)
+	if element == nil {
+		return ModifyPptistDeckResult{}, false, nil
+	}
+	elementID, _ := element["id"].(string)
+	if elementID == "" {
+		return ModifyPptistDeckResult{}, true, errors.New("modify pptist: target title element has no id")
+	}
+	return ModifyPptistDeckResult{
+		Summary:              fmt.Sprintf("Updated slide %d title.", targetSlideIndex+1),
+		Confidence:           "high",
+		RequiresConfirmation: false,
+		Ops: []map[string]any{{
+			"type":          "element:update-text",
+			"slideId":       targetSlide.ID,
+			"elementId":     elementID,
+			"text":          newText,
+			"preserveStyle": true,
+		}},
+	}, true, nil
+}
+
+func pptistPromptMentionsTitle(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	return strings.Contains(prompt, "标题") || strings.Contains(lower, "title")
+}
+
+func pptistEditConfirmationFromBridge(input *bridge.PlanPptistEditConfirmation) *PptistEditConfirmation {
+	if input == nil {
+		return nil
+	}
+	return &PptistEditConfirmation{
+		Title:     input.Title,
+		Message:   input.Message,
+		Target:    input.Target,
+		Changes:   append([]string(nil), input.Changes...),
+		Preserved: append([]string(nil), input.Preserved...),
+	}
+}
+
+const (
+	pptistPlannerMaxStringBytes = 4096
+	pptistPlannerMaxListItems   = 80
+)
+
+func compactPptistSnapshotForPlanner(snapshot PptistDeckSnapshot) PptistDeckSnapshot {
+	compact := PptistDeckSnapshot{
+		Title:         compactPptistStringForPlanner("title", snapshot.Title),
+		Theme:         compactPptistMapForPlanner(snapshot.Theme),
+		ViewportSize:  snapshot.ViewportSize,
+		ViewportRatio: snapshot.ViewportRatio,
+		SlideIndex:    snapshot.SlideIndex,
+	}
+	compact.Slides = make([]PptistSlide, 0, len(snapshot.Slides))
+	for _, slide := range snapshot.Slides {
+		next := PptistSlide{
+			ID:         compactPptistStringForPlanner("id", slide.ID),
+			Background: compactPptistMapForPlanner(slide.Background),
+		}
+		next.Elements = make([]map[string]any, 0, len(slide.Elements))
+		for _, element := range slide.Elements {
+			next.Elements = append(next.Elements, compactPptistMapForPlanner(element))
+		}
+		compact.Slides = append(compact.Slides, next)
+	}
+	return compact
+}
+
+func compactPptistMapForPlanner(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = compactPptistValueForPlanner(key, value)
+	}
+	return output
+}
+
+func compactPptistValueForPlanner(key string, value any) any {
+	switch typed := value.(type) {
+	case string:
+		return compactPptistStringForPlanner(key, typed)
+	case map[string]any:
+		return compactPptistMapForPlanner(typed)
+	case []any:
+		limit := len(typed)
+		if limit > pptistPlannerMaxListItems {
+			limit = pptistPlannerMaxListItems
+		}
+		output := make([]any, 0, limit+1)
+		for i := 0; i < limit; i++ {
+			output = append(output, compactPptistValueForPlanner(key, typed[i]))
+		}
+		if len(typed) > limit {
+			output = append(output, fmt.Sprintf("[%d items omitted]", len(typed)-limit))
+		}
+		return output
+	case []map[string]any:
+		limit := len(typed)
+		if limit > pptistPlannerMaxListItems {
+			limit = pptistPlannerMaxListItems
+		}
+		output := make([]map[string]any, 0, limit)
+		for i := 0; i < limit; i++ {
+			output = append(output, compactPptistMapForPlanner(typed[i]))
+		}
+		return output
+	default:
+		return value
+	}
+}
+
+func compactPptistStringForPlanner(key string, value string) string {
+	if value == "" {
+		return value
+	}
+	lowerKey := strings.ToLower(key)
+	prefix := strings.ToLower(value)
+	if len(prefix) > 64 {
+		prefix = prefix[:64]
+	}
+	if strings.HasPrefix(prefix, "data:image/") || strings.HasPrefix(prefix, "data:application/") || strings.Contains(lowerKey, "base64") || lowerKey == "src" || lowerKey == "image" || lowerKey == "imageurl" {
+		return fmt.Sprintf("[image omitted: %d bytes]", len(value))
+	}
+	if len(value) <= pptistPlannerMaxStringBytes {
+		return value
+	}
+	return truncatePptistPlannerString(value, pptistPlannerMaxStringBytes) + fmt.Sprintf("… [truncated %d bytes]", len(value)-pptistPlannerMaxStringBytes)
+}
+
+func truncatePptistPlannerString(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	var out strings.Builder
+	out.Grow(maxBytes)
+	for _, r := range value {
+		next := string(r)
+		if out.Len()+len(next) > maxBytes {
+			break
+		}
+		out.WriteString(next)
+	}
+	return out.String()
+}
+
+func planPptistEditOp(input ModifyPptistDeckInput) (map[string]any, string, error) {
+	prompt := strings.TrimSpace(input.Prompt)
+	targetSlideIndex := resolvePptistTargetSlideIndex(input)
+	if targetSlideIndex < 0 || targetSlideIndex >= len(input.Snapshot.Slides) {
+		targetSlideIndex = 0
+	}
+	targetSlide := input.Snapshot.Slides[targetSlideIndex]
+	element, _ := firstEditableTitleElement(targetSlide)
+	if element == nil {
+		return map[string]any{
+			"type":    "element:add",
+			"slideId": targetSlide.ID,
+			"element": map[string]any{
+				"id":      "ai-note-" + uuid.NewString(),
+				"type":    "text",
+				"left":    80,
+				"top":     80,
+				"width":   520,
+				"height":  80,
+				"content": htmlParagraph(prompt),
+			},
+		}, "Added a text element from the edit request.", nil
+	}
+	newText := requestedTitleText(prompt)
+	if newText == "" {
+		newText = prompt
+	}
+	elementID, _ := element["id"].(string)
+	if elementID == "" {
+		return nil, "", errors.New("modify pptist: target element has no id")
+	}
+	return map[string]any{
+		"type":          "element:update-text",
+		"slideId":       targetSlide.ID,
+		"elementId":     elementID,
+		"text":          newText,
+		"preserveStyle": true,
+	}, "Updated text in the live PPTist deck.", nil
+}
+
+var (
+	pptistChineseSlideIndexRE = regexp.MustCompile(`第\s*([一二三四五六七八九十两0-9]+)\s*[页頁张張]`)
+	pptistEnglishSlideIndexRE = regexp.MustCompile(`(?i)\bslide\s+([0-9]+)\b`)
+)
+
+func resolvePptistTargetSlideIndex(input ModifyPptistDeckInput) int {
+	prompt := strings.TrimSpace(input.Prompt)
+	if strings.Contains(prompt, "最后") || strings.Contains(strings.ToLower(prompt), "last slide") {
+		return len(input.Snapshot.Slides) - 1
+	}
+	if index, ok := explicitPptistSlideIndexFromPrompt(prompt); ok {
+		return index
+	}
+	if input.SelectedSlideID != "" {
+		for i, slide := range input.Snapshot.Slides {
+			if slide.ID == input.SelectedSlideID {
+				return i
+			}
+		}
+	}
+	return input.Snapshot.SlideIndex
+}
+
+func explicitPptistSlideIndexFromPrompt(prompt string) (int, bool) {
+	if match := pptistChineseSlideIndexRE.FindStringSubmatch(prompt); len(match) == 2 {
+		if value, ok := parsePptistPageNumber(match[1]); ok && value > 0 {
+			return value - 1, true
+		}
+	}
+	if match := pptistEnglishSlideIndexRE.FindStringSubmatch(prompt); len(match) == 2 {
+		if value, err := strconv.Atoi(match[1]); err == nil && value > 0 {
+			return value - 1, true
+		}
+	}
+	return 0, false
+}
+
+func parsePptistPageNumber(value string) (int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	if numeric, err := strconv.Atoi(value); err == nil {
+		return numeric, true
+	}
+	if value == "十" {
+		return 10, true
+	}
+	digits := map[rune]int{'一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+	runes := []rune(value)
+	if len(runes) == 1 {
+		digit, ok := digits[runes[0]]
+		return digit, ok
+	}
+	for i, r := range runes {
+		if r != '十' {
+			continue
+		}
+		tens := 1
+		if i > 0 {
+			parsed, ok := digits[runes[i-1]]
+			if !ok {
+				return 0, false
+			}
+			tens = parsed
+		}
+		ones := 0
+		if i+1 < len(runes) {
+			parsed, ok := digits[runes[i+1]]
+			if !ok {
+				return 0, false
+			}
+			ones = parsed
+		}
+		return tens*10 + ones, true
+	}
+	return 0, false
+}
+
+var htmlFontSizeRE = regexp.MustCompile(`(?i)font-size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*px`)
+
+func firstEditableTitleElement(slide PptistSlide) (map[string]any, bool) {
+	type candidate struct {
+		element     map[string]any
+		isShapeText bool
+		score       float64
+	}
+	var best *candidate
+	for _, el := range slide.Elements {
+		content, textType, isShapeText, ok := editableTextElementInfo(el)
+		if !ok {
+			continue
+		}
+		score := titleElementScore(el, content, textType)
+		if best == nil || score > best.score {
+			best = &candidate{element: el, isShapeText: isShapeText, score: score}
+		}
+	}
+	if best == nil {
+		return nil, false
+	}
+	return best.element, best.isShapeText
+}
+
+func editableTextElementInfo(el map[string]any) (content string, textType string, isShapeText bool, ok bool) {
+	if typ, _ := el["type"].(string); typ == "text" {
+		content, ok = el["content"].(string)
+		textType, _ = el["textType"].(string)
+		return content, textType, false, ok && strings.TrimSpace(stripHTML(content)) != ""
+	}
+	text, ok := el["text"].(map[string]any)
+	if !ok {
+		return "", "", false, false
+	}
+	content, ok = text["content"].(string)
+	textType, _ = text["type"].(string)
+	return content, textType, true, ok && strings.TrimSpace(stripHTML(content)) != ""
+}
+
+func titleElementScore(el map[string]any, content string, textType string) float64 {
+	score := 0.0
+	switch strings.ToLower(strings.TrimSpace(textType)) {
+	case "title":
+		score += 10000
+	case "subtitle", "itemtitle":
+		score += 4000
+	case "footer", "header", "partnumber", "itemnumber", "notes":
+		score -= 3000
+	}
+
+	fontSize := maxNumericValue(el["defaultFontSize"], fontSizeFromHTML(content))
+	if text, ok := el["text"].(map[string]any); ok {
+		fontSize = maxNumericValue(fontSize, text["defaultFontSize"], fontSizeFromHTML(content))
+	}
+	if fontSize > 0 {
+		score += fontSize * 100
+	}
+
+	width := numericValue(el["width"])
+	height := numericValue(el["height"])
+	score += (width * height) / 100
+	if top := numericValue(el["top"]); top > 0 {
+		score += maxFloat(0, 320-top)
+	}
+	if left := numericValue(el["left"]); left > 0 {
+		score += maxFloat(0, 180-left) * 0.2
+	}
+	if opacity := numericValue(el["opacity"]); opacity > 0 && opacity < 0.25 {
+		score -= 5000
+	}
+	plainTextLength := len([]rune(strings.TrimSpace(stripHTML(content))))
+	if plainTextLength <= 2 {
+		score -= 300
+	}
+	return score
+}
+
+func fontSizeFromHTML(html string) float64 {
+	matches := htmlFontSizeRE.FindAllStringSubmatch(html, -1)
+	max := 0.0
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		value, err := strconv.ParseFloat(match[1], 64)
+		if err == nil && value > max {
+			max = value
+		}
+	}
+	return max
+}
+
+func stripHTML(html string) string {
+	var out strings.Builder
+	inTag := false
+	for _, r := range html {
+		switch r {
+		case '<':
+			inTag = true
+		case '>':
+			inTag = false
+		default:
+			if !inTag {
+				out.WriteRune(r)
+			}
+		}
+	}
+	return out.String()
+}
+
+func numericValue(value any) float64 {
+	switch v := value.(type) {
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case float32:
+		return float64(v)
+	case float64:
+		return v
+	case json.Number:
+		f, _ := v.Float64()
+		return f
+	default:
+		return 0
+	}
+}
+
+func maxNumericValue(values ...any) float64 {
+	max := 0.0
+	for _, value := range values {
+		if numeric := numericValue(value); numeric > max {
+			max = numeric
+		}
+	}
+	return max
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func requestedTitleText(prompt string) string {
+	lower := strings.ToLower(prompt)
+	markers := []string{"改为", "改成", "修改为", "change to", "set to", "to "}
+	for _, marker := range markers {
+		idx := strings.LastIndex(lower, marker)
+		if idx < 0 {
+			continue
+		}
+		start := idx + len(marker)
+		if marker != strings.ToLower(marker) {
+			start = strings.LastIndex(prompt, marker) + len(marker)
+		}
+		if start >= 0 && start <= len(prompt) {
+			return cleanRequestedTitleText(prompt[start:])
+		}
+	}
+	return ""
+}
+
+func cleanRequestedTitleText(value string) string {
+	text := strings.Trim(strings.TrimSpace(value), "“”\"'。.")
+	constraintMarkers := []string{"，但", ", but", "，保持", ", keep", "，字体", "，颜色", "，样式", "，位置"}
+	for _, marker := range constraintMarkers {
+		idx := strings.Index(strings.ToLower(text), strings.ToLower(marker))
+		if idx >= 0 {
+			candidate := strings.Trim(strings.TrimSpace(text[:idx]), "“”\"'。.")
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return text
+}
+
+func htmlParagraph(text string) string {
+	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return "<p>" + replacer.Replace(text) + "</p>"
+}
+
+// ExportVibeTreePptxInput carries the vibe tree to render and the desired file name.
+type ExportVibeTreePptxInput struct {
+	TreeJSON string `json:"treeJSON"`
+	FileName string `json:"fileName"`
+}
+
+// ExportVibeTreePptx renders the vibe tree via pptxgenjs on the backend and
+// saves the resulting PPTX to the user's Downloads folder.
+func (a *App) ExportVibeTreePptx(input ExportVibeTreePptxInput) (string, error) {
+	if strings.TrimSpace(input.TreeJSON) == "" {
+		return "", errors.New("export pptx: empty tree")
+	}
+	client := a.bridgeClient
+	if client == nil {
+		return "", errors.New("export pptx: bridge not connected")
+	}
+	result, err := client.ExportPptxFromTree(a.ctx, json.RawMessage(input.TreeJSON))
+	if err != nil {
+		return "", fmt.Errorf("export pptx: %w", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(result.DataBase64)
+	if err != nil {
+		return "", fmt.Errorf("export pptx: decode: %w", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("export pptx: empty result")
+	}
+	fileName := result.FileName
+	if strings.TrimSpace(input.FileName) != "" {
+		fileName = input.FileName
+	}
+	return a.SavePptx(SavePptxInput{
+		DataBase64: result.DataBase64,
+		FileName:   normalizePptxFileName(fileName),
+	})
+}
+
+// normalizePptxFileName strips any path separators and guarantees a .pptx suffix.
+func normalizePptxFileName(name string) string {
+	name = strings.TrimSpace(name)
+	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+	if name == "" || name == "." || name == "/" {
+		name = "deck.pptx"
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".pptx") {
+		name += ".pptx"
+	}
+	return name
+}
+
 func normalizePastedImageExt(ext string) string {
 	cleaned := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
 	switch cleaned {
@@ -1318,148 +2105,6 @@ function run(argv) {
 		return fmt.Errorf("copy image to clipboard: %w: %s", err, msg)
 	}
 	return nil
-}
-
-// PreviewHTML is the renderer-facing wrapper for a sidecar HTML preview.
-type PreviewHTML struct {
-	HTML string `json:"html"`
-}
-
-// RenderPreviewHtml returns the `*.preview.html` sidecar next to an artifact,
-// or nil when the sidecar does not exist. Relative <img src> / <link href>
-// references inside the sidecar are inlined as data: URLs so the renderer can
-// load them inside a sandboxed iframe (which has no filesystem access).
-func (a *App) RenderPreviewHtml(previewToken string) (*PreviewHTML, error) {
-	entry, err := a.previewReg.ResolveToken(previewToken)
-	if err != nil {
-		return nil, err
-	}
-
-	ext := strings.ToLower(filepath.Ext(entry.FilePath))
-	if ext == ".pptx" && a.extRenderer.Available() {
-		html, err := a.extRenderer.RenderHTML(a.ctx, entry.FilePath)
-		if err != nil {
-			wailsruntime.LogWarningf(a.ctx, "extrender fallback to sidecar: %v", err)
-		} else {
-			return &PreviewHTML{HTML: html}, nil
-		}
-	}
-
-	base := strings.TrimSuffix(entry.FilePath, filepath.Ext(entry.FilePath))
-	sidecar := base + ".preview.html"
-	body, err := os.ReadFile(sidecar)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read sidecar: %w", err)
-	}
-	inlined := inlineSidecarResources(string(body), filepath.Dir(sidecar))
-	return &PreviewHTML{HTML: inlined}, nil
-}
-
-var (
-	// Captures <img ... src="..."> and <link ... href="..."> with single or
-	// double-quoted attribute values. Used to rewrite relative resource paths
-	// inside sidecar HTML to data: URLs.
-	sidecarImgSrcRE   = regexp.MustCompile(`(?i)(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"'<>]+)(["'])`)
-	sidecarLinkHrefRE = regexp.MustCompile(`(?i)(<link\b[^>]*?\bhref\s*=\s*)(["'])([^"'<>]+)(["'])`)
-)
-
-// sidecarMimeByExt maps lowercase file extensions (without dot) to MIME types
-// used when inlining sidecar HTML resources. Kept intentionally narrow:
-// officecli sidecars should bundle their own CSS — we only support a small
-// allowlist to avoid surprises.
-var sidecarMimeByExt = map[string]string{
-	"png":  "image/png",
-	"jpg":  "image/jpeg",
-	"jpeg": "image/jpeg",
-	"gif":  "image/gif",
-	"webp": "image/webp",
-	"bmp":  "image/bmp",
-	"svg":  "image/svg+xml",
-	"css":  "text/css",
-}
-
-// inlineSidecarResources rewrites relative <img src> / <link href> attribute
-// values in html so they become self-contained data: URLs sourced from baseDir.
-// Absolute (http/https/data/protocol-relative/root-absolute) URLs are left
-// untouched. If a referenced file cannot be read or its extension is not in
-// sidecarMimeByExt, the original attribute is preserved so the iframe surfaces
-// a normal "broken image" instead of crashing the preview pipeline.
-func inlineSidecarResources(html, baseDir string) string {
-	if baseDir == "" {
-		return html
-	}
-	rewriteAttr := func(prefix, openQuote, url, closeQuote string) string {
-		original := prefix + openQuote + url + closeQuote
-		if !isRelativeResource(url) {
-			return original
-		}
-		dataURL, ok := readAsDataURL(baseDir, url)
-		if !ok {
-			return original
-		}
-		return prefix + openQuote + dataURL + closeQuote
-	}
-
-	html = sidecarImgSrcRE.ReplaceAllStringFunc(html, func(m string) string {
-		parts := sidecarImgSrcRE.FindStringSubmatch(m)
-		return rewriteAttr(parts[1], parts[2], parts[3], parts[4])
-	})
-	html = sidecarLinkHrefRE.ReplaceAllStringFunc(html, func(m string) string {
-		parts := sidecarLinkHrefRE.FindStringSubmatch(m)
-		return rewriteAttr(parts[1], parts[2], parts[3], parts[4])
-	})
-	return html
-}
-
-func isRelativeResource(url string) bool {
-	if url == "" {
-		return false
-	}
-	if strings.HasPrefix(url, "data:") || strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
-		return false
-	}
-	if strings.HasPrefix(url, "//") || strings.HasPrefix(url, "/") {
-		return false
-	}
-	if strings.HasPrefix(url, "#") {
-		return false
-	}
-	return true
-}
-
-func readAsDataURL(baseDir, relURL string) (string, bool) {
-	// Strip query/fragment before resolving on disk.
-	clean := relURL
-	if i := strings.IndexAny(clean, "?#"); i >= 0 {
-		clean = clean[:i]
-	}
-	resolved := filepath.Join(baseDir, filepath.FromSlash(clean))
-	absBase, err := filepath.Abs(baseDir)
-	if err != nil {
-		return "", false
-	}
-	absResolved, err := filepath.Abs(resolved)
-	if err != nil {
-		return "", false
-	}
-	rel, err := filepath.Rel(absBase, absResolved)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		// Refuse to traverse out of the sidecar directory.
-		return "", false
-	}
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(absResolved), "."))
-	mime, ok := sidecarMimeByExt[ext]
-	if !ok {
-		return "", false
-	}
-	data, err := os.ReadFile(absResolved)
-	if err != nil {
-		return "", false
-	}
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), true
 }
 
 // ─── Auth bindings ──────────────────────────────────────────────────────────
@@ -1993,6 +2638,66 @@ type ExportLogsInput struct {
 type ExportLogsResult struct {
 	Path     string                     `json:"path"`
 	Manifest diagnostics.BundleManifest `json:"manifest"`
+}
+
+type RendererLogInput struct {
+	Source  string         `json:"source"`
+	Event   string         `json:"event"`
+	AtMs    int            `json:"atMs,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+func (a *App) RecordRendererLog(input RendererLogInput) error {
+	source := strings.TrimSpace(input.Source)
+	event := strings.TrimSpace(input.Event)
+	if source == "" || event == "" {
+		return nil
+	}
+	if len(source) > 160 {
+		source = source[:160]
+	}
+	if len(event) > 200 {
+		event = event[:200]
+	}
+
+	details := input.Details
+	if details == nil {
+		details = map[string]any{}
+	}
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		detailsJSON = []byte(`{"marshalError":true}`)
+	}
+	if len(detailsJSON) > 65536 {
+		detailsJSON = []byte(`{"truncated":true}`)
+	}
+
+	entry := map[string]any{
+		"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+		"source":  source,
+		"event":   event,
+		"atMs":    input.AtMs,
+		"details": json.RawMessage(detailsJSON),
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("record renderer log: marshal: %w", err)
+	}
+
+	logDir := filepath.Join(a.userDataDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return fmt.Errorf("record renderer log: mkdir: %w", err)
+	}
+	logPath := filepath.Join(logDir, "renderer-"+time.Now().Format("20060102")+".log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("record renderer log: open: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		return fmt.Errorf("record renderer log: write: %w", err)
+	}
+	return nil
 }
 
 // ExportLogs assembles a diagnostics bundle (scrubbed settings, events, logs)
@@ -3333,42 +4038,6 @@ func findBundledBinaryPath(goos, exePath, cwd string, exists func(string) bool) 
 		}
 	}
 	return ""
-}
-
-func (a *App) resolveExtrenderBinary() string {
-	binaryName := "extrender"
-	if runtime.GOOS == "windows" {
-		binaryName = "extrender.exe"
-	}
-
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "..", "Resources", "extrender", binaryName)
-		if _, err := os.Stat(candidate); err == nil {
-			abs, _ := filepath.Abs(candidate)
-			return abs
-		}
-	}
-
-	if cwd, err := os.Getwd(); err == nil {
-		platformDir := resolveExtrenderPlatformDir()
-		candidate := filepath.Join(cwd, "build", "extrender", platformDir, binaryName)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
-}
-
-func resolveExtrenderPlatformDir() string {
-	switch runtime.GOOS + "/" + runtime.GOARCH {
-	case "darwin/arm64", "darwin/amd64":
-		return "mac-universal"
-	case "windows/amd64":
-		return "win-x64"
-	default:
-		return runtime.GOOS + "-" + runtime.GOARCH
-	}
 }
 
 func (a *App) resolveGenerateInput(input types.GenerateInput, s types.UserSettings) (types.GenerateInput, error) {

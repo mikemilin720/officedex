@@ -25,6 +25,13 @@ const finalReportPath = path.join(runDir, "report.json");
 const markdownReportPath = path.join(runDir, "report.md");
 const officecliBinary = process.env.OFFICECLI_DESKTOP_BINARY || path.join(repoRoot, "build", "officecli", process.platform === "win32" ? "officecli.exe" : "officecli");
 
+class ExitError extends Error {
+  constructor(status) {
+    super(`command exited with ${status}`);
+    this.status = status;
+  }
+}
+
 mkdirSync(artifactDir, { recursive: true });
 mkdirSync(logDir, { recursive: true });
 mkdirSync(playwrightOutputDir, { recursive: true });
@@ -60,6 +67,13 @@ try {
     OFFICEDEX_E2E_OUTPUT_DIR: artifactDir,
     OFFICEDEX_E2E_RUN_DIR: runDir,
   };
+  const bridgeEnv = {
+    ...baseEnv,
+    OFFICEDEX_E2E_HOST: "1",
+  };
+  if (bridgeEnv.GOROOT && !existsSync(bridgeEnv.GOROOT)) {
+    delete bridgeEnv.GOROOT;
+  }
 
   const bridge = spawnLogged("go", [
     "test",
@@ -73,7 +87,7 @@ try {
     "0",
     "-v",
   ], {
-    env: { ...baseEnv, OFFICEDEX_E2E_HOST: "1" },
+    env: bridgeEnv,
     logFile: path.join(logDir, "bridge-host.log"),
     prefix: "[real-e2e:bridge]",
   });
@@ -432,11 +446,4 @@ function timestamp() {
   const pad = (n) => String(n).padStart(2, "0");
   const millis = String(now.getMilliseconds()).padStart(3, "0");
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${millis}-${process.pid}`;
-}
-
-class ExitError extends Error {
-  constructor(status) {
-    super(`command exited with ${status}`);
-    this.status = status;
-  }
 }

@@ -1,4 +1,4 @@
-import { Alert, Button, Input, Modal, message, Select, Space, Switch, Tag } from "antd";
+import { Alert, Button, Modal, message, Select, Space, Switch, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { officecli } from "../bridge";
 import { useT } from "../i18n";
@@ -6,6 +6,7 @@ import { broadcastSettingsChanged } from "../useSettings";
 import { defaultProxySettings, isValidProxyUrl } from "../defaults";
 import { formatTestResult, ProviderForm } from "../components/ProviderForm";
 import type { DocumentType, GenerateDefaults, LlmProvider, ProviderTestResult, ProxySettings, UserSettings, WhoAmIResult } from "../../shared/types";
+import { ImeInput } from "../components/ImeInput";
 
 interface OnboardingScreenProps {
   settings: UserSettings;
@@ -281,7 +282,7 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
               ) : null}
             </Field>
             <Field label={t("onboarding.field.workspace")}>
-              <Input disabled value={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")} />
+              <ImeInput disabled value={defaultWorkspaceDir || t("settings.row.outputDir.placeholder")} />
               <span className="provider-hint">{t("onboarding.field.workspaceHint")}</span>
             </Field>
           </Space>
@@ -317,13 +318,13 @@ export function OnboardingScreen({ settings, defaultWorkspaceDir, onComplete }: 
                   <span>{t("settings.row.proxy.enableLabel")}</span>
                 </Space>
                 {proxy.enabled ? (
-                  <Input
+                  <ImeInput
                     placeholder={t("settings.row.proxy.urlPlaceholder")}
                     value={proxy.url}
-                    onChange={(event) => {
+                    onValueChange={(value) => {
                       setDraft((current) => ({
                         ...current,
-                        proxy: { enabled: true, url: event.target.value },
+                        proxy: { enabled: true, url: value },
                       }));
                       if (proxyValidationError) setProxyValidationError(undefined);
                     }}

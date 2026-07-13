@@ -21,6 +21,7 @@ const settings: UserSettings = {
   onboardingCompletedAt: "2026-05-22T00:00:00.000Z",
   proxy: null,
   imageWatermark: { showWatermark: true, preferenceSource: "system" },
+  waiting2048Enabled: false,
 };
 
 vi.mock("./notifications", () => ({

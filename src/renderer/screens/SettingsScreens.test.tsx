@@ -98,6 +98,7 @@ function makeSettings(overrides: Partial<UserSettings> = {}): UserSettings {
     onboardingCompletedAt: overrides.onboardingCompletedAt ?? "2026-05-22T00:00:00Z",
     proxy: overrides.proxy ?? DEFAULT_PROXY,
     imageWatermark: overrides.imageWatermark ?? { showWatermark: true, preferenceSource: "system" },
+    waiting2048Enabled: overrides.waiting2048Enabled ?? false,
   };
 }
 
@@ -114,6 +115,7 @@ let testProviderSpy: ReturnType<typeof vi.fn>;
 let sendDesktopNotificationSpy: ReturnType<typeof vi.fn>;
 let whoamiSpy: ReturnType<typeof vi.fn>;
 let getCreditStatusSpy: ReturnType<typeof vi.fn>;
+let getInviteInfoSpy: ReturnType<typeof vi.fn>;
 let originals: Partial<DesktopAPI>;
 
 async function cleanupAntdPortals() {
@@ -159,6 +161,7 @@ beforeEach(() => {
     paidKeyRemaining: 0,
     raw: "",
   }));
+  getInviteInfoSpy = vi.fn(async () => ({ invite_code: "invite-user" }));
   originals = {
     getSettings: officecli.getSettings,
     updateSettings: officecli.updateSettings,
@@ -168,6 +171,7 @@ beforeEach(() => {
     sendDesktopNotification: officecli.sendDesktopNotification,
     whoami: officecli.whoami,
     getCreditStatus: officecli.getCreditStatus,
+    getInviteInfo: officecli.getInviteInfo,
   };
   officecli.getSettings = getSettingsSpy as unknown as DesktopAPI["getSettings"];
   officecli.updateSettings = updateSettingsSpy as unknown as DesktopAPI["updateSettings"];
@@ -177,6 +181,7 @@ beforeEach(() => {
   officecli.sendDesktopNotification = sendDesktopNotificationSpy as unknown as DesktopAPI["sendDesktopNotification"];
   officecli.whoami = whoamiSpy as unknown as DesktopAPI["whoami"];
   officecli.getCreditStatus = getCreditStatusSpy as unknown as DesktopAPI["getCreditStatus"];
+  officecli.getInviteInfo = getInviteInfoSpy as unknown as DesktopAPI["getInviteInfo"];
 });
 
 afterEach(async () => {
@@ -319,6 +324,39 @@ describe("SettingsScreen", () => {
     expect(
       updateSettingsSpy.mock.calls.every((args) => (args[0] as Partial<UserSettings>).defaults?.enableImages === undefined),
     ).toBe(true);
+  });
+
+  it("keeps waiting 2048 disabled by default and saves opt-in from Settings", async () => {
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+
+    const toggle = await screen.findByRole("switch", { name: /waiting 2048/i });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(updateSettingsSpy).toHaveBeenCalledWith({ waiting2048Enabled: true }));
+  });
+
+  it("shows invite code only in the Subscription section and copies it", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const { SettingsScreen } = await import("./SettingsScreens");
+    render(<SettingsScreen />);
+    await waitFor(() => expect(getSettingsSpy).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByText("invite-user")).toBeNull();
+    await selectSettingsSection("Subscription");
+
+    expect(await screen.findByText("invite-user")).toBeTruthy();
+    await waitFor(() => expect(getInviteInfoSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /copy invite code/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("invite-user"));
   });
 
   it("disables the desktop notification test button when notifications are off", async () => {

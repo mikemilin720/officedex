@@ -48,7 +48,7 @@ function materializePendingContext(pending: PendingGenerate, taskId: string): Ta
 }
 
 function generationModeForDocumentType(documentType: string | undefined): GenerateInput["generationMode"] | undefined {
-  return documentType === "img" || documentType === "gif" ? undefined : "plan";
+  return documentType === "pptx" || documentType === "docx" || documentType === "xlsx" || documentType === "report" ? "plan" : undefined;
 }
 
 function normalizeGenerationMode(_value: unknown): GenerateInput["generationMode"] {
@@ -66,7 +66,25 @@ function normalizeGenerateInputForGeneration(values: GenerateInput): GenerateInp
   return next;
 }
 
+export function findModifySourceTask(tasks: DesktopTask[], documentType: string): DesktopTask | undefined {
+  const targetType = documentType.trim().toLowerCase();
+  for (let i = tasks.length - 1; i >= 0; i--) {
+    const task = tasks[i];
+    const artifact = task.artifact;
+    if (!artifact?.filePath) continue;
+    const artifactType = (artifact.documentType || task.documentType || "").toLowerCase();
+    if (artifactType === targetType) {
+      return task;
+    }
+  }
+  return undefined;
+}
+
 export function App() {
+  return <OfficeDexApp />;
+}
+
+function OfficeDexApp() {
   const [state, setState] = useState<TaskState>(() => createInitialTaskState());
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [chats, setChats] = useState<WorkspaceConversationSummary[]>([]);
@@ -79,6 +97,7 @@ export function App() {
   const [errorDetails, setErrorDetails] = useState<string>();
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [previewGrant, setPreviewGrant] = useState<PreviewGrant | null>(null);
+  const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
   const pendingGenerateRef = useRef<PendingGenerate | null>(null);
   const { settings: persistedSettings, defaultWorkspaceDir, loading: settingsLoading } = useSettings();
   const [newGenerationDraft, setNewGenerationDraft] = useState<NewGenerationDraft>(() => createNewGenerationDraft());
@@ -318,6 +337,17 @@ export function App() {
     if (!conversationId) return [];
     return getConversationTasks(state, conversationId);
   }, [state, conversationId]);
+  const activePptCanvasTaskId = useMemo(() => {
+    if (activeNav !== "dialogue") return undefined;
+    return conversationTasks.find((task) => task.documentType === "pptx" && task.vibeTree)?.id;
+  }, [activeNav, conversationTasks]);
+  const activeVibeTask = useMemo(
+    () => (activeNav === "dialogue"
+      ? conversationTasks.find((task) => task.documentType === "pptx" && task.vibeTree)
+      : undefined),
+    [activeNav, conversationTasks],
+  );
+  const vibeStage = activeVibeTask?.vibeTree?.stage;
   const tasks = useMemo(() => state.taskOrder.map((taskID) => state.tasks[taskID]).filter(Boolean), [state]);
   const conversations = useMemo(() => getConversationList(state), [state]);
   const sidebarWorkspaces = useMemo(() => {
@@ -634,7 +664,7 @@ export function App() {
       recordError("Update required before continuing", "setup");
       return;
     }
-    const parent = conversationTasks.at(-1);
+    const parent = findModifySourceTask(conversationTasks, documentType);
     const sourceFile = parent?.artifact?.filePath;
     if (!sourceFile) {
       recordError("No source document to modify", "other");
@@ -734,6 +764,8 @@ export function App() {
     }
   }, [clearError, refreshProjectLists, state.tasks]);
 
+  const [deckPanelDismissedId, setDeckPanelDismissedId] = useState<string | null>(null);
+
   const openInlinePreview = useCallback(async (artifact: Artifact) => {
     if (previewGrant) {
       await officecli.revokePreviewToken(previewGrant.token).catch(() => {});
@@ -741,7 +773,7 @@ export function App() {
     try {
       const grant = await officecli.issuePreviewToken(artifact);
       setPreviewGrant(grant);
-      officecli.setPreviewMode(true).catch(() => {});
+      setPreviewArtifact(artifact);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       message.error(`Preview unavailable: ${text}`);
@@ -753,11 +785,15 @@ export function App() {
       await officecli.revokePreviewToken(previewGrant.token).catch(() => {});
     }
     setPreviewGrant(null);
-    officecli.setPreviewMode(false).catch(() => {});
-  }, [previewGrant]);
+    setPreviewArtifact(null);
+    setDeckPanelDismissedId(activeVibeTask?.id ?? null);
+  }, [previewGrant, activeVibeTask?.id]);
+
+  // The Living Tree Cockpit already embeds a PPTist preview at the slides_ready/completed
+  // stages, so auto-opening the full-window PreviewPanel is no longer needed for vibe tasks.
 
   const sidePanel = previewGrant
-    ? <PreviewPanel grant={previewGrant} onClose={closeInlinePreview} />
+    ? <PreviewPanel grant={previewGrant} onClose={closeInlinePreview} artifact={previewArtifact} />
     : undefined;
 
   const showBanner =
@@ -800,6 +836,7 @@ export function App() {
         failed={Boolean(lastError)}
         errorKind={lastError ? errorKind : undefined}
         inspector={sidePanel}
+        autoCollapseSidebarKey={activePptCanvasTaskId}
         credit={credit}
         hasCustomProvider={persistedSettings.llmProvider !== null}
         workspaces={sidebarWorkspaces}

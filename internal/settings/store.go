@@ -174,6 +174,7 @@ type Patch struct {
 	SupportReportToken    *string                       `json:"supportReportToken,omitempty"`
 	Proxy                 *types.ProxySettings          `json:"proxy,omitempty"`
 	ImageWatermark        *types.ImageWatermarkSettings `json:"imageWatermark,omitempty"`
+	Waiting2048Enabled    *bool                         `json:"waiting2048Enabled,omitempty"`
 	// ClearLlmProvider, when true, removes the stored provider. Ignored when
 	// LlmProvider is non-nil.
 	ClearLlmProvider bool `json:"clearLlmProvider,omitempty"`
@@ -237,6 +238,9 @@ func applyPatch(base types.UserSettings, patch Patch) types.UserSettings {
 	if patch.ImageWatermark != nil {
 		out.ImageWatermark = *patch.ImageWatermark
 	}
+	if patch.Waiting2048Enabled != nil {
+		out.Waiting2048Enabled = *patch.Waiting2048Enabled
+	}
 	return out
 }
 
@@ -254,6 +258,7 @@ type rawSettings struct {
 	SupportReportToken    *string                    `json:"supportReportToken,omitempty"`
 	Proxy                 *rawProxySettings          `json:"proxy,omitempty"`
 	ImageWatermark        *rawImageWatermarkSettings `json:"imageWatermark,omitempty"`
+	Waiting2048Enabled    *bool                      `json:"waiting2048Enabled,omitempty"`
 }
 
 type rawGenerateDefaults struct {
@@ -314,6 +319,9 @@ func sanitizeRaw(raw rawSettings) types.UserSettings {
 	if raw.ImageWatermark != nil {
 		out.ImageWatermark = sanitizeRawImageWatermark(raw.ImageWatermark)
 	}
+	if raw.Waiting2048Enabled != nil {
+		out.Waiting2048Enabled = *raw.Waiting2048Enabled
+	}
 	return out
 }
 
@@ -343,6 +351,7 @@ func sanitizeCanonical(s types.UserSettings) types.UserSettings {
 	out.SupportReportToken = trimNullable(s.SupportReportToken)
 	out.Proxy = sanitizeCanonicalProxy(s.Proxy)
 	out.ImageWatermark = sanitizeCanonicalImageWatermark(s.ImageWatermark)
+	out.Waiting2048Enabled = s.Waiting2048Enabled
 	return out
 }
 
