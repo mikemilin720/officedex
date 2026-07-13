@@ -1,29 +1,28 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { chmodSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 
-const scriptPath = new URL("./verify-wails-app.mjs", import.meta.url).pathname;
+const scriptPath = path.join(process.cwd(), "scripts", "verify-wails-app.mjs");
 
 describe("verify-wails-app", () => {
   it("fails when CFBundleExecutable is missing from Contents/MacOS", async () => {
     const app = await createAppFixture({ withExecutable: false });
     const result = spawnSync("node", [scriptPath, app], { encoding: "utf8" });
 
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /executable is missing/i);
-    assert.match(result.stderr, /Contents\/MacOS\/officedex/);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/executable is missing/i);
+    expect(result.stderr).toMatch(/Contents\/MacOS\/officedex/);
   });
 
   it("passes when CFBundleExecutable exists and is executable", async () => {
     const app = await createAppFixture({ withExecutable: true });
     const result = spawnSync("node", [scriptPath, app], { encoding: "utf8" });
 
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /verified executable/i);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/verified executable/i);
   });
 });
 
