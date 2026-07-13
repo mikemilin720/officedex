@@ -5,6 +5,8 @@ package demoflow
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +26,24 @@ type demoImplementation struct {
 }
 
 type demoTask struct {
-	ID         string
-	Prompt     string
-	QuestionID string
-	Done       bool
+	ID              string
+	Prompt          string
+	QuestionID      string
+	ConfirmationIdx int
+	Done            bool
+	LastRaw         []byte
+}
+
+var demoQuestions = []struct {
+	ID       string
+	Question string
+	StageID  string
+	Label    string
+}{
+	{"demo-confirm-idea", "Confirm the idea and story direction", "idea", "Idea"},
+	{"demo-confirm-story", "Confirm the story beats", "story", "Story Beats"},
+	{"demo-confirm-chapters", "Confirm the chapter structure", "chapters", "Chapters"},
+	{"demo-confirm-outline", "Confirm the per-slide outline", "outline", "Slide Outlines"},
 }
 
 func newImplementation(options Options) implementation {
@@ -77,8 +93,41 @@ func (d *demoImplementation) TryGenerate(ctx context.Context, input types.Genera
 	return GenerateResult{TaskID: taskID, SessionID: taskID, Status: "running"}, true, nil
 }
 
-func (d *demoImplementation) TryRespond(context.Context, RespondInput) ([]byte, bool, error) {
-	return nil, false, nil
+func (d *demoImplementation) TryRespond(ctx context.Context, input RespondInput) ([]byte, bool, error) {
+	d.mu.Lock()
+	task, exists := d.tasks[input.TaskID]
+	if !exists {
+		d.mu.Unlock()
+		return nil, true, errors.New("Demo Mode: unknown demo task")
+	}
+	if task.Done {
+		raw := append([]byte(nil), task.LastRaw...)
+		d.mu.Unlock()
+		return raw, true, nil
+	}
+	expected := task.QuestionID
+	if input.QuestionID != expected || input.OptionID != "confirm" {
+		d.mu.Unlock()
+		return nil, true, errors.New("Demo Mode: confirmation does not match the current prepared step")
+	}
+	idx := task.ConfirmationIdx
+	task.ConfirmationIdx++
+	task.QuestionID = ""
+	raw := []byte(`{"ok":true}`)
+	task.LastRaw = raw
+	d.mu.Unlock()
+
+	if err := d.emit(ctx, input.TaskID, "task.answers", map[string]any{
+		"answers": []map[string]any{{
+			"questionId": input.QuestionID,
+			"answer":     "Approve",
+			"optionId":   "confirm",
+		}},
+	}); err != nil {
+		return nil, true, err
+	}
+	go d.advanceAfterConfirmation(context.Background(), input.TaskID, idx)
+	return raw, true, nil
 }
 
 func (d *demoImplementation) TryModifyPptistDeck(context.Context, ModifyPptistDeckInput) (ModifyPptistDeckResult, bool, error) {
@@ -88,18 +137,35 @@ func (d *demoImplementation) TryModifyPptistDeck(context.Context, ModifyPptistDe
 func (d *demoImplementation) Shutdown() {}
 
 func (d *demoImplementation) advanceToQuestion(ctx context.Context, taskID string) {
-	<-d.delay(ctx)
-	_ = d.emit(ctx, taskID, "task.question", map[string]any{
-		"id":       "demo-confirm-idea",
-		"question": "Confirm the idea and story direction",
-		"options": []map[string]any{
-			{"id": "confirm", "label": "Approve"},
-		},
-	})
+	d.emitQuestion(ctx, taskID, 0)
+}
 
+func (d *demoImplementation) advanceAfterConfirmation(ctx context.Context, taskID string, answeredIdx int) {
+	<-d.delay(ctx)
+	_ = d.emit(ctx, taskID, "task.vibe_tree", demoTreePayload(answeredIdx))
+	next := answeredIdx + 1
+	if next < len(demoQuestions) {
+		d.emitQuestion(ctx, taskID, next)
+		return
+	}
+	<-d.delay(ctx)
+	_ = d.emit(ctx, taskID, "task.vibe_slide", map[string]any{"index": 0, "slide": demoSlides[0]})
+	_ = d.completeTask(ctx, taskID)
+}
+
+func (d *demoImplementation) emitQuestion(ctx context.Context, taskID string, idx int) {
+	<-d.delay(ctx)
+	q := demoQuestions[idx]
+	_ = d.emit(ctx, taskID, "task.question", map[string]any{
+		"id":          q.ID,
+		"question":    q.Question,
+		"stage_id":    q.StageID,
+		"stage_label": q.Label,
+		"options":     []map[string]any{{"id": "confirm", "label": "Approve"}},
+	})
 	d.mu.Lock()
 	if task := d.tasks[taskID]; task != nil {
-		task.QuestionID = "demo-confirm-idea"
+		task.QuestionID = q.ID
 	}
 	d.mu.Unlock()
 }
@@ -112,6 +178,49 @@ func (d *demoImplementation) emit(ctx context.Context, taskID, typ string, paylo
 		TS:      time.Now().UTC().Format(time.RFC3339Nano),
 		Payload: payload,
 	})
+}
+
+func (d *demoImplementation) completeTask(ctx context.Context, taskID string) error {
+	path, err := d.writeDemoPptx(taskID)
+	if err != nil {
+		_ = d.emit(ctx, taskID, "task.failed", map[string]any{"message": "Demo Mode: failed to write deterministic PPTX: " + err.Error()})
+		return err
+	}
+	artifact := types.Artifact{
+		TaskID:       taskID,
+		FilePath:     path,
+		FileName:     filepath.Base(path),
+		DocumentType: "pptx",
+	}
+	if err := d.recorder.AllowArtifact(artifact); err != nil {
+		return err
+	}
+	if err := d.recorder.RecordArtifact(artifact); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	if task := d.tasks[taskID]; task != nil {
+		task.Done = true
+	}
+	d.mu.Unlock()
+	return d.emit(ctx, taskID, "task.completed", map[string]any{
+		"stage_id":    "review",
+		"stage_label": "Review",
+		"result": map[string]any{
+			"file_path":     path,
+			"file_name":     filepath.Base(path),
+			"document_type": "pptx",
+		},
+	})
+}
+
+func (d *demoImplementation) writeDemoPptx(taskID string) (string, error) {
+	dir := filepath.Join(d.recorder.UserDataDir(), "demo-flow", taskID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "launch-strategy-demo.pptx")
+	return path, writePptx(path)
 }
 
 func MagicPromptForTests() string { return magicPrompt }

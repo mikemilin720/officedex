@@ -1,3 +1,5 @@
+//go:build !officedex_demo
+
 package demoflow
 
 import (
