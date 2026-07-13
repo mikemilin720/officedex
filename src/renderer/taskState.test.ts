@@ -496,4 +496,22 @@ describe("taskState", () => {
     expect(state.tasks["task-2"].conversationId).toBe("task-1");
     expect(getConversationList(state)).toHaveLength(1);
   });
+
+  it("replays demo staged PPTX events into a completed PPTist-reviewable task", () => {
+    let state = createInitialTaskState();
+    const taskId = "demo-task";
+    const events = [
+      { task_id: taskId, type: "task.started", payload: { document_type: "pptx", topic: "Launch strategy", stage_id: "idea", stage_label: "Idea" } },
+      { task_id: taskId, type: "task.question", payload: { id: "demo-confirm-idea", question: "Confirm the idea", options: [{ id: "confirm", label: "Approve" }] } },
+      { task_id: taskId, type: "task.vibe_tree", payload: { stage: "outline", tree: { id: "demo-tree", rootId: "root", title: "Launch Strategy", nodes: [{ id: "root", title: "Launch Strategy", summary: "Demo", kind: "idea" }] } } },
+      { task_id: taskId, type: "task.vibe_slide", payload: { index: 5, slide: { id: "demo-slide-06", elements: [{ id: "title", type: "text", left: 0, top: 0, width: 100, height: 40, content: "<p>90-Day Launch Timeline</p>" }] } } },
+      { task_id: taskId, type: "task.completed", payload: { result: { file_path: "/tmp/launch-strategy-demo.pptx", file_name: "launch-strategy-demo.pptx", document_type: "pptx" } } },
+    ] as const;
+    for (const event of events) state = applyTaskEvent(state, event);
+    const task = state.tasks[taskId];
+    expect(task.status).toBe("completed");
+    expect(task.documentType).toBe("pptx");
+    expect(task.artifact?.fileName).toBe("launch-strategy-demo.pptx");
+    expect(task.vibeSlides?.[5]?.id).toBe("demo-slide-06");
+  });
 });
