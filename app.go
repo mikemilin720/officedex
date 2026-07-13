@@ -3848,12 +3848,8 @@ func (a *App) ensureBridgeForCwd(cwd string) (*bridge.Client, error) {
 				}
 			}
 		}
-		completedArtifact := (*types.Artifact)(nil)
-		if event.Type == "task.completed" {
-			completedArtifact = artifactFromCompletedEvent(event)
-		}
-		if a.localStore != nil {
-			_ = a.localStore.RecordEvent(event)
+		if err := a.RecordAndEmitTaskEvent(ctx, event); err != nil {
+			wailsruntime.LogWarningf(ctx, "record task event: %v", err)
 		}
 		if event.Type == "task.completed" || event.Type == "task.failed" {
 			if a.localStore != nil && event.Payload != nil {
@@ -3866,17 +3862,6 @@ func (a *App) ensureBridgeForCwd(cwd string) (*bridge.Client, error) {
 				}
 			}
 		}
-		if event.Type == "task.completed" {
-			if completedArtifact != nil {
-				if err := a.previewReg.AllowArtifact(*completedArtifact); err != nil {
-					wailsruntime.LogWarningf(ctx, "preview register: %v", err)
-				}
-				if a.localStore != nil {
-					_ = a.localStore.RecordArtifact(*completedArtifact)
-				}
-			}
-		}
-		emit(ctx, bridgeEventChannel, event)
 	})
 
 	if err := client.Start(a.ctx); err != nil {
@@ -4261,6 +4246,50 @@ func (a *App) recordTaskWorkspaceContext(taskID, workspaceID, conversationID, pa
 		ConversationID: conversationID,
 		ParentTaskID:   parentTaskID,
 	})
+}
+
+func (a *App) RecordAndEmitTaskEvent(ctx context.Context, event types.BridgeEvent) error {
+	completedArtifact := (*types.Artifact)(nil)
+	if event.Type == "task.completed" {
+		completedArtifact = artifactFromCompletedEvent(event)
+	}
+	if a.localStore != nil {
+		if err := a.localStore.RecordEvent(event); err != nil {
+			return err
+		}
+	}
+	if event.Type == "task.completed" && completedArtifact != nil {
+		if err := a.AllowArtifact(*completedArtifact); err != nil {
+			return err
+		}
+		if err := a.RecordArtifact(*completedArtifact); err != nil {
+			return err
+		}
+	}
+	emit(ctx, bridgeEventChannel, event)
+	return nil
+}
+
+func (a *App) RecordTaskWorkspaceContext(taskID, workspaceID, conversationID, parentTaskID, title string, noProject bool) error {
+	return a.recordTaskWorkspaceContext(taskID, workspaceID, conversationID, parentTaskID, title, noProject)
+}
+
+func (a *App) AllowArtifact(artifact types.Artifact) error {
+	if a.previewReg == nil {
+		return nil
+	}
+	return a.previewReg.AllowArtifact(artifact)
+}
+
+func (a *App) RecordArtifact(artifact types.Artifact) error {
+	if a.localStore == nil {
+		return nil
+	}
+	return a.localStore.RecordArtifact(artifact)
+}
+
+func (a *App) UserDataDir() string {
+	return a.userDataDir
 }
 
 func (a *App) refreshPreviewTrustedRoots(s types.UserSettings) error {
