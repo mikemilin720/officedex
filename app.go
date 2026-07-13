@@ -34,6 +34,7 @@ import (
 	"officedex/internal/appupdate"
 	"officedex/internal/binresolver"
 	"officedex/internal/bridge"
+	"officedex/internal/demoflow"
 	"officedex/internal/diagnostics"
 	"officedex/internal/localstore"
 	"officedex/internal/login"
@@ -106,6 +107,7 @@ type App struct {
 	settingsStore *settings.Store
 	localStore    *localstore.Store
 	previewReg    *preview.Registry
+	demoFlow      *demoflow.Engine
 
 	mu                     sync.Mutex
 	cachedSettings         types.UserSettings
@@ -190,6 +192,7 @@ func NewApp() (*App, error) {
 		cachedSettings: cached,
 		proxyPool:      proxyPool,
 	}
+	app.demoFlow = demoflow.New(demoflow.Options{Recorder: app})
 
 	manifestURL := os.Getenv("OFFICEDEX_UPDATE_MANIFEST_URL")
 	if strings.TrimSpace(manifestURL) == "" {
@@ -249,10 +252,14 @@ func (a *App) shutdown(ctx context.Context) {
 	a.bridgeClient = nil
 	loginUnsub := a.loginUnsub
 	a.loginUnsub = nil
+	demoFlow := a.demoFlow
 	a.mu.Unlock()
 
 	if bridgeClient != nil {
 		bridgeClient.Stop()
+	}
+	if demoFlow != nil {
+		demoFlow.Shutdown()
 	}
 	if loginUnsub != nil {
 		loginUnsub()
@@ -393,6 +400,14 @@ func (a *App) Generate(input types.GenerateInput) (GenerateResult, error) {
 		return GenerateResult{}, fmt.Errorf("load settings: %w", err)
 	}
 	input = normalizeGenerateInputText(input)
+	if a.demoFlow != nil {
+		if result, ok, err := a.demoFlow.TryGenerate(a.ctx, input); ok || err != nil {
+			if err != nil {
+				return GenerateResult{}, err
+			}
+			return GenerateResult{TaskID: result.TaskID, SessionID: result.SessionID, Status: result.Status}, nil
+		}
+	}
 	if input.DocumentType == types.DocIMG {
 		var watermark *types.ImageWatermarkGenerateOptions
 		settings, watermark = a.refreshImageWatermarkSettingsForGenerate(settings)
@@ -547,6 +562,17 @@ func (a *App) Respond(input RespondInput) ([]byte, error) {
 	if err := a.recordRespondAnswers(input); err != nil {
 		return nil, err
 	}
+	if a.demoFlow != nil {
+		if raw, ok, err := a.demoFlow.TryRespond(a.ctx, demoflow.RespondInput{
+			TaskID:     input.TaskID,
+			QuestionID: input.QuestionID,
+			OptionID:   input.OptionID,
+			Answer:     input.Answer,
+			Answers:    demoflowRespondAnswers(input.Answers),
+		}); ok || err != nil {
+			return raw, err
+		}
+	}
 	// Route to the live replacement task if this id was recovered earlier, so
 	// the answer reaches the task at its real position instead of re-triggering
 	// a from-scratch recovery.
@@ -574,6 +600,20 @@ func (a *App) Respond(input RespondInput) ([]byte, error) {
 		return a.recoverStaleInteractiveRespond(input, err)
 	}
 	return raw, err
+}
+
+func demoflowRespondAnswers(input []RespondAnswerInput) []demoflow.RespondAnswerInput {
+	out := make([]demoflow.RespondAnswerInput, 0, len(input))
+	for _, item := range input {
+		out = append(out, demoflow.RespondAnswerInput{
+			QuestionGroupID: item.QuestionGroupID,
+			QuestionID:      item.QuestionID,
+			OptionID:        item.OptionID,
+			Answer:          item.Answer,
+			QuestionIndex:   item.QuestionIndex,
+		})
+	}
+	return out
 }
 
 func (a *App) recordRespondAnswers(input RespondInput) error {
