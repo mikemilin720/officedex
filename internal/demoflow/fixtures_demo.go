@@ -31,6 +31,8 @@ var demoSlides = []map[string]any{
 	demoBulletsSlide("demo-slide-09", "Next Steps", []string{"Record launch video", "Ship demo build", "Prepare website and X assets", "Open download funnel"}),
 }
 
+var demoTimelineVisualSlide = demoTimelineSlide("demo-slide-06", true)
+
 func demoTitleSlide(id, title, subtitle string) map[string]any {
 	return map[string]any{
 		"id":         id,

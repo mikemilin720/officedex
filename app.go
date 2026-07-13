@@ -1301,6 +1301,36 @@ func (a *App) ModifyPptistDeck(input ModifyPptistDeckInput) (ModifyPptistDeckRes
 	if len(input.Snapshot.Slides) == 0 {
 		return ModifyPptistDeckResult{}, errors.New("modify pptist: snapshot has no slides")
 	}
+	if a.demoFlow != nil {
+		if result, ok, err := a.demoFlow.TryModifyPptistDeck(a.ctx, demoflow.ModifyPptistDeckInput{
+			Prompt:             input.Prompt,
+			Snapshot:           demoflowPptistSnapshot(input.Snapshot),
+			SelectedSlideID:    input.SelectedSlideID,
+			SelectedElementIDs: append([]string(nil), input.SelectedElementIDs...),
+		}); ok || err != nil {
+			if err != nil {
+				return ModifyPptistDeckResult{}, err
+			}
+			var confirmation *PptistEditConfirmation
+			if result.Confirmation != nil {
+				confirmation = &PptistEditConfirmation{
+					Title:     result.Confirmation.Title,
+					Message:   result.Confirmation.Message,
+					Target:    result.Confirmation.Target,
+					Changes:   append([]string(nil), result.Confirmation.Changes...),
+					Preserved: append([]string(nil), result.Confirmation.Preserved...),
+				}
+			}
+			return ModifyPptistDeckResult{
+				Summary:              result.Summary,
+				Ops:                  result.Ops,
+				Confidence:           result.Confidence,
+				RequiresConfirmation: result.RequiresConfirmation,
+				Confirmation:         confirmation,
+				Warnings:             append([]string(nil), result.Warnings...),
+			}, nil
+		}
+	}
 	if result, ok, err := planDeterministicPptistTitleEdit(input); ok || err != nil {
 		if err != nil {
 			return ModifyPptistDeckResult{}, err
@@ -1369,6 +1399,29 @@ func (a *App) ModifyPptistDeck(input ModifyPptistDeckInput) (ModifyPptistDeckRes
 		Confirmation:         pptistEditConfirmationFromBridge(result.Confirmation),
 		Warnings:             append([]string(nil), result.Warnings...),
 	}, nil
+}
+
+func demoflowPptistSnapshot(input PptistDeckSnapshot) demoflow.PptistDeckSnapshot {
+	slides := make([]demoflow.PptistSlide, 0, len(input.Slides))
+	for _, slide := range input.Slides {
+		slides = append(slides, demoflow.PptistSlide{
+			ID:         slide.ID,
+			Elements:   append([]map[string]any(nil), slide.Elements...),
+			Background: cloneMapAny(slide.Background),
+		})
+	}
+	return demoflow.PptistDeckSnapshot{Slides: slides, SlideIndex: input.SlideIndex}
+}
+
+func cloneMapAny(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
 }
 
 func isPptistNoEditOpsError(err error) bool {

@@ -130,8 +130,48 @@ func (d *demoImplementation) TryRespond(ctx context.Context, input RespondInput)
 	return raw, true, nil
 }
 
-func (d *demoImplementation) TryModifyPptistDeck(context.Context, ModifyPptistDeckInput) (ModifyPptistDeckResult, bool, error) {
-	return ModifyPptistDeckResult{}, false, nil
+func (d *demoImplementation) TryModifyPptistDeck(_ context.Context, input ModifyPptistDeckInput) (ModifyPptistDeckResult, bool, error) {
+	if strings.TrimSpace(input.Prompt) != timelineEditPrompt {
+		return ModifyPptistDeckResult{
+			Summary:              "Demo mode supports the prepared timeline edit.",
+			Ops:                  nil,
+			Confidence:           "high",
+			RequiresConfirmation: false,
+			Warnings:             []string{"Demo mode supports one prepared edit."},
+		}, true, nil
+	}
+	if len(input.Snapshot.Slides) < 6 {
+		return ModifyPptistDeckResult{}, true, errors.New("Demo Mode: prepared timeline edit requires slide 6")
+	}
+	targetIndex := input.Snapshot.SlideIndex
+	if input.SelectedSlideID != "" {
+		for i, slide := range input.Snapshot.Slides {
+			if slide.ID == input.SelectedSlideID {
+				targetIndex = i
+				break
+			}
+		}
+	}
+	if targetIndex != 5 {
+		return ModifyPptistDeckResult{}, true, errors.New("Demo Mode: prepared timeline edit only supports slide 6")
+	}
+	return ModifyPptistDeckResult{
+		Summary:              "Prepared a more visual launch timeline.",
+		Confidence:           "high",
+		RequiresConfirmation: true,
+		Ops: []map[string]any{{
+			"type":  "slide:replace",
+			"index": 5,
+			"slide": demoTimelineVisualSlide,
+		}},
+		Confirmation: &PptistEditConfirmation{
+			Title:     "Apply prepared timeline edit?",
+			Message:   "Demo Mode prepared the approved visual timeline replacement for slide 6.",
+			Target:    "Slide 6",
+			Changes:   []string{"Replace the text-heavy timeline with a visual 90-day timeline."},
+			Preserved: []string{"Deck topic", "slide count", "paper-and-ink visual system"},
+		},
+	}, true, nil
 }
 
 func (d *demoImplementation) Shutdown() {}

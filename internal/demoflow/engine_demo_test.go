@@ -157,6 +157,42 @@ func TestDemoFlowCompletesWithNineSlidePptxArtifact(t *testing.T) {
 	}
 }
 
+func TestDemoTimelineEditRequiresExactPromptAndSlideSix(t *testing.T) {
+	engine := New(Options{Recorder: newMemoryRecorder(t)})
+	snapshot := PptistDeckSnapshot{
+		SlideIndex: 5,
+		Slides: []PptistSlide{
+			{ID: "s1"}, {ID: "s2"}, {ID: "s3"}, {ID: "s4"}, {ID: "s5"}, {ID: "demo-slide-06"}, {ID: "s7"}, {ID: "s8"}, {ID: "s9"},
+		},
+	}
+	result, ok, err := engine.TryModifyPptistDeck(context.Background(), ModifyPptistDeckInput{
+		Prompt:   timelineEditPrompt,
+		Snapshot: snapshot,
+	})
+	if err != nil || !ok {
+		t.Fatalf("TryModifyPptistDeck ok=%v err=%v", ok, err)
+	}
+	if !result.RequiresConfirmation || len(result.Ops) != 1 || result.Ops[0]["type"] != "slide:replace" {
+		t.Fatalf("result = %#v, want confirmation slide:replace", result)
+	}
+	if result.Ops[0]["index"] != 5 {
+		t.Fatalf("op index = %#v, want 5", result.Ops[0]["index"])
+	}
+
+	wrongPrompt, ok, err := engine.TryModifyPptistDeck(context.Background(), ModifyPptistDeckInput{Prompt: "Make the timeline more visual.", Snapshot: snapshot})
+	if err != nil || !ok {
+		t.Fatalf("wrong prompt ok=%v err=%v", ok, err)
+	}
+	if wrongPrompt.Summary != "Demo mode supports the prepared timeline edit." {
+		t.Fatalf("wrong prompt summary = %q", wrongPrompt.Summary)
+	}
+
+	snapshot.SlideIndex = 4
+	if _, ok, err := engine.TryModifyPptistDeck(context.Background(), ModifyPptistDeckInput{Prompt: timelineEditPrompt, Snapshot: snapshot}); !ok || err == nil || !strings.Contains(err.Error(), "slide 6") {
+		t.Fatalf("wrong slide ok=%v err=%v, want slide 6 error", ok, err)
+	}
+}
+
 type memoryRecorder struct {
 	t      *testing.T
 	mu     sync.Mutex

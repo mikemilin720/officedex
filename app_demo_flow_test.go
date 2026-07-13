@@ -55,6 +55,25 @@ func TestDemoGenerateBypassesProviderValidation(t *testing.T) {
 	}
 }
 
+func TestDemoModifyPptistDeckRoutesPreparedTimelineEdit(t *testing.T) {
+	app := newDemoTestApp(t)
+	result, err := app.ModifyPptistDeck(ModifyPptistDeckInput{
+		Prompt: "Make this launch timeline more visual.",
+		Snapshot: PptistDeckSnapshot{
+			SlideIndex: 5,
+			Slides: []PptistSlide{
+				{ID: "s1"}, {ID: "s2"}, {ID: "s3"}, {ID: "s4"}, {ID: "s5"}, {ID: "demo-slide-06"}, {ID: "s7"}, {ID: "s8"}, {ID: "s9"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ModifyPptistDeck returned error: %v", err)
+	}
+	if !result.RequiresConfirmation || len(result.Ops) != 1 || result.Ops[0]["type"] != "slide:replace" {
+		t.Fatalf("result = %#v, want confirmation slide:replace", result)
+	}
+}
+
 func newDemoTestApp(t *testing.T) *App {
 	t.Helper()
 	dir := t.TempDir()
