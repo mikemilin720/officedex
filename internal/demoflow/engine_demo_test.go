@@ -142,8 +142,12 @@ func TestDemoFlowCompletesWithNineSlidePptxArtifact(t *testing.T) {
 	}
 	defer reader.Close()
 	names := map[string]bool{}
+	slideCount := 0
 	for _, file := range reader.File {
 		names[file.Name] = true
+		if strings.HasPrefix(file.Name, "ppt/slides/slide") && strings.HasSuffix(file.Name, ".xml") {
+			slideCount++
+		}
 	}
 	for _, name := range []string{"[Content_Types].xml", "ppt/presentation.xml", "ppt/slides/slide6.xml"} {
 		if !names[name] {
@@ -159,6 +163,9 @@ func TestDemoFlowCompletesWithNineSlidePptxArtifact(t *testing.T) {
 	coreXML := readZipFile(t, &reader.Reader, "docProps/core.xml")
 	if !strings.Contains(appXML, "officecli PPTX Generator") || !strings.Contains(coreXML, "OfficeCLI") {
 		t.Fatalf("demo artifact is not marked as an officecli-generated PPTX")
+	}
+	if slideCount != 9 || !strings.Contains(appXML, "<Slides>9</Slides>") {
+		t.Fatalf("demo artifact slide count = %d, app.xml = %q; want exactly 9 officecli slides", slideCount, appXML)
 	}
 	if len(demoSlides) != 9 {
 		t.Fatalf("len(demoSlides) = %d, want 9", len(demoSlides))
