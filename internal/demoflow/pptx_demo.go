@@ -8,8 +8,8 @@ import (
 )
 
 //go:embed testdata/launch-strategy-demo.officecli.pptx
-var officecliGeneratedDemoPptx []byte
+var polishedDemoPptx []byte
 
 func writePptx(path string) error {
-	return os.WriteFile(path, officecliGeneratedDemoPptx, 0o644)
+	return os.WriteFile(path, polishedDemoPptx, 0o644)
 }

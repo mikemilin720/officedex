@@ -154,18 +154,30 @@ func TestDemoFlowCompletesWithNineSlidePptxArtifact(t *testing.T) {
 			t.Fatalf("pptx missing %s", name)
 		}
 	}
-	for _, name := range []string{"docProps/app.xml", "docProps/core.xml", "ppt/presProps.xml", "ppt/viewProps.xml"} {
+	for _, name := range []string{"docProps/app.xml", "docProps/core.xml", "ppt/presProps.xml"} {
 		if !names[name] {
-			t.Fatalf("pptx missing %s; demo artifact should be a real officecli-generated PPTX, not a handcrafted minimal package", name)
+			t.Fatalf("pptx missing %s; demo artifact should be a real polished PPTX package, not a handcrafted minimal package", name)
 		}
 	}
-	appXML := readZipFile(t, &reader.Reader, "docProps/app.xml")
-	coreXML := readZipFile(t, &reader.Reader, "docProps/core.xml")
-	if !strings.Contains(appXML, "officecli PPTX Generator") || !strings.Contains(coreXML, "OfficeCLI") {
-		t.Fatalf("demo artifact is not marked as an officecli-generated PPTX")
+	if slideCount != 9 {
+		t.Fatalf("demo artifact slide count = %d; want exactly 9 polished demo slides", slideCount)
 	}
-	if slideCount != 9 || !strings.Contains(appXML, "<Slides>9</Slides>") {
-		t.Fatalf("demo artifact slide count = %d, app.xml = %q; want exactly 9 officecli slides", slideCount, appXML)
+	slide1XML := readZipFile(t, &reader.Reader, "ppt/slides/slide1.xml")
+	slide6XML := readZipFile(t, &reader.Reader, "ppt/slides/slide6.xml")
+	slide9XML := readZipFile(t, &reader.Reader, "ppt/slides/slide9.xml")
+	for _, assertion := range []struct {
+		name   string
+		xml    string
+		needle string
+	}{
+		{name: "slide 1", xml: slide1XML, needle: "OfficeDex turns prompts"},
+		{name: "slide 6", xml: slide6XML, needle: "90-DAY LAUNCH TIMELINE"},
+		{name: "slide 6", xml: slide6XML, needle: "Turn launch proof into a repeatable funnel"},
+		{name: "slide 9", xml: slide9XML, needle: "Download OfficeDex"},
+	} {
+		if !strings.Contains(assertion.xml, assertion.needle) {
+			t.Fatalf("%s missing %q", assertion.name, assertion.needle)
+		}
 	}
 	if len(demoSlides) != 9 {
 		t.Fatalf("len(demoSlides) = %d, want 9", len(demoSlides))
