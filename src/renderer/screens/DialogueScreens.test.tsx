@@ -1738,6 +1738,10 @@ describe("DialogueScreen state machine", () => {
     expect(slideCard.querySelector(".living-tree-pptx-placeholder-mask")).toBeTruthy();
     expect(slideCard.querySelector(".living-tree-slide-preview-iframe")).toBeNull();
     expect(within(slideCard).queryByText("Page 1")).toBeTruthy();
+    expect(within(slideCard).queryByText("Preview thumbnail unavailable")).toBeTruthy();
+    expect(within(slideCard).queryByText("Final PPTX output is the source of truth")).toBeTruthy();
+    expect(within(slideCard).queryByText("暂无缩略图预览")).toBeNull();
+    expect(within(slideCard).queryByText("以实际生成的 PPTX 为准")).toBeNull();
     expect(within(slideCard).queryByText("Rebuilding the internal knowledge base: from tool upgrade to organizational collaboration upgrade")).toBeTruthy();
     expect(within(slideCard).queryByText("Establish the reporting thesis: the essence of rebuilding the knowledge base is reducing collaboration friction.")).toBeTruthy();
     expect(within(slideCard).queryByText("Clarify that today's discussion is not about switching storage tools")).toBeTruthy();

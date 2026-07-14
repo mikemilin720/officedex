@@ -5,6 +5,7 @@ package demoflow
 import (
 	"archive/zip"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -148,6 +149,16 @@ func TestDemoFlowCompletesWithNineSlidePptxArtifact(t *testing.T) {
 		if !names[name] {
 			t.Fatalf("pptx missing %s", name)
 		}
+	}
+	for _, name := range []string{"docProps/app.xml", "docProps/core.xml", "ppt/presProps.xml", "ppt/viewProps.xml"} {
+		if !names[name] {
+			t.Fatalf("pptx missing %s; demo artifact should be a real officecli-generated PPTX, not a handcrafted minimal package", name)
+		}
+	}
+	appXML := readZipFile(t, &reader.Reader, "docProps/app.xml")
+	coreXML := readZipFile(t, &reader.Reader, "docProps/core.xml")
+	if !strings.Contains(appXML, "officecli PPTX Generator") || !strings.Contains(coreXML, "OfficeCLI") {
+		t.Fatalf("demo artifact is not marked as an officecli-generated PPTX")
 	}
 	if len(demoSlides) != 9 {
 		t.Fatalf("len(demoSlides) = %d, want 9", len(demoSlides))
@@ -298,6 +309,27 @@ func assertContainsInOrder(t *testing.T, got []string, want []string) {
 	if pos != len(want) {
 		t.Fatalf("events %v did not contain %v in order", got, want)
 	}
+}
+
+func readZipFile(t *testing.T, reader *zip.Reader, name string) string {
+	t.Helper()
+	for _, file := range reader.File {
+		if file.Name != name {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", name, err)
+		}
+		defer rc.Close()
+		body, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return string(body)
+	}
+	t.Fatalf("zip missing %s", name)
+	return ""
 }
 
 func slideTitle(slide map[string]any) string {

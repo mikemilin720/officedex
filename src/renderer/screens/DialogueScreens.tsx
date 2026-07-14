@@ -3582,8 +3582,8 @@ function VibeTreeFlowNode({ data, selected }: NodeProps<FlowNode<VibeCanvasData>
               </span>
             </div>
             <div className="living-tree-pptx-placeholder-copy">
-              <strong>暂无缩略图预览</strong>
-              <span>以实际生成的 PPTX 为准</span>
+              <strong>Preview thumbnail unavailable</strong>
+              <span>Final PPTX output is the source of truth</span>
             </div>
           </div>
         </div>
