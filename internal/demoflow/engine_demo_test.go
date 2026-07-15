@@ -332,6 +332,74 @@ func TestDemoTimelineEditRequiresExactPromptAndSlideSix(t *testing.T) {
 	}
 }
 
+func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
+	elements := demoTimelineVisualSlide["elements"].([]map[string]any)
+	shapeCount := 0
+	longPhaseText := ""
+	visualIDs := map[string]bool{}
+	for _, element := range elements {
+		id, _ := element["id"].(string)
+		visualIDs[id] = true
+		if element["type"] == "shape" {
+			shapeCount++
+		}
+		if id == "phase-card-1" || id == "phase-card-2" || id == "phase-card-3" {
+			if text, ok := element["text"].(map[string]any); ok {
+				if content, _ := text["content"].(string); len(content) > len(longPhaseText) {
+					longPhaseText = content
+				}
+			}
+		}
+	}
+	if shapeCount < 10 {
+		t.Fatalf("visual timeline shape count = %d, want at least 10 cards, markers, and axis shapes", shapeCount)
+	}
+	for _, id := range []string{
+		"timeline-axis",
+		"phase-card-1",
+		"phase-card-2",
+		"phase-card-3",
+		"milestone-dot-1",
+		"milestone-dot-2",
+		"milestone-dot-3",
+		"launch-marker",
+	} {
+		if !visualIDs[id] {
+			t.Fatalf("visual timeline missing element %q", id)
+		}
+	}
+	if longPhaseText != "" {
+		t.Fatalf("visual timeline phase cards should use separate short labels, found nested text %q", longPhaseText)
+	}
+	for _, id := range []string{
+		"phase-icon-1",
+		"phase-icon-2",
+		"phase-icon-3",
+		"phase-metric-1",
+		"phase-metric-2",
+		"phase-metric-3",
+		"launch-flag-label",
+	} {
+		if !visualIDs[id] {
+			t.Fatalf("visual timeline missing short visual label %q", id)
+		}
+	}
+	for _, element := range elements {
+		id, _ := element["id"].(string)
+		width, _ := element["width"].(int)
+		switch id {
+		case "phase-icon-label-1", "phase-icon-label-2", "phase-icon-label-3":
+			if width < 60 {
+				t.Fatalf("%s width = %d, want at least 60 to prevent digit wrapping", id, width)
+			}
+		case "phase-chip-1", "phase-chip-2", "phase-chip-3":
+			if width < 110 {
+				t.Fatalf("%s width = %d, want at least 110 to prevent percentage wrapping", id, width)
+			}
+		}
+	}
+}
+
 type memoryRecorder struct {
 	t            *testing.T
 	mu           sync.Mutex

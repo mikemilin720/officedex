@@ -57,6 +57,37 @@ func demoBulletsSlide(id, title string, bullets []string) map[string]any {
 func demoTimelineSlide(id string, visual bool) map[string]any {
 	elements := []map[string]any{{"id": "title", "type": "text", "left": 64, "top": 48, "width": 820, "height": 60, "content": "<p>90-Day Launch Timeline</p>", "defaultFontName": "Inter", "defaultColor": "#05101A"}}
 	labels := []string{"Days 1-30: Validate", "Days 31-60: Launch", "Days 61-90: Scale"}
+	if visual {
+		elements = append(elements,
+			map[string]any{"id": "subtitle", "type": "text", "left": 70, "top": 104, "width": 760, "height": 38, "content": "<p>Three launch motions, one measurable growth path.</p>", "defaultFontName": "Inter", "defaultColor": "#40505C"},
+			timelineRect("timeline-axis", 126, 316, 744, 14, "#0E6F78", ""),
+			timelineRect("phase-card-1", 76, 170, 250, 235, "#E8F7EF", ""),
+			timelineRect("phase-card-2", 372, 170, 250, 235, "#FFF2DA", ""),
+			timelineRect("phase-card-3", 668, 170, 250, 235, "#E9F0FF", ""),
+			timelineCircleSized("phase-icon-1", 108, 206, 68, "#37B26C"),
+			timelineCircleSized("phase-icon-2", 404, 206, 68, "#F2A93B"),
+			timelineCircleSized("phase-icon-3", 700, 206, 68, "#5B72F0"),
+			timelineText("phase-icon-label-1", 108, 224, 68, 28, "<p>01</p>", "#FCFAF2"),
+			timelineText("phase-icon-label-2", 404, 224, 68, 28, "<p>02</p>", "#05101A"),
+			timelineText("phase-icon-label-3", 700, 224, 68, 28, "<p>03</p>", "#FCFAF2"),
+			timelineText("phase-title-1", 196, 196, 110, 34, "<p>Validate</p>", "#05101A"),
+			timelineText("phase-title-2", 492, 196, 110, 34, "<p>Launch</p>", "#05101A"),
+			timelineText("phase-title-3", 788, 196, 110, 34, "<p>Scale</p>", "#05101A"),
+			timelineRect("phase-chip-1", 196, 242, 112, 30, "#37B26C", "<p>0–33%</p>"),
+			timelineRect("phase-chip-2", 492, 242, 112, 30, "#F2A93B", "<p>34–66%</p>"),
+			timelineRect("phase-chip-3", 788, 242, 112, 30, "#5B72F0", "<p>67–100%</p>"),
+			timelineText("phase-metric-1", 108, 350, 168, 32, "<p>Proof points</p>", "#1A2530"),
+			timelineText("phase-metric-2", 404, 350, 168, 32, "<p>Launch assets</p>", "#1A2530"),
+			timelineText("phase-metric-3", 700, 350, 168, 32, "<p>Conversion loops</p>", "#1A2530"),
+			timelineCircle("milestone-dot-1", 180, 296, "#37B26C"),
+			timelineCircle("milestone-dot-2", 476, 296, "#F2A93B"),
+			timelineCircle("milestone-dot-3", 772, 296, "#5B72F0"),
+			timelineRect("launch-marker", 622, 136, 5, 294, "#05101A", ""),
+			timelineRect("launch-flag", 636, 132, 170, 34, "#05101A", ""),
+			timelineText("launch-flag-label", 650, 138, 136, 24, "<p>Public launch</p>", "#FCFAF2"),
+		)
+		return map[string]any{"id": id, "background": map[string]any{"type": "solid", "color": "#FCFAF2"}, "elements": elements}
+	}
 	for i, label := range labels {
 		elements = append(elements, map[string]any{
 			"id": "phase-" + strconv.Itoa(i+1), "type": "text",
@@ -64,10 +95,63 @@ func demoTimelineSlide(id string, visual bool) map[string]any {
 			"content": bulletText(label), "defaultFontName": "Inter", "defaultColor": "#1A2530",
 		})
 	}
-	if visual {
-		elements = append(elements, map[string]any{"id": "timeline-accent", "type": "shape", "left": 72, "top": 310, "width": 780, "height": 12, "viewBox": []int{0, 0}, "path": "M 0 0 L 780 0", "fill": "#006876"})
-	}
 	return map[string]any{"id": id, "background": map[string]any{"type": "solid", "color": "#FCFAF2"}, "elements": elements}
+}
+
+func timelineRect(id string, left, top, width, height int, fill string, content string) map[string]any {
+	shape := map[string]any{
+		"id":         id,
+		"type":       "shape",
+		"left":       left,
+		"top":        top,
+		"width":      width,
+		"height":     height,
+		"viewBox":    []int{200, 200},
+		"path":       "M 18 0 L 182 0 Q 200 0 200 18 L 200 182 Q 200 200 182 200 L 18 200 Q 0 200 0 182 L 0 18 Q 0 0 18 0 Z",
+		"fill":       fill,
+		"fixedRatio": false,
+	}
+	if content != "" {
+		shape["text"] = map[string]any{
+			"content":         content,
+			"defaultFontName": "Inter",
+			"defaultColor":    "#05101A",
+		}
+	}
+	return shape
+}
+
+func timelineCircle(id string, left, top int, fill string) map[string]any {
+	return timelineCircleSized(id, left, top, 54, fill)
+}
+
+func timelineCircleSized(id string, left, top, size int, fill string) map[string]any {
+	return map[string]any{
+		"id":         id,
+		"type":       "shape",
+		"left":       left,
+		"top":        top,
+		"width":      size,
+		"height":     size,
+		"viewBox":    []int{200, 200},
+		"path":       "M 100 0 A 100 100 0 1 1 100 200 A 100 100 0 1 1 100 0 Z",
+		"fill":       fill,
+		"fixedRatio": true,
+	}
+}
+
+func timelineText(id string, left, top, width, height int, content, color string) map[string]any {
+	return map[string]any{
+		"id":              id,
+		"type":            "text",
+		"left":            left,
+		"top":             top,
+		"width":           width,
+		"height":          height,
+		"content":         content,
+		"defaultFontName": "Inter",
+		"defaultColor":    color,
+	}
 }
 
 func bulletText(text string) string {
