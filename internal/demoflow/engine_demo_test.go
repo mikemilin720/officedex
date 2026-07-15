@@ -363,7 +363,6 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 		"milestone-dot-1",
 		"milestone-dot-2",
 		"milestone-dot-3",
-		"launch-badge",
 	} {
 		if !visualIDs[id] {
 			t.Fatalf("visual timeline missing element %q", id)
@@ -376,10 +375,15 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 		"phase-window-1",
 		"phase-window-2",
 		"phase-window-3",
+		"phase-window-label-1",
+		"phase-window-label-2",
+		"phase-window-label-3",
+		"phase-title-1",
+		"phase-title-2",
+		"phase-title-3",
 		"phase-metric-1",
 		"phase-metric-2",
 		"phase-metric-3",
-		"launch-badge-label",
 	} {
 		if !visualIDs[id] {
 			t.Fatalf("visual timeline missing short visual label %q", id)
@@ -390,13 +394,13 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 		width, _ := element["width"].(int)
 		height, _ := element["height"].(int)
 		switch id {
-		case "phase-window-1", "phase-window-2", "phase-window-3":
-			if width < 132 {
-				t.Fatalf("%s width = %d, want at least 132 to prevent percentage wrapping", id, width)
+		case "phase-card-1", "phase-card-2", "phase-card-3":
+			if height < 230 {
+				t.Fatalf("%s height = %d, want large cards readable in video", id, height)
 			}
-		case "launch-badge":
-			if width < 150 || height < 28 {
-				t.Fatalf("%s size = %dx%d, want enough room for one-line launch badge", id, width, height)
+		case "phase-window-1", "phase-window-2", "phase-window-3":
+			if width < 170 || height < 48 {
+				t.Fatalf("%s size = %dx%d, want a large percentage block readable in video", id, width, height)
 			}
 		case "timeline-axis", "timeline-progress":
 			if height > 6 {
@@ -412,6 +416,20 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 		}
 		if strings.HasPrefix(id, "phase-outcome-") {
 			t.Fatalf("visual timeline should avoid cramped sentence outcomes in the demo slide: %s", id)
+		}
+		if strings.HasPrefix(id, "launch-badge") {
+			t.Fatalf("visual timeline should not use a launch badge that can overlap or clip text: %s", id)
+		}
+		fontSize, _ := element["defaultFontSize"].(int)
+		switch {
+		case id == "subtitle" && fontSize < 18:
+			t.Fatalf("%s font size = %d, want at least 18 for video readability", id, fontSize)
+		case strings.HasPrefix(id, "phase-window-label-") && fontSize < 30:
+			t.Fatalf("%s font size = %d, want at least 30 for video readability", id, fontSize)
+		case strings.HasPrefix(id, "phase-title-") && fontSize < 26:
+			t.Fatalf("%s font size = %d, want at least 26 for video readability", id, fontSize)
+		case strings.HasPrefix(id, "phase-metric-") && fontSize < 20:
+			t.Fatalf("%s font size = %d, want at least 20 for video readability", id, fontSize)
 		}
 	}
 }
