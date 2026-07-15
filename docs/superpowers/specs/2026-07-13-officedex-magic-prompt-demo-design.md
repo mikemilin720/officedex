@@ -77,7 +77,7 @@ Each confirmation is accepted only through `App.Respond` for the current demo ta
 Only one edit prompt is recognized. No paraphrase, casing change, punctuation change, or extra text should match:
 
 ```text
-Make this launch timeline more visual.
+Turn this launch timeline into a vertical roadmap.
 ```
 
 The edit prompt must target slide 6, using the user-visible one-based slide number. When matched, `ModifyPptistDeck` returns a confirmation-required `slide:replace` preset operation for slide 6. The operation replaces the timeline with the prepared more-visual timeline variant and uses the existing PPTist edit confirmation/apply surface.

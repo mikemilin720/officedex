@@ -353,7 +353,7 @@ Create `marketing/ppt-launch-video/runbooks/demo-runbook.md` with these required
 
 1. Locate the slide containing the 90-day launch timeline.
 2. Select the slide or its main timeline element.
-3. Enter: `Make this launch timeline more visual.`
+3. Enter: `Turn this launch timeline into a vertical roadmap.`
 4. Review the proposed changes.
 5. Apply the edit.
 6. Confirm the local PPTX finishes saving.

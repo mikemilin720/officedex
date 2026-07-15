@@ -42,7 +42,7 @@ On-screen demo prompt:
 
 The featured follow-up edit is:
 
-> Make this launch timeline more visual.
+> Turn this launch timeline into a vertical roadmap.
 
 The edit should target slide 6 in the prepared demo deck unless the final generated deck places the launch timeline on a different slide. In that case, use the actual timeline slide and keep the narration generic enough not to mention a page number.
 

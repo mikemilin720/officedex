@@ -2100,7 +2100,12 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
     && !hasPptxFile
     && task.status === "running"
     && !hasVibeSlides;
-  const showPptistEmbed = !isPptxgenjsAssembling && (activeSnapshot.stage === "slides_ready" || activeSnapshot.stage === "rendering" || activeSnapshot.stage === "completed");
+  const awaitingGeneratedSlideApproval = activeSnapshot.stage === "slides_ready"
+    && Boolean(activeSnapshot.confirmation?.nodeIds?.length)
+    && actions.length > 0;
+  const showPptistEmbed = !isPptxgenjsAssembling
+    && !awaitingGeneratedSlideApproval
+    && (activeSnapshot.stage === "slides_ready" || activeSnapshot.stage === "rendering" || activeSnapshot.stage === "completed");
   const completedReviewMode = activeSnapshot.stage === "completed" && showPptistEmbed;
   const [completedCanvasTreeOpen, setCompletedCanvasTreeOpen] = useState(false);
   const canvasTreeInteractionsEnabled = !completedReviewMode || completedCanvasTreeOpen;
@@ -4136,7 +4141,6 @@ function nearestConfirmableAncestor(nodeMap: Map<string, VibeProjectTreeNode>, n
 function currentStepConfirmableNodeIds(nodes: Array<FlowNode<VibeCanvasData>>, snapshot: VibeTreeSnapshot, overrideKinds?: VibeCanvasNodeKind[]) {
   const kinds = overrideKinds ?? defaultConfirmableKinds(snapshot.stage);
   if (snapshot.confirmation?.nodeIds?.length) {
-    if (kinds.length === 0) return new Set<string>();
     return new Set(snapshot.confirmation.nodeIds);
   }
   return new Set(nodes.filter((node) => kinds.includes(node.data.kind as VibeCanvasNodeKind)).map((node) => node.id));

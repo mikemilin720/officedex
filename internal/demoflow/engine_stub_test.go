@@ -29,7 +29,7 @@ func TestNormalBuildDoesNotHandleRespondOrEdit(t *testing.T) {
 	if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "demo-task"}); err != nil || ok {
 		t.Fatalf("TryRespond = ok %v err %v, want ok false nil", ok, err)
 	}
-	if _, ok, err := engine.TryModifyPptistDeck(context.Background(), ModifyPptistDeckInput{Prompt: "Make this launch timeline more visual."}); err != nil || ok {
+	if _, ok, err := engine.TryModifyPptistDeck(context.Background(), ModifyPptistDeckInput{Prompt: "Turn this launch timeline into a vertical roadmap."}); err != nil || ok {
 		t.Fatalf("TryModifyPptistDeck = ok %v err %v, want ok false nil", ok, err)
 	}
 }

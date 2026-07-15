@@ -1661,6 +1661,45 @@ describe("DialogueScreen state machine", () => {
     expect(flowModel.edges.some((edge) => edge.source === "deck" || edge.target === "deck")).toBe(false);
   });
 
+  it("keeps generated slides on the canvas until the visible approval is confirmed", async () => {
+    const task: DesktopTask = {
+      id: "task-generated-slide-approval",
+      conversationId: "task-generated-slide-approval",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "demo-confirm-slides",
+        question: "Confirm the generated slides",
+        allowFreeform: true,
+        options: [{ id: "confirm", label: "Approve Generated Slides" }],
+      },
+      vibeTree: {
+        stage: "slides_ready",
+        actions: [{ id: "confirm", label: "Approve Generated Slides" }],
+        confirmation: { nodeIds: ["slide-6"] },
+        tree: {
+          id: "tree-generated-slide-approval",
+          rootId: "root",
+          title: "Launch Strategy",
+          nodes: [
+            { id: "root", kind: "root", title: "Launch Strategy" },
+            { id: "chapter-02", parentId: "root", kind: "slide_group", title: "Launch Execution" },
+            { id: "outline-6", parentId: "chapter-02", kind: "outline", title: "90-Day Timeline" },
+            { id: "slide-6", parentId: "outline-6", kind: "generated_slide", title: "90-Day Launch Timeline", slideNumber: 6 },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await waitForVibePopoverTitle("90-Day Launch Timeline");
+    clickCurrentVibeConfirmButton();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve Generated Slides" })).not.toBeDisabled());
+    expect(document.querySelector(".living-tree-pptx-edit-panel")).toBeNull();
+  });
+
   it("shows Deck and connects generated Slides after the flow advances to rendering", () => {
     const snapshot: VibeTreeSnapshot = {
       stage: "rendering",
