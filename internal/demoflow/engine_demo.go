@@ -40,10 +40,10 @@ var demoQuestions = []struct {
 	StageID  string
 	Label    string
 }{
-	{"demo-confirm-idea", "Confirm the idea and story direction", "idea", "Idea"},
-	{"demo-confirm-story", "Confirm the story beats", "story", "Story Beats"},
-	{"demo-confirm-chapters", "Confirm the chapter structure", "chapters", "Chapters"},
-	{"demo-confirm-outline", "Confirm the per-slide outline", "outline", "Slide Outlines"},
+	{"demo-confirm-idea", "Confirm the idea and story direction", "story_ready", "Idea"},
+	{"demo-confirm-story", "Confirm the story beats", "outline_ready", "Story Beats"},
+	{"demo-confirm-chapters", "Confirm the chapter structure", "refined_ready", "Chapters"},
+	{"demo-confirm-outline", "Confirm the per-slide outline", "slides_ready", "Slide Outlines"},
 }
 
 func newImplementation(options Options) implementation {
@@ -66,8 +66,12 @@ func newImplementation(options Options) implementation {
 }
 
 func (d *demoImplementation) TryGenerate(ctx context.Context, input types.GenerateInput) (GenerateResult, bool, error) {
-	prompt := strings.TrimSpace(input.Topic)
-	if input.DocumentType != types.DocPPTX || input.GenerationMode != "plan" || prompt != magicPrompt {
+	topic := strings.TrimSpace(input.Topic)
+	prompt := strings.TrimSpace(input.Prompt)
+	if prompt == "" {
+		prompt = topic
+	}
+	if input.DocumentType != types.DocPPTX || input.GenerationMode != "plan" || (topic != magicPrompt && prompt != magicPrompt) {
 		return GenerateResult{}, false, nil
 	}
 	if d.recorder == nil {
@@ -190,6 +194,7 @@ func (d *demoImplementation) advanceAfterConfirmation(ctx context.Context, taskI
 	}
 	<-d.delay(ctx)
 	_ = d.emit(ctx, taskID, "task.vibe_slide", map[string]any{"index": 0, "slide": demoSlides[0]})
+	_ = d.emit(ctx, taskID, "task.vibe_tree", demoTreePayload(len(demoStages)-1))
 	_ = d.completeTask(ctx, taskID)
 }
 
@@ -255,7 +260,11 @@ func (d *demoImplementation) completeTask(ctx context.Context, taskID string) er
 }
 
 func (d *demoImplementation) writeDemoPptx(taskID string) (string, error) {
-	dir := filepath.Join(d.recorder.UserDataDir(), "demo-flow", taskID)
+	root := strings.TrimSpace(d.recorder.WorkspaceDir())
+	if root == "" {
+		root = d.recorder.UserDataDir()
+	}
+	dir := filepath.Join(root, "demo-flow", taskID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

@@ -2078,6 +2078,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
   const pptistAnimationSessionKeysRef = useRef<Set<string>>(new Set());
   const [slideDataMap, setSlideDataMap] = useState<Map<string, PptistSlide>>(new Map());
   const [artifactSlidesByNodeId, setArtifactSlidesByNodeId] = useState<Map<string, PptistSlide>>(new Map());
+  const [importedArtifactSlideCount, setImportedArtifactSlideCount] = useState(0);
   const [selectedPptistSlideId, setSelectedPptistSlideId] = useState<string | undefined>(undefined);
   const [pptistEditRunning, setPptistEditRunning] = useState(false);
   const [pptistEditStatus, setPptistEditStatus] = useState<string>("");
@@ -2144,6 +2145,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
     [pptistAllSlideNodes],
   );
   const handleSlidesLoaded = useCallback((slides: PptistSlide[]) => {
+    setImportedArtifactSlideCount(slides.length);
     setArtifactSlidesByNodeId(() => {
       const next = new Map<string, PptistSlide>();
       pptistAllSlideNodes.forEach((node, i) => {
@@ -2251,6 +2253,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
     if (!showPptistEmbed) {
       setSlidePushIndex(-1);
       setTypedNodeIds(new Set());
+      setImportedArtifactSlideCount(0);
     }
   }, [showPptistEmbed]);
   useEffect(() => {
@@ -2270,8 +2273,11 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
     [hasPptxFile, pptistAllSlideNodes, slideDataMap, streamedSlidesByNodeId],
   );
   const totalGeneratedPages = pptistAllSlideNodes.length || pptistSlides.length;
-  const generatedPageCount = totalGeneratedPages > 0 ? Math.min(typedNodeIds.size, totalGeneratedPages) : typedNodeIds.size;
-  const allPagesGenerated = totalGeneratedPages > 0 && generatedPageCount >= totalGeneratedPages;
+  const importedArtifactReady = hasPptxFile && importedArtifactSlideCount > 0;
+  const generatedPageCount = importedArtifactReady
+    ? Math.max(totalGeneratedPages, importedArtifactSlideCount)
+    : totalGeneratedPages > 0 ? Math.min(typedNodeIds.size, totalGeneratedPages) : typedNodeIds.size;
+  const allPagesGenerated = importedArtifactReady || (totalGeneratedPages > 0 && generatedPageCount >= totalGeneratedPages);
   const baseFlowNodes = canvasTreeMounted ? flowModel.nodes.filter((node) => renderableFlowNodeIds.has(node.id)).map((node) => {
     const treeNode = node.data.treeNode;
     const nodeIsConfirmable = confirmableNodeIds.has(treeNode.id);

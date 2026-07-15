@@ -11,12 +11,11 @@ var demoStages = []struct {
 	ID    string
 	Label string
 }{
-	{"idea", "Idea"},
-	{"story", "Story Beats"},
-	{"chapters", "Chapters"},
-	{"outline", "Slide Outlines"},
-	{"build", "Build PPTX"},
-	{"review", "Review"},
+	{"story_ready", "Idea"},
+	{"outline_ready", "Story Beats"},
+	{"refined_ready", "Chapters"},
+	{"slides_ready", "Slide Outlines"},
+	{"completed", "Review"},
 }
 
 var demoSlides = []map[string]any{

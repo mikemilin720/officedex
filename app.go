@@ -4385,6 +4385,10 @@ func (a *App) UserDataDir() string {
 	return a.userDataDir
 }
 
+func (a *App) WorkspaceDir() string {
+	return a.workspaceDir
+}
+
 func (a *App) refreshPreviewTrustedRoots(s types.UserSettings) error {
 	if a.previewReg == nil {
 		return nil

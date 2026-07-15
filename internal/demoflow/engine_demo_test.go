@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -48,6 +49,45 @@ func TestDemoBuildMatchesOnlyExactMagicPrompt(t *testing.T) {
 		if _, ok, err := New(Options{Recorder: newMemoryRecorder(t), Delay: instantDelay}).TryGenerate(context.Background(), mismatch); err != nil || ok {
 			t.Fatalf("mismatch %#v returned ok %v err %v", mismatch, ok, err)
 		}
+	}
+}
+
+func TestDemoBuildMatchesMagicPromptFromRendererPromptField(t *testing.T) {
+	recorder := newMemoryRecorder(t)
+	engine := New(Options{Recorder: recorder, Delay: instantDelay, NewID: fixedID("demo-task-prompt")})
+	result, ok, err := engine.TryGenerate(context.Background(), types.GenerateInput{
+		DocumentType:   types.DocPPTX,
+		GenerationMode: "plan",
+		Prompt:         magicPrompt,
+	})
+	if err != nil {
+		t.Fatalf("TryGenerate returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected demo flow to match renderer prompt field")
+	}
+	if result.TaskID != "demo-task-prompt" || result.Status != "running" {
+		t.Fatalf("result = %#v, want demo task running", result)
+	}
+}
+
+func TestDemoBuildMatchesMagicPromptWhenRendererTopicIsSummary(t *testing.T) {
+	recorder := newMemoryRecorder(t)
+	engine := New(Options{Recorder: recorder, Delay: instantDelay, NewID: fixedID("demo-task-summary")})
+	result, ok, err := engine.TryGenerate(context.Background(), types.GenerateInput{
+		DocumentType:   types.DocPPTX,
+		GenerationMode: "plan",
+		Topic:          "Create a launch strategy presentation",
+		Prompt:         magicPrompt,
+	})
+	if err != nil {
+		t.Fatalf("TryGenerate returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected demo flow to match exact magic prompt even when renderer topic is a summary")
+	}
+	if result.TaskID != "demo-task-summary" || result.Status != "running" {
+		t.Fatalf("result = %#v, want demo task running", result)
 	}
 }
 
@@ -97,6 +137,47 @@ func TestDemoFlowStageOrderingAndConfirmations(t *testing.T) {
 		"task.completed",
 	}
 	assertContainsInOrder(t, got, wantContainsInOrder)
+}
+
+func TestDemoFlowWritesPptxUnderWorkspaceDir(t *testing.T) {
+	recorder := newMemoryRecorder(t)
+	engine := New(Options{Recorder: recorder, Delay: instantDelay, NewID: fixedID("demo-task")})
+	_, ok, err := engine.TryGenerate(context.Background(), types.GenerateInput{DocumentType: types.DocPPTX, GenerationMode: "plan", Topic: magicPrompt})
+	if err != nil || !ok {
+		t.Fatalf("TryGenerate ok=%v err=%v", ok, err)
+	}
+	for _, questionID := range []string{"demo-confirm-idea", "demo-confirm-story", "demo-confirm-chapters", "demo-confirm-outline"} {
+		waitForQuestion(t, recorder, questionID)
+		if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "demo-task", QuestionID: questionID, OptionID: "confirm"}); err != nil || !ok {
+			t.Fatalf("TryRespond(%s) ok=%v err=%v", questionID, ok, err)
+		}
+	}
+	waitForEvent(t, recorder, "task.completed")
+	artifact := recorder.lastArtifact()
+	if artifact == nil {
+		t.Fatal("expected recorded artifact")
+	}
+	if !strings.HasPrefix(artifact.FilePath, recorder.WorkspaceDir()+string(os.PathSeparator)) {
+		t.Fatalf("artifact path = %q, want under workspace %q", artifact.FilePath, recorder.WorkspaceDir())
+	}
+}
+
+func TestDemoVibeTreeStagesMatchRendererAcceptedStages(t *testing.T) {
+	accepted := map[string]bool{
+		"story_ready":   true,
+		"outline_ready": true,
+		"refined_ready": true,
+		"slides_ready":  true,
+		"rendering":     true,
+		"completed":     true,
+	}
+	for idx := range demoQuestions {
+		payload := demoTreePayload(idx)
+		stage, _ := payload["stage"].(string)
+		if !accepted[stage] {
+			t.Fatalf("demoTreePayload(%d) stage = %q, want renderer-accepted stage", idx, stage)
+		}
+	}
 }
 
 func TestDemoFlowRejectsWrongOrStaleConfirmation(t *testing.T) {
@@ -224,14 +305,26 @@ func TestDemoTimelineEditRequiresExactPromptAndSlideSix(t *testing.T) {
 }
 
 type memoryRecorder struct {
-	t      *testing.T
-	mu     sync.Mutex
-	events []types.BridgeEvent
+	t            *testing.T
+	mu           sync.Mutex
+	events       []types.BridgeEvent
+	artifacts    []types.Artifact
+	userDataDir  string
+	workspaceDir string
 }
 
 func newMemoryRecorder(t *testing.T) *memoryRecorder {
 	t.Helper()
-	return &memoryRecorder{t: t}
+	root := t.TempDir()
+	userDataDir := filepath.Join(root, "user-data")
+	workspaceDir := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(userDataDir, 0o755); err != nil {
+		t.Fatalf("mkdir user data dir: %v", err)
+	}
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace dir: %v", err)
+	}
+	return &memoryRecorder{t: t, userDataDir: userDataDir, workspaceDir: workspaceDir}
 }
 
 func (r *memoryRecorder) RecordAndEmitTaskEvent(_ context.Context, event types.BridgeEvent) error {
@@ -251,9 +344,24 @@ func (r *memoryRecorder) RecordTaskWorkspaceContext(taskID, workspaceID, convers
 	return nil
 }
 
-func (r *memoryRecorder) AllowArtifact(types.Artifact) error  { return nil }
-func (r *memoryRecorder) RecordArtifact(types.Artifact) error { return nil }
-func (r *memoryRecorder) UserDataDir() string                 { return r.t.TempDir() }
+func (r *memoryRecorder) AllowArtifact(types.Artifact) error { return nil }
+func (r *memoryRecorder) RecordArtifact(artifact types.Artifact) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.artifacts = append(r.artifacts, artifact)
+	return nil
+}
+func (r *memoryRecorder) lastArtifact() *types.Artifact {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.artifacts) == 0 {
+		return nil
+	}
+	artifact := r.artifacts[len(r.artifacts)-1]
+	return &artifact
+}
+func (r *memoryRecorder) UserDataDir() string  { return r.userDataDir }
+func (r *memoryRecorder) WorkspaceDir() string { return r.workspaceDir }
 
 func instantDelay(context.Context) <-chan time.Time {
 	ch := make(chan time.Time, 1)

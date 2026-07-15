@@ -1969,6 +1969,17 @@ describe("DialogueScreen state machine", () => {
 		        source: iframe.contentWindow,
 		      }));
 		    });
+	    await act(async () => {
+	      window.dispatchEvent(new MessageEvent("message", {
+	        data: {
+	          type: "pptist:slides-loaded",
+	          slides: [{ id: "Bbczix9SNA", elements: [{ id: "title", type: "text", content: "<p>Imported</p>" }] }],
+	        },
+	        source: iframe.contentWindow,
+	      }));
+	    });
+
+	    expect(editInput).toBeEnabled();
 		    await act(async () => {
 	      window.dispatchEvent(new MessageEvent("message", {
 	        data: { type: "pptist:slide-typed", index: 0, slideId: "generated-slide-01" },
@@ -1977,7 +1988,6 @@ describe("DialogueScreen state machine", () => {
 	    });
 
 	    expect(screen.queryByText("1/1 pages generated")).toBeNull();
-	    expect(editInput).toBeEnabled();
 	    await act(async () => {
 	      window.dispatchEvent(new MessageEvent("message", {
 	        data: {
@@ -2154,6 +2164,55 @@ describe("DialogueScreen state machine", () => {
 	    expect(onContinueModify).not.toHaveBeenCalled();
 	    expect(showInFolderButton.disabled).toBe(false);
 	  });
+
+  it("enables PPTist follow-up edits after importing a completed artifact even without generated slide tree nodes", async () => {
+    const artifact = {
+      taskId: "task-vibe-artifact-only",
+      filePath: "/tmp/launch-strategy-demo.pptx",
+      fileName: "launch-strategy-demo.pptx",
+      documentType: "pptx",
+    };
+    const task: DesktopTask = {
+      id: "task-vibe-artifact-only",
+      conversationId: "task-vibe-artifact-only",
+      status: "completed",
+      documentType: "pptx",
+      topic: "Launch Strategy",
+      events: [],
+      artifact,
+      vibeTree: {
+        stage: "completed",
+        actions: [],
+        tree: {
+          id: "tree-artifact-only",
+          rootId: "root",
+          title: "Launch Strategy",
+          nodes: [
+            { id: "root", kind: "root", title: "Launch Strategy" },
+          ],
+        },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    const pptistEmbed = document.querySelector(".living-tree-pptist-embed");
+    const iframe = pptistEmbed?.querySelector("iframe") as HTMLIFrameElement;
+    const editInput = screen.getByPlaceholderText("Ask to modify this PPT...");
+    expect(editInput).toBeDisabled();
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: {
+          type: "pptist:slides-loaded",
+          slides: [{ id: "Bbczix9SNA", elements: [{ id: "title", type: "text", content: "<p>Launch</p>" }] }],
+        },
+        source: iframe.contentWindow,
+      }));
+    });
+
+    expect(editInput).toBeEnabled();
+  });
 
   it("renders referenced PPT shapes as inline composer tokens without nested input chrome", () => {
     const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");

@@ -70,6 +70,7 @@ type EventRecorder interface {
 	AllowArtifact(types.Artifact) error
 	RecordArtifact(types.Artifact) error
 	UserDataDir() string
+	WorkspaceDir() string
 }
 
 type Options struct {

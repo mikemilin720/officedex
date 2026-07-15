@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"officedex/internal/appupdate"
+	"officedex/internal/demoflow"
 	"officedex/internal/localstore"
 	"officedex/internal/netproxy"
 	"officedex/internal/preview"
@@ -432,6 +433,7 @@ func newRealOfficeDexApp(t *testing.T) *App {
 		appUpdateMgr:   newRealAppUpdateManager(t, filepath.Join(userDataDir, "updates"), appUpdateFixtureOptions{ManifestPath: "/manifest.json"}),
 		runtimeMgr:     runtimeMgr,
 	}
+	app.demoFlow = demoflow.New(demoflow.Options{Recorder: app})
 	if err := app.initializeWorkspaces(ctx); err != nil {
 		t.Fatalf("initializeWorkspaces: %v", err)
 	}
