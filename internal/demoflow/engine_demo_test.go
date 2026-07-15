@@ -335,58 +335,73 @@ func TestDemoTimelineEditRequiresExactPromptAndSlideSix(t *testing.T) {
 func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 	elements := demoTimelineVisualSlide["elements"].([]map[string]any)
 	shapeCount := 0
-	longPhaseText := ""
 	visualIDs := map[string]bool{}
+	bounds := map[string]struct {
+		left   int
+		top    int
+		width  int
+		height int
+	}{}
 	for _, element := range elements {
 		id, _ := element["id"].(string)
 		visualIDs[id] = true
+		left, _ := element["left"].(int)
+		top, _ := element["top"].(int)
+		width, _ := element["width"].(int)
+		height, _ := element["height"].(int)
+		bounds[id] = struct {
+			left   int
+			top    int
+			width  int
+			height int
+		}{left: left, top: top, width: width, height: height}
 		if element["type"] == "shape" {
 			shapeCount++
 		}
-		if id == "phase-card-1" || id == "phase-card-2" || id == "phase-card-3" {
-			if text, ok := element["text"].(map[string]any); ok {
-				if content, _ := text["content"].(string); len(content) > len(longPhaseText) {
-					longPhaseText = content
-				}
-			}
-		}
 	}
 	if shapeCount < 10 {
-		t.Fatalf("visual timeline shape count = %d, want at least 10 cards, markers, and axis shapes", shapeCount)
+		t.Fatalf("visual timeline shape count = %d, want at least 10 comparison, transform, and roadmap shapes", shapeCount)
 	}
 	for _, id := range []string{
-		"timeline-axis",
-		"timeline-progress",
-		"phase-card-1",
-		"phase-card-2",
-		"phase-card-3",
-		"milestone-dot-1",
-		"milestone-dot-2",
-		"milestone-dot-3",
+		"before-panel",
+		"transform-panel",
+		"after-panel",
+		"ai-spark",
+		"transform-arrow",
+		"roadmap-track-1",
+		"roadmap-track-2",
+		"roadmap-track-3",
+		"roadmap-step-dot-1",
+		"roadmap-step-dot-2",
+		"roadmap-step-dot-3",
 	} {
 		if !visualIDs[id] {
 			t.Fatalf("visual timeline missing element %q", id)
 		}
 	}
-	if longPhaseText != "" {
-		t.Fatalf("visual timeline phase cards should use separate short labels, found nested text %q", longPhaseText)
-	}
 	for _, id := range []string{
-		"phase-window-1",
-		"phase-window-2",
-		"phase-window-3",
-		"phase-window-label-1",
-		"phase-window-label-2",
-		"phase-window-label-3",
-		"phase-title-1",
-		"phase-title-2",
-		"phase-title-3",
-		"phase-metric-1",
-		"phase-metric-2",
-		"phase-metric-3",
+		"before-label",
+		"before-line-1",
+		"before-line-2",
+		"before-line-3",
+		"transform-label",
+		"after-label",
+		"roadmap-title-1",
+		"roadmap-title-2",
+		"roadmap-title-3",
+		"roadmap-percent-1",
+		"roadmap-percent-2",
+		"roadmap-percent-3",
 	} {
 		if !visualIDs[id] {
 			t.Fatalf("visual timeline missing short visual label %q", id)
+		}
+	}
+	beforePanel := bounds["before-panel"]
+	for _, id := range []string{"before-label", "before-line-1", "before-line-1b", "before-line-2", "before-line-2b", "before-line-3", "before-line-3b"} {
+		box := bounds[id]
+		if box.top+box.height > beforePanel.top+beforePanel.height {
+			t.Fatalf("%s bottom = %d, want inside before panel bottom %d", id, box.top+box.height, beforePanel.top+beforePanel.height)
 		}
 	}
 	for _, element := range elements {
@@ -394,41 +409,36 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 		width, _ := element["width"].(int)
 		height, _ := element["height"].(int)
 		switch id {
-		case "phase-card-1", "phase-card-2", "phase-card-3":
-			if height < 230 {
-				t.Fatalf("%s height = %d, want large cards readable in video", id, height)
+		case "before-panel":
+			if width > 280 {
+				t.Fatalf("%s width = %d, want before panel secondary to the after roadmap", id, width)
 			}
-		case "phase-window-1", "phase-window-2", "phase-window-3":
-			if width < 170 || height < 48 {
-				t.Fatalf("%s size = %dx%d, want a large percentage block readable in video", id, width, height)
+		case "after-panel":
+			if width < 420 || height < 260 {
+				t.Fatalf("%s size = %dx%d, want large after panel for video impact", id, width, height)
 			}
-		case "timeline-axis", "timeline-progress":
-			if height > 6 {
-				t.Fatalf("%s height = %d, want a slim product-style timeline rail", id, height)
+		case "roadmap-track-1", "roadmap-track-2", "roadmap-track-3":
+			if width < 300 || height < 26 {
+				t.Fatalf("%s size = %dx%d, want broad visual roadmap tracks", id, width, height)
 			}
-		case "milestone-dot-1", "milestone-dot-2", "milestone-dot-3":
-			if width > 24 || height > 24 {
-				t.Fatalf("%s size = %dx%d, want subtle milestone dots", id, width, height)
+		case "transform-arrow":
+			if width < 110 {
+				t.Fatalf("%s width = %d, want obvious AI transform arrow", id, width)
 			}
 		}
-		if strings.HasPrefix(id, "phase-icon-") {
-			t.Fatalf("visual timeline should not use oversized decorative phase icons: %s", id)
-		}
-		if strings.HasPrefix(id, "phase-outcome-") {
-			t.Fatalf("visual timeline should avoid cramped sentence outcomes in the demo slide: %s", id)
+		if strings.HasPrefix(id, "phase-card-") || strings.HasPrefix(id, "phase-window-") || strings.HasPrefix(id, "phase-title-") || strings.HasPrefix(id, "phase-metric-") {
+			t.Fatalf("visual timeline should not use the rejected equal card layout element: %s", id)
 		}
 		if strings.HasPrefix(id, "launch-badge") {
 			t.Fatalf("visual timeline should not use a launch badge that can overlap or clip text: %s", id)
 		}
 		fontSize, _ := element["defaultFontSize"].(int)
 		switch {
-		case id == "subtitle" && fontSize < 18:
-			t.Fatalf("%s font size = %d, want at least 18 for video readability", id, fontSize)
-		case strings.HasPrefix(id, "phase-window-label-") && fontSize < 30:
-			t.Fatalf("%s font size = %d, want at least 30 for video readability", id, fontSize)
-		case strings.HasPrefix(id, "phase-title-") && fontSize < 26:
-			t.Fatalf("%s font size = %d, want at least 26 for video readability", id, fontSize)
-		case strings.HasPrefix(id, "phase-metric-") && fontSize < 20:
+		case id == "transform-label" && fontSize < 22:
+			t.Fatalf("%s font size = %d, want at least 22 for video readability", id, fontSize)
+		case strings.HasPrefix(id, "roadmap-title-") && fontSize < 24:
+			t.Fatalf("%s font size = %d, want at least 24 for video readability", id, fontSize)
+		case strings.HasPrefix(id, "roadmap-percent-") && fontSize < 24:
 			t.Fatalf("%s font size = %d, want at least 20 for video readability", id, fontSize)
 		}
 	}
