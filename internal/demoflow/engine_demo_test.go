@@ -356,13 +356,14 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 	}
 	for _, id := range []string{
 		"timeline-axis",
+		"timeline-progress",
 		"phase-card-1",
 		"phase-card-2",
 		"phase-card-3",
 		"milestone-dot-1",
 		"milestone-dot-2",
 		"milestone-dot-3",
-		"launch-marker",
+		"launch-badge",
 	} {
 		if !visualIDs[id] {
 			t.Fatalf("visual timeline missing element %q", id)
@@ -372,13 +373,13 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 		t.Fatalf("visual timeline phase cards should use separate short labels, found nested text %q", longPhaseText)
 	}
 	for _, id := range []string{
-		"phase-icon-1",
-		"phase-icon-2",
-		"phase-icon-3",
+		"phase-window-1",
+		"phase-window-2",
+		"phase-window-3",
 		"phase-metric-1",
 		"phase-metric-2",
 		"phase-metric-3",
-		"launch-flag-label",
+		"launch-badge-label",
 	} {
 		if !visualIDs[id] {
 			t.Fatalf("visual timeline missing short visual label %q", id)
@@ -387,15 +388,30 @@ func TestDemoTimelineVisualEditUsesActualTimelineVisuals(t *testing.T) {
 	for _, element := range elements {
 		id, _ := element["id"].(string)
 		width, _ := element["width"].(int)
+		height, _ := element["height"].(int)
 		switch id {
-		case "phase-icon-label-1", "phase-icon-label-2", "phase-icon-label-3":
-			if width < 60 {
-				t.Fatalf("%s width = %d, want at least 60 to prevent digit wrapping", id, width)
+		case "phase-window-1", "phase-window-2", "phase-window-3":
+			if width < 132 {
+				t.Fatalf("%s width = %d, want at least 132 to prevent percentage wrapping", id, width)
 			}
-		case "phase-chip-1", "phase-chip-2", "phase-chip-3":
-			if width < 110 {
-				t.Fatalf("%s width = %d, want at least 110 to prevent percentage wrapping", id, width)
+		case "launch-badge":
+			if width < 150 || height < 28 {
+				t.Fatalf("%s size = %dx%d, want enough room for one-line launch badge", id, width, height)
 			}
+		case "timeline-axis", "timeline-progress":
+			if height > 6 {
+				t.Fatalf("%s height = %d, want a slim product-style timeline rail", id, height)
+			}
+		case "milestone-dot-1", "milestone-dot-2", "milestone-dot-3":
+			if width > 24 || height > 24 {
+				t.Fatalf("%s size = %dx%d, want subtle milestone dots", id, width, height)
+			}
+		}
+		if strings.HasPrefix(id, "phase-icon-") {
+			t.Fatalf("visual timeline should not use oversized decorative phase icons: %s", id)
+		}
+		if strings.HasPrefix(id, "phase-outcome-") {
+			t.Fatalf("visual timeline should avoid cramped sentence outcomes in the demo slide: %s", id)
 		}
 	}
 }

@@ -59,32 +59,32 @@ func demoTimelineSlide(id string, visual bool) map[string]any {
 	labels := []string{"Days 1-30: Validate", "Days 31-60: Launch", "Days 61-90: Scale"}
 	if visual {
 		elements = append(elements,
-			map[string]any{"id": "subtitle", "type": "text", "left": 70, "top": 104, "width": 760, "height": 38, "content": "<p>Three launch motions, one measurable growth path.</p>", "defaultFontName": "Inter", "defaultColor": "#40505C"},
-			timelineRect("timeline-axis", 126, 316, 744, 14, "#0E6F78", ""),
-			timelineRect("phase-card-1", 76, 170, 250, 235, "#E8F7EF", ""),
-			timelineRect("phase-card-2", 372, 170, 250, 235, "#FFF2DA", ""),
-			timelineRect("phase-card-3", 668, 170, 250, 235, "#E9F0FF", ""),
-			timelineCircleSized("phase-icon-1", 108, 206, 68, "#37B26C"),
-			timelineCircleSized("phase-icon-2", 404, 206, 68, "#F2A93B"),
-			timelineCircleSized("phase-icon-3", 700, 206, 68, "#5B72F0"),
-			timelineText("phase-icon-label-1", 108, 224, 68, 28, "<p>01</p>", "#FCFAF2"),
-			timelineText("phase-icon-label-2", 404, 224, 68, 28, "<p>02</p>", "#05101A"),
-			timelineText("phase-icon-label-3", 700, 224, 68, 28, "<p>03</p>", "#FCFAF2"),
-			timelineText("phase-title-1", 196, 196, 110, 34, "<p>Validate</p>", "#05101A"),
-			timelineText("phase-title-2", 492, 196, 110, 34, "<p>Launch</p>", "#05101A"),
-			timelineText("phase-title-3", 788, 196, 110, 34, "<p>Scale</p>", "#05101A"),
-			timelineRect("phase-chip-1", 196, 242, 112, 30, "#37B26C", "<p>0–33%</p>"),
-			timelineRect("phase-chip-2", 492, 242, 112, 30, "#F2A93B", "<p>34–66%</p>"),
-			timelineRect("phase-chip-3", 788, 242, 112, 30, "#5B72F0", "<p>67–100%</p>"),
-			timelineText("phase-metric-1", 108, 350, 168, 32, "<p>Proof points</p>", "#1A2530"),
-			timelineText("phase-metric-2", 404, 350, 168, 32, "<p>Launch assets</p>", "#1A2530"),
-			timelineText("phase-metric-3", 700, 350, 168, 32, "<p>Conversion loops</p>", "#1A2530"),
-			timelineCircle("milestone-dot-1", 180, 296, "#37B26C"),
-			timelineCircle("milestone-dot-2", 476, 296, "#F2A93B"),
-			timelineCircle("milestone-dot-3", 772, 296, "#5B72F0"),
-			timelineRect("launch-marker", 622, 136, 5, 294, "#05101A", ""),
-			timelineRect("launch-flag", 636, 132, 170, 34, "#05101A", ""),
-			timelineText("launch-flag-label", 650, 138, 136, 24, "<p>Public launch</p>", "#FCFAF2"),
+			timelineText("subtitle", 70, 104, 760, 30, "<p>Three launch motions, one measurable growth path.</p>", "#40505C", 15),
+			timelineRect("phase-card-1", 78, 164, 260, 170, "#F1FAF5", ""),
+			timelineRect("phase-card-2", 366, 164, 260, 170, "#FFF7E8", ""),
+			timelineRect("phase-card-3", 654, 164, 260, 170, "#F3F6FF", ""),
+			timelineRect("phase-accent-1", 110, 184, 38, 5, "#21A66B", ""),
+			timelineRect("phase-accent-2", 398, 184, 38, 5, "#E59A2F", ""),
+			timelineRect("phase-accent-3", 686, 184, 38, 5, "#4B63E6", ""),
+			timelineRect("phase-window-1", 110, 206, 132, 28, "#DFF5EA", ""),
+			timelineRect("phase-window-2", 398, 206, 132, 28, "#FCE7C4", ""),
+			timelineRect("phase-window-3", 686, 206, 132, 28, "#E2E8FF", ""),
+			timelineText("phase-window-label-1", 124, 211, 104, 20, "<p>0–33%</p>", "#0F6D48", 12),
+			timelineText("phase-window-label-2", 412, 211, 104, 20, "<p>34–66%</p>", "#8A5615", 12),
+			timelineText("phase-window-label-3", 700, 211, 104, 20, "<p>67–100%</p>", "#293FB8", 12),
+			timelineText("phase-title-1", 110, 252, 160, 30, "<p>Validate</p>", "#05101A", 19),
+			timelineText("phase-title-2", 398, 252, 160, 30, "<p>Launch</p>", "#05101A", 19),
+			timelineText("phase-title-3", 686, 252, 160, 30, "<p>Scale</p>", "#05101A", 19),
+			timelineText("phase-metric-1", 110, 294, 180, 24, "<p>Proof points</p>", "#40505C", 14),
+			timelineText("phase-metric-2", 398, 294, 180, 24, "<p>Launch assets</p>", "#40505C", 14),
+			timelineText("phase-metric-3", 686, 294, 180, 24, "<p>Conversion loops</p>", "#40505C", 14),
+			timelineRect("timeline-axis", 116, 384, 760, 4, "#D7E7E8", ""),
+			timelineRect("timeline-progress", 116, 384, 500, 4, "#0E6F78", ""),
+			timelineCircleSized("milestone-dot-1", 198, 378, 16, "#21A66B"),
+			timelineCircleSized("milestone-dot-2", 486, 378, 16, "#E59A2F"),
+			timelineCircleSized("milestone-dot-3", 774, 378, 16, "#4B63E6"),
+			timelineRect("launch-badge", 552, 346, 154, 30, "#0E6F78", ""),
+			timelineText("launch-badge-label", 570, 352, 118, 18, "<p>Launch day</p>", "#FCFAF2", 11),
 		)
 		return map[string]any{"id": id, "background": map[string]any{"type": "solid", "color": "#FCFAF2"}, "elements": elements}
 	}
@@ -140,7 +140,7 @@ func timelineCircleSized(id string, left, top, size int, fill string) map[string
 	}
 }
 
-func timelineText(id string, left, top, width, height int, content, color string) map[string]any {
+func timelineText(id string, left, top, width, height int, content, color string, fontSize int) map[string]any {
 	return map[string]any{
 		"id":              id,
 		"type":            "text",
@@ -151,6 +151,7 @@ func timelineText(id string, left, top, width, height int, content, color string
 		"content":         content,
 		"defaultFontName": "Inter",
 		"defaultColor":    color,
+		"defaultFontSize": fontSize,
 	}
 }
 
