@@ -11,10 +11,9 @@ var demoStages = []struct {
 	ID    string
 	Label string
 }{
-	{"story_ready", "Idea"},
 	{"outline_ready", "Story Beats"},
-	{"refined_ready", "Chapters"},
-	{"slides_ready", "Slide Outlines"},
+	{"refined_ready", "Slide Outlines"},
+	{"slides_ready", "Generated Slides"},
 	{"completed", "Review"},
 }
 
@@ -77,6 +76,7 @@ func bulletText(text string) string {
 
 func demoTreePayload(idx int) map[string]any {
 	stage := demoStages[min(idx, len(demoStages)-1)]
+	nodes := demoTreeNodesForStage(stage.ID)
 	return map[string]any{
 		"stage":       stage.ID,
 		"stage_id":    stage.ID,
@@ -85,13 +85,100 @@ func demoTreePayload(idx int) map[string]any {
 			"id":     "demo-tree",
 			"rootId": "root",
 			"title":  "Launch Strategy",
-			"nodes": []map[string]any{{
-				"id":      "root",
-				"title":   "Launch Strategy",
-				"summary": "Deterministic demo node",
-				"kind":    "idea",
-				"status":  "done",
-			}},
+			"nodes":  nodes,
 		},
 	}
+}
+
+func demoTreeNodesForStage(stage string) []map[string]any {
+	nodes := []map[string]any{demoTreeNode("root", "", "root", "Launch Strategy", "Executive-ready launch plan for an AI productivity app.")}
+	nodes = append(nodes,
+		demoTreeNode("branch-01", "root", "branch", "Audience + Positioning", "Clarify who the product is for and why it wins."),
+		demoTreeNode("branch-02", "root", "branch", "Launch Motion", "Sequence website, X, communities, and onboarding."),
+		demoTreeNode("branch-03", "root", "branch", "Measurement", "Define success metrics and risk controls."),
+	)
+	if stage == "outline_ready" {
+		return append(nodes,
+			demoTreeNode("chapter-01", "branch-01", "slide_group", "Market Narrative", "Audience, positioning, and executive summary."),
+			demoTreeNode("chapter-02", "branch-02", "slide_group", "Launch Execution", "Channels and 90-day rollout."),
+			demoTreeNode("chapter-03", "branch-03", "slide_group", "Operating Metrics", "KPIs, risks, and next steps."),
+		)
+	}
+	nodes = append(nodes,
+		demoTreeNode("chapter-01", "branch-01", "slide_group", "Market Narrative", "Audience, positioning, and executive summary."),
+		demoTreeNode("chapter-02", "branch-02", "slide_group", "Launch Execution", "Channels and 90-day rollout."),
+		demoTreeNode("chapter-03", "branch-03", "slide_group", "Operating Metrics", "KPIs, risks, and next steps."),
+	)
+	for _, outline := range demoOutlineNodes() {
+		nodes = append(nodes, outline)
+	}
+	if stage == "refined_ready" {
+		return nodes
+	}
+	for _, slide := range demoGeneratedSlideNodes() {
+		nodes = append(nodes, slide)
+	}
+	if stage == "completed" {
+		nodes = append(nodes, demoTreeNode("deck", "slide-09", "deck", "Launch Strategy Deck", "All 9 slides assembled into an editable PPTX."))
+	}
+	return nodes
+}
+
+func demoTreeNode(id, parentID, kind, title, summary string) map[string]any {
+	node := map[string]any{
+		"id":      id,
+		"kind":    kind,
+		"title":   title,
+		"summary": summary,
+		"status":  "done",
+	}
+	if parentID != "" {
+		node["parentId"] = parentID
+	}
+	return node
+}
+
+func demoOutlineNodes() []map[string]any {
+	titles := []string{
+		"Title and Promise",
+		"Executive Summary",
+		"Target Audience",
+		"Positioning",
+		"Launch Channels",
+		"90-Day Timeline",
+		"Success Metrics",
+		"Risks and Mitigations",
+		"Download CTA",
+	}
+	parents := []string{"chapter-01", "chapter-01", "chapter-01", "chapter-01", "chapter-02", "chapter-02", "chapter-03", "chapter-03", "chapter-03"}
+	out := make([]map[string]any, 0, len(titles))
+	for i, title := range titles {
+		node := demoTreeNode("outline-"+strconv.Itoa(i+1), parents[i], "outline", title, "Define the slide content, visual intent, and proof points.")
+		node["slideNumber"] = i + 1
+		node["outline"] = []string{"Message", "Visual structure", "Executive takeaway"}
+		out = append(out, node)
+	}
+	return out
+}
+
+func demoGeneratedSlideNodes() []map[string]any {
+	titles := []string{
+		"Launch Strategy",
+		"Executive Summary",
+		"Target Audience",
+		"Positioning",
+		"Launch Channels",
+		"90-Day Launch Timeline",
+		"Success Metrics",
+		"Risks and Mitigations",
+		"Next Steps",
+	}
+	out := make([]map[string]any, 0, len(titles))
+	for i, title := range titles {
+		parentID := "outline-" + strconv.Itoa(i+1)
+		node := demoTreeNode("slide-"+strconv.Itoa(i+1), parentID, "generated_slide", title, "Generated editable slide preview.")
+		node["slideNumber"] = i + 1
+		out = append(out, node)
+	}
+	return out
 }

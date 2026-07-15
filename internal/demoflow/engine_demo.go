@@ -40,10 +40,9 @@ var demoQuestions = []struct {
 	StageID  string
 	Label    string
 }{
-	{"demo-confirm-idea", "Confirm the idea and story direction", "story_ready", "Idea"},
 	{"demo-confirm-story", "Confirm the story beats", "outline_ready", "Story Beats"},
-	{"demo-confirm-chapters", "Confirm the chapter structure", "refined_ready", "Chapters"},
-	{"demo-confirm-outline", "Confirm the per-slide outline", "slides_ready", "Slide Outlines"},
+	{"demo-confirm-outline", "Confirm the per-slide outline", "refined_ready", "Slide Outlines"},
+	{"demo-confirm-slides", "Confirm the generated slides", "slides_ready", "Generated Slides"},
 }
 
 func newImplementation(options Options) implementation {

@@ -357,6 +357,35 @@ describe("PptistEmbedPanel", () => {
     expect(appSource).toContain("iframe:slide-index:hydrate-slide");
   });
 
+  it("cancels animated embed slide queues before replacing them with a final PPTX artifact", () => {
+    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const loadSlidesStart = appSource.indexOf("function loadSlidesIntoEmbed");
+    const loadPptxStart = appSource.indexOf("case 'pptist:load-pptx'");
+    const loadPptxEnd = appSource.indexOf("case 'pptist:goto-slide'", loadPptxStart);
+
+    expect(appSource).toContain("cancelEmbedAnimatedSlideQueue");
+    expect(loadSlidesStart).toBeGreaterThan(-1);
+    expect(loadPptxStart).toBeGreaterThan(-1);
+    expect(loadPptxEnd).toBeGreaterThan(loadPptxStart);
+    expect(appSource.slice(loadSlidesStart, loadPptxStart)).toContain("cancelEmbedAnimatedSlideQueue()");
+    expect(appSource.slice(loadPptxStart, loadPptxEnd)).toContain("cancelEmbedAnimatedSlideQueue()");
+  });
+
+  it("reports synchronous PPTist edit ops as applied before waiting for the next render frame", () => {
+    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const fnStart = appSource.indexOf("async function applyPptistEditOps");
+    const fnEnd = appSource.indexOf("function setupEmbedMode", fnStart);
+    const fnSource = appSource.slice(fnStart, fnEnd);
+    const appliedPost = fnSource.indexOf("type: 'pptist:edit-op-applied'");
+    const firstNextTickAfterApply = fnSource.indexOf("await nextTick()", fnSource.indexOf("syncEmbedFullSlidesFromCurrentStore()"));
+
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    expect(appliedPost).toBeGreaterThan(-1);
+    expect(firstNextTickAfterApply).toBeGreaterThan(-1);
+    expect(appliedPost).toBeLessThan(firstNextTickAfterApply);
+  });
+
   it("loads only the active embedded PPTist thumbnail before progressively rendering the rail", () => {
     const thumbnailsSource = readFileSync("../PPTist/src/views/Editor/Thumbnails/index.vue", "utf8");
 

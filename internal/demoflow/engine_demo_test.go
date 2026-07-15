@@ -104,7 +104,7 @@ func TestDemoFlowStageOrderingAndConfirmations(t *testing.T) {
 	}
 	waitForEvent(t, recorder, "task.question")
 
-	confirmations := []string{"demo-confirm-idea", "demo-confirm-story", "demo-confirm-chapters", "demo-confirm-outline"}
+	confirmations := demoConfirmationIDs()
 	for _, questionID := range confirmations {
 		waitForQuestion(t, recorder, questionID)
 		raw, ok, err := engine.TryRespond(context.Background(), RespondInput{
@@ -130,10 +130,8 @@ func TestDemoFlowStageOrderingAndConfirmations(t *testing.T) {
 		"task.question",
 		"task.answers",
 		"task.vibe_tree",
-		"task.question",
-		"task.answers",
-		"task.vibe_tree",
 		"task.vibe_slide",
+		"task.vibe_tree",
 		"task.completed",
 	}
 	assertContainsInOrder(t, got, wantContainsInOrder)
@@ -146,7 +144,7 @@ func TestDemoFlowWritesPptxUnderWorkspaceDir(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("TryGenerate ok=%v err=%v", ok, err)
 	}
-	for _, questionID := range []string{"demo-confirm-idea", "demo-confirm-story", "demo-confirm-chapters", "demo-confirm-outline"} {
+	for _, questionID := range demoConfirmationIDs() {
 		waitForQuestion(t, recorder, questionID)
 		if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "demo-task", QuestionID: questionID, OptionID: "confirm"}); err != nil || !ok {
 			t.Fatalf("TryRespond(%s) ok=%v err=%v", questionID, ok, err)
@@ -174,9 +172,39 @@ func TestDemoVibeTreeStagesMatchRendererAcceptedStages(t *testing.T) {
 	for idx := range demoQuestions {
 		payload := demoTreePayload(idx)
 		stage, _ := payload["stage"].(string)
+		if stage == "story_ready" {
+			t.Fatalf("demoTreePayload(%d) stage = story_ready, promo demo must avoid the renderer idea gate", idx)
+		}
 		if !accepted[stage] {
 			t.Fatalf("demoTreePayload(%d) stage = %q, want renderer-accepted stage", idx, stage)
 		}
+	}
+}
+
+func TestDemoVibeTreeExpandsAcrossVisibleNodeTypes(t *testing.T) {
+	cases := []struct {
+		idx      int
+		stage    string
+		wantKind string
+	}{
+		{0, "outline_ready", "slide_group"},
+		{1, "refined_ready", "outline"},
+		{2, "slides_ready", "generated_slide"},
+		{3, "completed", "deck"},
+	}
+	for _, tc := range cases {
+		payload := demoTreePayload(tc.idx)
+		if payload["stage"] != tc.stage {
+			t.Fatalf("demoTreePayload(%d) stage = %v, want %s", tc.idx, payload["stage"], tc.stage)
+		}
+		kinds := demoPayloadNodeKinds(t, payload)
+		if kinds[tc.wantKind] == 0 {
+			t.Fatalf("demoTreePayload(%d) node kinds = %#v, want at least one %s", tc.idx, kinds, tc.wantKind)
+		}
+	}
+	slideKinds := demoPayloadNodeKinds(t, demoTreePayload(2))
+	if slideKinds["generated_slide"] != len(demoSlides) {
+		t.Fatalf("slides_ready generated slides = %d, want %d", slideKinds["generated_slide"], len(demoSlides))
 	}
 }
 
@@ -188,10 +216,10 @@ func TestDemoFlowRejectsWrongOrStaleConfirmation(t *testing.T) {
 		t.Fatalf("TryGenerate ok=%v err=%v", ok, err)
 	}
 	waitForEvent(t, recorder, "task.question")
-	if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "other-task", QuestionID: "demo-confirm-idea", OptionID: "confirm"}); !ok || err == nil || !strings.Contains(err.Error(), "Demo Mode") {
+	if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "other-task", QuestionID: "demo-confirm-story", OptionID: "confirm"}); !ok || err == nil || !strings.Contains(err.Error(), "Demo Mode") {
 		t.Fatalf("wrong task ok=%v err=%v, want Demo Mode error", ok, err)
 	}
-	if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "demo-task", QuestionID: "demo-confirm-story", OptionID: "confirm"}); !ok || err == nil || !strings.Contains(err.Error(), "Demo Mode") {
+	if _, ok, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "demo-task", QuestionID: "demo-confirm-outline", OptionID: "confirm"}); !ok || err == nil || !strings.Contains(err.Error(), "Demo Mode") {
 		t.Fatalf("stale question ok=%v err=%v, want Demo Mode error", ok, err)
 	}
 }
@@ -203,7 +231,7 @@ func TestDemoFlowCompletesWithNineSlidePptxArtifact(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("TryGenerate ok=%v err=%v", ok, err)
 	}
-	for _, questionID := range []string{"demo-confirm-idea", "demo-confirm-story", "demo-confirm-chapters", "demo-confirm-outline"} {
+	for _, questionID := range demoConfirmationIDs() {
 		waitForQuestion(t, recorder, questionID)
 		if _, _, err := engine.TryRespond(context.Background(), RespondInput{TaskID: "demo-task", QuestionID: questionID, OptionID: "confirm"}); err != nil {
 			t.Fatalf("TryRespond(%s): %v", questionID, err)
@@ -415,6 +443,28 @@ func waitForEventPayload(t *testing.T, recorder *memoryRecorder, typ string) map
 	}
 	t.Fatalf("timed out waiting for event %s", typ)
 	return nil
+}
+
+func demoPayloadNodeKinds(t *testing.T, payload map[string]any) map[string]int {
+	t.Helper()
+	tree, ok := payload["tree"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload tree = %#v, want map", payload["tree"])
+	}
+	rawNodes, ok := tree["nodes"].([]map[string]any)
+	if !ok {
+		t.Fatalf("tree nodes = %#v, want []map[string]any", tree["nodes"])
+	}
+	kinds := map[string]int{}
+	for _, node := range rawNodes {
+		kind, _ := node["kind"].(string)
+		kinds[kind]++
+	}
+	return kinds
+}
+
+func demoConfirmationIDs() []string {
+	return []string{"demo-confirm-story", "demo-confirm-outline", "demo-confirm-slides"}
 }
 
 func eventTypes(events []types.BridgeEvent) []string {
