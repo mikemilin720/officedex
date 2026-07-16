@@ -62,20 +62,23 @@ ffmpeg -hide_banner -loglevel error -y \
 ffmpeg -hide_banner -loglevel error -y -i "$CLEAN" \
   -filter_complex \
   "[0:v]trim=start=0:end=4,setpts=PTS-STARTPTS[v0]; \
-   [0:v]trim=start=7:end=12,setpts=PTS-STARTPTS[v1]; \
-   [0:v]trim=start=24:end=30,setpts=PTS-STARTPTS[v2]; \
-   [0:v]trim=start=49:end=55,setpts=PTS-STARTPTS[v3]; \
-   [0:v]trim=start=65:end=71,setpts=PTS-STARTPTS[v4]; \
-   [0:v]trim=start=82:end=85,setpts=PTS-STARTPTS[v5]; \
-   [v0][v1][v2][v3][v4][v5]concat=n=6:v=1:a=0[base]; \
+   [0:v]trim=start=7:end=11,setpts=PTS-STARTPTS[v1]; \
+   [0:v]trim=start=24:end=29,setpts=PTS-STARTPTS[v2]; \
+   [0:v]trim=start=49:end=54,setpts=PTS-STARTPTS[v3]; \
+   [0:v]trim=start=64:end=69,setpts=PTS-STARTPTS[v4]; \
+   [0:v]trim=start=73:end=77,setpts=PTS-STARTPTS[v5]; \
+   [0:v]trim=start=82:end=85,setpts=PTS-STARTPTS[v6]; \
+   [v0][v1][v2][v3][v4][v5][v6]concat=n=7:v=1:a=0[base]; \
    [base]subtitles=filename='$X_GUIDES':force_style='FontName=Arial,FontSize=10,PrimaryColour=&H001A1005,OutlineColour=&H00F2FAFC,BorderStyle=3,Outline=5,Shadow=0,MarginL=34,MarginV=28,Alignment=7,Bold=1'[video]" \
   -map "[video]" -an -c:v libx264 -preset medium -crf 19 -movflags +faststart "$X_CUT"
 
 ffmpeg -hide_banner -loglevel error -y -i "$CLEAN" \
   -filter_complex \
-  "[0:v]trim=start=55:end=72,setpts=PTS-STARTPTS[product]; \
+  "[0:v]trim=start=55:end=62,setpts=PTS-STARTPTS[edit_prompt]; \
+   [0:v]trim=start=64:end=69,setpts=PTS-STARTPTS[edit_confirm]; \
+   [0:v]trim=start=72:end=77,setpts=PTS-STARTPTS[edit_result]; \
    [0:v]trim=start=82:end=85,setpts=PTS-STARTPTS[cta]; \
-   [product][cta]concat=n=2:v=1:a=0,scale=1080:608:force_original_aspect_ratio=decrease, \
+   [edit_prompt][edit_confirm][edit_result][cta]concat=n=4:v=1:a=0,scale=1080:608:force_original_aspect_ratio=decrease, \
    pad=1080:1920:0:656:#FCFAF2, \
    drawtext=font='Arial':text='From prompt to editable PPTX':fontcolor=#05101A:fontsize=58:x=(w-text_w)/2:y=210, \
    drawtext=font='Arial':text='Plan. Confirm. Preview. Edit.':fontcolor=#03849B:fontsize=38:x=(w-text_w)/2:y=300, \
