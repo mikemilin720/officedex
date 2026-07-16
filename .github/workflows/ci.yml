@@ -53,5 +53,8 @@ jobs:
       - name: Renderer tests (vitest)
         run: npx vitest run
 
-      - name: Go tests
+      - name: Go tests (normal build)
         run: go test ./... -count=1
+
+      - name: Go tests (demo build)
+        run: go test -tags officedex_demo ./... -count=1
