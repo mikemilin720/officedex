@@ -56,6 +56,9 @@ jobs:
       - name: TypeScript lint (tsc --noEmit)
         run: npm run lint
 
+      - name: Build and release script tests (node:test)
+        run: npm run test:scripts
+
       - name: Renderer tests (vitest)
         run: npx vitest run
 

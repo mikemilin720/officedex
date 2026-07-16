@@ -1,6 +1,6 @@
 {
   "name": "officedex",
-  "version": "0.5.43",
+  "version": "0.6.0",
   "description": "The AI desktop workspace for documents, slides, and spreadsheets. Wails v2 + React 19 client for OfficeCLI.",
   "license": "GPL-3.0-only",
   "homepage": "https://github.com/officecli/officedex#readme",
@@ -29,8 +29,9 @@
     "dist:mac": "npm run prefetch:officecli && wails build -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\" && node scripts/bundle-runtime.mjs && npm run bundle:officecli:mac && node scripts/notarize.mjs build/bin/OfficeDex.app",
     "dist:win": "npm run prefetch:officecli && wails build -platform windows/amd64 -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\"",
     "test": "vitest run",
+    "test:scripts": "node --test scripts/bundle-licenses.test.mjs scripts/sync-embedded-pptist.test.mjs scripts/verify-font-licenses.test.mjs scripts/verify-release-version.test.mjs",
     "test:go": "env -u GOROOT go test ./... -count=1 && env -u GOROOT go test -tags officedex_demo ./... -count=1",
-    "test:all": "npm run lint && npx vitest run && npm run test:go && npm run test:e2e",
+    "test:all": "npm run lint && npm run test:scripts && npx vitest run && npm run test:go && npm run test:e2e",
     "test:e2e": "node scripts/run-real-e2e.mjs",
     "test:e2e:real": "node scripts/run-real-e2e.mjs",
     "test:e2e:list": "node scripts/run-real-e2e.mjs --list",
@@ -62,7 +63,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "jsdom": "^26.1.0",
     "typescript": "^5.7.3",
-    "vite": "^6.4.1",
-    "vitest": "^3.2.4"
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
   }
 }

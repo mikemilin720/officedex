@@ -72,6 +72,9 @@ jobs:
       - name: Lint (typecheck)
         run: npm run lint
 
+      - name: Build and release script tests (node:test)
+        run: npm run test:scripts
+
       - name: Renderer tests (vitest)
         run: npx vitest run
 
@@ -95,6 +98,16 @@ jobs:
       - name: Bundle release licenses (macOS)
         if: runner.os == 'macOS'
         run: npm run bundle:licenses:mac
+
+      - name: Verify release version metadata
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          args=(--expected "$version" --package package.json --wails wails.json --tag "$GITHUB_REF_NAME")
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            args+=(--app build/bin/OfficeDex.app)
+          fi
+          node scripts/verify-release-version.mjs "${args[@]}"
 
       - name: Import signing certificate (macOS)
         if: runner.os == 'macOS'
