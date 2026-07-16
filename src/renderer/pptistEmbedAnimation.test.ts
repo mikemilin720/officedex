@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasRenderableImages, randomPageRenderDelayMs } from "../../../PPTist/src/embedAnimation";
+import { hasRenderableImages, randomPageRenderDelayMs } from "../../third_party/pptist/src/embedAnimation";
 
 describe("PPTist embed page render delay", () => {
   it("uses a bounded short random delay for pages without images", () => {

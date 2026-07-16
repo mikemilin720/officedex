@@ -176,7 +176,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("normalizes PPTist embed locale query values", async () => {
-    const { normalizeEmbedLocale } = await import("../../../../PPTist/src/embedLocale");
+    const { normalizeEmbedLocale } = await import("../../../third_party/pptist/src/embedLocale");
 
     expect(normalizeEmbedLocale("en")).toBe("en");
     expect(normalizeEmbedLocale("zh")).toBe("zh");
@@ -185,7 +185,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("translates common PPTist editor UI copy for English embeds", async () => {
-    const { translateEmbedUiText } = await import("../../../../PPTist/src/embedLocale");
+    const { translateEmbedUiText } = await import("../../../third_party/pptist/src/embedLocale");
 
     expect(translateEmbedUiText("en", "设计")).toBe("Design");
     expect(translateEmbedUiText("en", "切换")).toBe("Transition");
@@ -202,7 +202,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("translates PPTist transition and animation panel copy for English embeds", async () => {
-    const { translateEmbedUiText } = await import("../../../../PPTist/src/embedLocale");
+    const { translateEmbedUiText } = await import("../../../third_party/pptist/src/embedLocale");
 
     expect(translateEmbedUiText("en", "应用到全部")).toBe("Apply to all");
     expect(translateEmbedUiText("en", "已应用到全部")).toBe("Applied to all");
@@ -231,9 +231,9 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("keeps PPTist animation config labels translatable in English embeds", async () => {
-    const { translateEmbedUiText } = await import("../../../../PPTist/src/embedLocale");
-    const animationSource = readFileSync("../PPTist/src/configs/animation.ts", "utf8");
-    const elementSource = readFileSync("../PPTist/src/configs/element.ts", "utf8");
+    const { translateEmbedUiText } = await import("../../../third_party/pptist/src/embedLocale");
+    const animationSource = readFileSync("third_party/pptist/src/configs/animation.ts", "utf8");
+    const elementSource = readFileSync("third_party/pptist/src/configs/element.ts", "utf8");
     const labelMatches = [animationSource, elementSource]
       .join("\n")
       .matchAll(/['"]([^'"]*[\u4e00-\u9fff][^'"]*)['"]/g);
@@ -245,7 +245,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("hides PPTist editor chrome by default in embed mode", () => {
-    const editorSource = readFileSync("../PPTist/src/views/Editor/index.vue", "utf8");
+    const editorSource = readFileSync("third_party/pptist/src/views/Editor/index.vue", "utf8");
 
     expect(editorSource).toContain('<EditorHeader v-if="!embedMode" class="layout-header" />');
     expect(editorSource).toContain('<Toolbar v-if="!embedMode" class="layout-content-right" />');
@@ -259,7 +259,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("localizes the PPTist speaker notes placeholder before ProseMirror renders it", () => {
-    const remarkEditorSource = readFileSync("../PPTist/src/views/Editor/Remark/Editor.vue", "utf8");
+    const remarkEditorSource = readFileSync("third_party/pptist/src/views/Editor/Remark/Editor.vue", "utf8");
 
     expect(remarkEditorSource).toContain("translateEmbedUiText");
     expect(remarkEditorSource).toContain("normalizeEmbedLocale");
@@ -267,13 +267,13 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("uses a larger default canvas zoom for editable PPTist embeds", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
 
     expect(appSource).toContain("if (isEmbedEditable) mainStore.setCanvasPercentage(96)");
   });
 
   it("reports embedded goto-slide timing and completion back to the host", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
     const hostSource = readFileSync("src/renderer/components/PptistEmbedPanel.tsx", "utf8");
 
     expect(hostSource).toContain("host:goto-slide:post");
@@ -286,7 +286,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("supports selecting referenced PPTist elements from the host", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
     const hostSource = readFileSync("src/renderer/components/PptistEmbedPanel.tsx", "utf8");
 
     expect(hostSource).toContain('type: "pptist:select-elements"');
@@ -297,7 +297,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("logs embedded deck state and first render frame while loading cached slides", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
 
     expect(appSource).toContain("iframe:load-slides:set-slides:start");
     expect(appSource).toContain("iframe:load-slides:set-slides:end");
@@ -305,7 +305,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("does not deep stringify the whole embedded deck to detect dirty slides", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
 
     expect(appSource).not.toContain("JSON.stringify(slidesStore.slides.map");
     expect(appSource).toContain("isEmbedProgrammaticUpdate");
@@ -313,7 +313,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("reports user edits dirty immediately while coalescing the full slide update payload", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
     const watcherStart = appSource.indexOf("// Notify parent when user edits a slide");
     const watcherEnd = appSource.indexOf("\nonMounted", watcherStart);
     const watcherSource = appSource.slice(watcherStart, watcherEnd);
@@ -330,7 +330,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("defers editable PPTist controls until after the embedded slide first paints", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
 
     expect(appSource).toContain("deferEmbedEditableModeForRender");
     expect(appSource).toContain("restoreEmbedEditableModeAfterRender");
@@ -339,7 +339,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("hydrates the embedded thumbnail budget before lazily hydrating the rest of the deck", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
 
     expect(appSource).toContain("buildEmbedInitialSlides");
     expect(appSource).toContain("getEmbedInitialHydratedSlideCount");
@@ -349,7 +349,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("hydrates the active slide when PPTist internal thumbnails change slideIndex", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
 
     expect(appSource).toContain("watchEmbedSlideIndexForHydration");
     expect(appSource).toContain("slidesStore.slideIndex");
@@ -358,7 +358,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("cancels animated embed slide queues before replacing them with a final PPTX artifact", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
     const loadSlidesStart = appSource.indexOf("function loadSlidesIntoEmbed");
     const loadPptxStart = appSource.indexOf("case 'pptist:load-pptx'");
     const loadPptxEnd = appSource.indexOf("case 'pptist:goto-slide'", loadPptxStart);
@@ -372,7 +372,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("reports synchronous PPTist edit ops as applied before waiting for the next render frame", () => {
-    const appSource = readFileSync("../PPTist/src/App.vue", "utf8");
+    const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
     const fnStart = appSource.indexOf("async function applyPptistEditOps");
     const fnEnd = appSource.indexOf("function setupEmbedMode", fnStart);
     const fnSource = appSource.slice(fnStart, fnEnd);
@@ -387,7 +387,7 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("loads only the active embedded PPTist thumbnail before progressively rendering the rail", () => {
-    const thumbnailsSource = readFileSync("../PPTist/src/views/Editor/Thumbnails/index.vue", "utf8");
+    const thumbnailsSource = readFileSync("third_party/pptist/src/views/Editor/Thumbnails/index.vue", "utf8");
 
     expect(thumbnailsSource).toContain("const initialThumbnailLoadConfig = getPptxPerformanceConfig");
     expect(thumbnailsSource).toContain("initialLimit: initialThumbnailLoadConfig.initialLimit");
