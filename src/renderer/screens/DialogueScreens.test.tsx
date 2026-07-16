@@ -5104,7 +5104,7 @@ describe("DialogueScreen state machine", () => {
     );
 
     await waitFor(() => expect(readLocalImageSpy).toHaveBeenCalledWith("/tmp/reference.png"));
-    expect(screen.getByRole("img", { name: "reference.png" })).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "reference.png" })).toBeTruthy();
   });
 
   it("labels added reference image cards with a semantic panel header and card badges", async () => {
