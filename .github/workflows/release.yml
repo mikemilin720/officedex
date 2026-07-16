@@ -52,9 +52,15 @@ jobs:
         run: npm ci
 
       - name: Build embedded PPTist from committed source
+        if: runner.os != 'Windows'
         run: npm run build:pptist
 
       - name: Verify embedded PPTist bundle is reproducible
+        # Vue/Vite content hashes are platform-dependent on Windows. The
+        # committed bundle is rebuilt byte-for-byte on Ubuntu CI and again in
+        # the macOS release job; Windows packages that verified bundle instead
+        # of replacing it with a platform-specific equivalent.
+        if: runner.os != 'Windows'
         shell: bash
         run: git diff --exit-code -- public/pptist
 
