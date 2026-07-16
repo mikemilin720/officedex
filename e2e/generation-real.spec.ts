@@ -3,6 +3,8 @@ import {
   answerPlanUntilCompleted,
   assertNoResponseContractError,
   attachHostReport,
+  dismissOnboarding,
+  expectPptistText,
   fixturePath,
   preparePage,
   recordScenario,
@@ -74,6 +76,16 @@ test.describe("OfficeDex real client generation and artifact flows", () => {
       const durationMs = Date.now() - startedAt;
       if (item.documentType === "pptx") {
         await expect(page.locator(".living-tree-cockpit[data-vibe-stage='completed'] .living-tree-pptx-edit-panel.is-review-mode").first()).toBeVisible();
+        const verifiedTitle = "OfficeDex v0.6.0 Verified";
+        const editInput = page.getByPlaceholder(/Ask to modify this PPT/i);
+        await editInput.fill(`将第一页的标题改为“${verifiedTitle}”`);
+        await page.getByRole("button", { name: /Send edit request/i }).click();
+        await expect(page.getByText(/Saved locally\./i).last()).toBeVisible({ timeout: 180_000 });
+        await expectPptistText(page, verifiedTitle);
+
+        await page.reload();
+        await dismissOnboarding(page);
+        await expectPptistText(page, verifiedTitle);
       } else {
         await expect(page.getByText(artifact.artifactPath.split(/[\\/]/).pop() ?? artifact.artifactPath)).toBeVisible();
       }

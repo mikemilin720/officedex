@@ -79,6 +79,7 @@ const parsedArtifactSlidesCache = new Map<string, PptistSlide[]>();
 interface PersistentParsedSlidesCache {
   get(key: string): Promise<PptistSlide[] | null>;
   set(key: string, slides: PptistSlide[]): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 let persistentParsedSlidesCacheForTests: PersistentParsedSlidesCache | null | undefined;
@@ -112,6 +113,12 @@ function cacheParsedArtifactSlides(cacheKey: string, slides: PptistSlide[]) {
     if (!oldestKey) break;
     parsedArtifactSlidesCache.delete(oldestKey);
   }
+}
+
+async function invalidateParsedArtifactSlides(cacheKey: string) {
+  if (!cacheKey) return;
+  parsedArtifactSlidesCache.delete(cacheKey);
+  await persistentParsedSlidesCache().delete(cacheKey);
 }
 
 function openParsedSlidesCacheDb(): Promise<IDBDatabase | null> {
@@ -167,6 +174,17 @@ function getDefaultPersistentParsedSlidesCache(): PersistentParsedSlidesCache {
         for (let i = 0; i < overflow; i += 1) {
           await requestToPromise(store.delete(allKeys[i]));
         }
+      } finally {
+        db.close();
+      }
+    },
+    async delete(key: string) {
+      if (!key) return;
+      const db = await openParsedSlidesCacheDb();
+      if (!db) return;
+      try {
+        const tx = db.transaction(PERSISTENT_PARSED_ARTIFACT_STORE, "readwrite");
+        await requestToPromise(tx.objectStore(PERSISTENT_PARSED_ARTIFACT_STORE).delete(key));
       } finally {
         db.close();
       }
@@ -282,6 +300,7 @@ export const PptistEmbedPanel = forwardRef<PptistEmbedPanelHandle, PptistEmbedPa
     const autosaveInFlightRef = useRef(false);
     const autosavePendingRef = useRef(false);
     const activeAutosaveRequestIdRef = useRef<string | null>(null);
+    const activeAutosaveCacheKeyRef = useRef("");
     const requestAutosaveRef = useRef<() => void>(() => {});
     const slideSwitchHideTimerRef = useRef<number | null>(null);
     const slideSwitchFallbackTimerRef = useRef<number | null>(null);
@@ -477,6 +496,7 @@ export const PptistEmbedPanel = forwardRef<PptistEmbedPanelHandle, PptistEmbedPa
     const finishAutosaveCycle = useCallback((requestId: string) => {
       if (activeAutosaveRequestIdRef.current !== requestId) return;
       activeAutosaveRequestIdRef.current = null;
+      activeAutosaveCacheKeyRef.current = "";
       autosaveInFlightRef.current = false;
       if (!autosavePendingRef.current) return;
       autosavePendingRef.current = false;
@@ -496,6 +516,7 @@ export const PptistEmbedPanel = forwardRef<PptistEmbedPanelHandle, PptistEmbedPa
       enqueueOrRun(() => {
         const requestId = nextRequestId("export");
         activeAutosaveRequestIdRef.current = requestId;
+        activeAutosaveCacheKeyRef.current = artifactCacheKeyRef.current;
         const timeout = window.setTimeout(() => {
           if (activeAutosaveRequestIdRef.current !== requestId) return;
           exportTimeoutsRef.current.delete(requestId);
@@ -710,7 +731,10 @@ export const PptistEmbedPanel = forwardRef<PptistEmbedPanelHandle, PptistEmbedPa
               savePptxTimeoutMs(bytes.byteLength),
               "Saving PPTX locally timed out. Your in-editor changes are still kept; retry after checking file access.",
             )
-              .then((filePath) => {
+              .then(async (filePath) => {
+                if (autosaveRequestId) {
+                  await invalidateParsedArtifactSlides(activeAutosaveCacheKeyRef.current);
+                }
                 onAutosaveStateChangeRef.current?.("saved");
                 onExported?.(filePath);
                 if (autosaveRequestId) finishAutosaveCycle(autosaveRequestId);
@@ -973,6 +997,7 @@ export const PptistEmbedPanel = forwardRef<PptistEmbedPanelHandle, PptistEmbedPa
         autosaveInFlightRef.current = false;
         autosavePendingRef.current = false;
         activeAutosaveRequestIdRef.current = null;
+        activeAutosaveCacheKeyRef.current = "";
         clearSlideSwitchTimers();
         exportTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
         exportTimeoutsRef.current.clear();

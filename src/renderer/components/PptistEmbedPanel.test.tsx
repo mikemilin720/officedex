@@ -601,6 +601,9 @@ describe("PptistEmbedPanel", () => {
       set: async (key, slides) => {
         persistentStore.set(key, slides as typeof parsedSlides);
       },
+      delete: async (key) => {
+        persistentStore.delete(key);
+      },
     });
 
     const first = render(
@@ -852,6 +855,12 @@ describe("PptistEmbedPanel", () => {
   });
 
   it("requests snapshots, applies AI edit ops, and immediately autosaves the result back to the artifact", async () => {
+    const deleteParsedSlides = vi.fn(async () => undefined);
+    setPptistParsedSlidesPersistentCacheForTests({
+      get: async () => null,
+      set: async () => undefined,
+      delete: deleteParsedSlides,
+    });
     const ref = createRef<PptistEmbedPanelHandle>();
     const onAutosaveStateChange = vi.fn();
     const { container } = render(
@@ -906,6 +915,7 @@ describe("PptistEmbedPanel", () => {
       data: { type: "pptist:export-result", requestId: exportMessage.requestId, buffer: new Uint8Array([9, 8, 7]).buffer, fileName: artifact.fileName, targetFilePath: artifact.filePath },
     }));
     await waitFor(() => expect(officecli.savePptx).toHaveBeenCalledWith(new Uint8Array([9, 8, 7]), artifact.fileName, { targetFilePath: artifact.filePath }));
+    await waitFor(() => expect(deleteParsedSlides).toHaveBeenCalledWith(expect.stringContaining(artifact.filePath)));
     expect(onAutosaveStateChange).toHaveBeenLastCalledWith("saved");
   });
 
