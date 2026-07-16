@@ -19,6 +19,8 @@
     "prebuild": "npm run prefetch:officecli",
     "dev": "wails dev",
     "dev:browser": "vite --host=0.0.0.0 --port=3100",
+    "bundle:licenses:mac": "node scripts/bundle-licenses.mjs --target build/bin/OfficeDex.app",
+    "bundle:licenses:win": "node scripts/bundle-licenses.mjs --target build/bin",
     "bundle:officecli:mac": "node scripts/codesign-bundled-officecli.mjs --app build/bin/OfficeDex.app --source build/officecli/officecli",
     "build:pptist": "bash scripts/build-embedded-pptist.sh",
     "build:local": "bash scripts/build-local-app.sh",

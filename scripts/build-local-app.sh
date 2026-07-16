@@ -89,6 +89,12 @@ echo "[build-local-app] building OfficeDex.app"
 )
 verify_app_executable
 
+echo "[build-local-app] bundling release licenses"
+(
+  cd "${OFFICEDEX_DIR}"
+  npm run bundle:licenses:mac
+)
+
 echo "[build-local-app] bundling local officecli into app"
 (
   cd "${OFFICEDEX_DIR}"

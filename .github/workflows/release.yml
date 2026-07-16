@@ -92,6 +92,10 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           wails build -platform ${{ matrix.platform }} -trimpath -ldflags "-X main.appVersion=${version}"
 
+      - name: Bundle release licenses (macOS)
+        if: runner.os == 'macOS'
+        run: npm run bundle:licenses:mac
+
       - name: Import signing certificate (macOS)
         if: runner.os == 'macOS'
         env:
@@ -173,6 +177,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $resDir | Out-Null
           Copy-Item "build\officecli\officecli.exe" -Destination "$resDir\officecli.exe" -Force
           Copy-Item "build\officecli\version.json" -Destination "$resDir\version.json" -Force
+
+      - name: Bundle release licenses (Windows)
+        if: runner.os == 'Windows'
+        run: npm run bundle:licenses:win
 
       - name: Archive (macOS)
         if: runner.os == 'macOS'
