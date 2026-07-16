@@ -76,106 +76,10 @@ mkdir -p "$(dirname "${OFFICECLI_STAGE_BIN}")"
 )
 
 echo "[build-local-app] building embedded PPTist bundle"
-PPTIST_DIR="${REPO_ROOT}/PPTist"
-if [[ ! -d "${PPTIST_DIR}" ]]; then
-  echo "[build-local-app] missing PPTist at ${PPTIST_DIR}" >&2
-  exit 1
-fi
 (
-  cd "${PPTIST_DIR}"
-  npm run build-only
+  cd "${OFFICEDEX_DIR}"
+  npm run build:pptist
 )
-echo "[build-local-app] syncing PPTist dist into officedex/public/pptist"
-# wails build below copies public/ into the app, so refresh the embedded PPTist
-# bundle here (otherwise the iframe runs a stale build).
-rsync -a --delete "${PPTIST_DIR}/dist/" "${OFFICEDEX_DIR}/public/pptist/"
-cat > "${OFFICEDEX_DIR}/public/pptist/officedex-embed.css" <<'CSS'
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen {
-  position: relative !important;
-  left: auto !important;
-  top: auto !important;
-  width: 160px !important;
-  height: 100% !important;
-  flex: 0 0 160px !important;
-  pointer-events: auto !important;
-  z-index: auto !important;
-  overflow: hidden !important;
-  background: #fff !important;
-  border-right: 1px solid #e5e7eb !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-center {
-  width: calc(100% - 160px) !important;
-  min-width: 0 !important;
-  flex: 1 1 auto !important;
-}
-
-.pptist-editor.is-embed-editable-mode .layout-content-left {
-  width: 128px !important;
-  flex: 0 0 128px !important;
-}
-
-.pptist-editor.is-embed-editable-mode .layout-content-center {
-  width: calc(100% - 128px - 260px) !important;
-  min-width: 0 !important;
-}
-
-.pptist-editor.is-embed-editable-mode .layout-content-left .thumbnail-slide {
-  width: 94px !important;
-  height: 52.875px !important;
-}
-
-.pptist-editor.is-embed-editable-mode .layout-content-left .thumbnail-slide .elements {
-  transform: scale(0.094) !important;
-}
-
-.pptist-editor.is-embed-editable-mode .layout-content-left .thumbnail-item {
-  padding: 6px 0 !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen .thumbnails {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen.thumbnails {
-  width: 160px !important;
-  height: 100% !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen .thumbnail-slide {
-  width: 118px !important;
-  height: 66.375px !important;
-  cursor: pointer !important;
-  pointer-events: none !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen .thumbnail-slide * {
-  cursor: pointer !important;
-  pointer-events: none !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen .thumbnail-slide .elements {
-  transform: scale(0.118) !important;
-}
-
-.pptist-editor.is-embed-readonly-mode .layout-content-left-offscreen .thumbnail-item {
-  padding: 8px 0 !important;
-  cursor: pointer !important;
-  pointer-events: auto !important;
-}
-CSS
-node - "${OFFICEDEX_DIR}/public/pptist/index.html" <<'NODE'
-const fs = require("node:fs");
-const indexPath = process.argv[2];
-let html = fs.readFileSync(indexPath, "utf8");
-if (!html.includes("officedex-embed.css")) {
-  const scriptMatch = html.match(/    <script type="module" crossorigin src="\.\/assets\/index-[^"]+\.js"><\/script>/);
-  if (!scriptMatch) throw new Error("PPTist index module script not found");
-  html = html.replace(scriptMatch[0], `    <link rel="stylesheet" crossorigin href="./officedex-embed.css">\n${scriptMatch[0]}`);
-  fs.writeFileSync(indexPath, html);
-}
-NODE
 
 echo "[build-local-app] building OfficeDex.app"
 (

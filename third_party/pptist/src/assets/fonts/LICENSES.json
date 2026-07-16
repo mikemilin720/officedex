@@ -1,0 +1,86 @@
+{
+  "Inter.woff2": {
+    "family": "Inter",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/Inter.txt",
+    "source": "https://github.com/rsms/inter"
+  },
+  "JetBrainsMono.woff2": {
+    "family": "JetBrains Mono",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/JetBrainsMono.txt",
+    "source": "https://github.com/JetBrains/JetBrainsMono"
+  },
+  "LXGWNeoXiHei.woff2": {
+    "family": "LXGW Neo XiHei",
+    "license": "IPA Font License Agreement 1.0",
+    "licenseFile": "licenses/LXGWNeoXiHei.txt",
+    "source": "https://github.com/lxgw/LxgwNeoXiHei"
+  },
+  "LXGWNeoZhiSong.woff2": {
+    "family": "LXGW Neo ZhiSong",
+    "license": "IPA Font License Agreement 1.0",
+    "licenseFile": "licenses/LXGWNeoZhiSong.txt",
+    "source": "https://github.com/lxgw/LxgwNeoZhiSong"
+  },
+  "LXGWWenKai.woff2": {
+    "family": "LXGW WenKai",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/LXGWWenKai.txt",
+    "source": "https://github.com/lxgw/LxgwWenKai"
+  },
+  "Lato.woff2": {
+    "family": "Lato",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/Lato.txt",
+    "source": "https://github.com/latofonts/lato-source"
+  },
+  "Literata.woff2": {
+    "family": "Literata",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/Literata.txt",
+    "source": "https://github.com/googlefonts/literata"
+  },
+  "Merriweather.woff2": {
+    "family": "Merriweather",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/Merriweather.txt",
+    "source": "https://github.com/SorkinType/Merriweather"
+  },
+  "Montserrat.woff2": {
+    "family": "Montserrat",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/Montserrat.txt",
+    "source": "https://github.com/JulietaUla/Montserrat"
+  },
+  "SourceHanSans.woff2": {
+    "family": "Source Han Sans",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/SourceHanSans.txt",
+    "source": "https://github.com/adobe-fonts/source-han-sans"
+  },
+  "SourceHanSerif.woff2": {
+    "family": "Source Han Serif",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/SourceHanSerif.txt",
+    "source": "https://github.com/adobe-fonts/source-han-serif"
+  },
+  "SourceSansPro.woff2": {
+    "family": "Source Sans Pro",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/SourceSansPro.txt",
+    "source": "https://github.com/adobe-fonts/source-sans"
+  },
+  "SourceSerif4.woff2": {
+    "family": "Source Serif 4",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/SourceSerif4.txt",
+    "source": "https://github.com/adobe-fonts/source-serif"
+  },
+  "ZhuQueFangSong.woff2": {
+    "family": "ZhuQue FangSong",
+    "license": "SIL Open Font License 1.1",
+    "licenseFile": "licenses/ZhuQueFangSong.txt",
+    "source": "https://github.com/TrionesType/zhuque"
+  }
+}
