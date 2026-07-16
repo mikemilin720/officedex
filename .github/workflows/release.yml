@@ -192,8 +192,18 @@ jobs:
           set -euo pipefail
           KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
-          NOTARIZE_API_KEY_PATH="$KEY_PATH" node scripts/notarize.mjs build/bin/OfficeDex.app
-          rm -f "$KEY_PATH"
+          trap 'rm -f "$KEY_PATH"' EXIT
+          attempt=1
+          until NOTARIZE_API_KEY_PATH="$KEY_PATH" node scripts/notarize.mjs build/bin/OfficeDex.app; do
+            if (( attempt >= 3 )); then
+              echo "::error::.app signing/notarization failed after $attempt attempts"
+              exit 1
+            fi
+            delay=$((attempt * 20))
+            echo "::warning::.app signing/notarization attempt $attempt failed; retrying in ${delay}s"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
 
       - name: Bundle officecli (Windows)
         if: runner.os == 'Windows'
@@ -256,9 +266,19 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
-          NOTARIZE_API_KEY_PATH="$KEY_PATH" \
-            node scripts/notarize.mjs "dist-artifacts/OfficeDex-${tag}-darwin-universal.dmg"
-          rm -f "$KEY_PATH"
+          trap 'rm -f "$KEY_PATH"' EXIT
+          attempt=1
+          until NOTARIZE_API_KEY_PATH="$KEY_PATH" \
+            node scripts/notarize.mjs "dist-artifacts/OfficeDex-${tag}-darwin-universal.dmg"; do
+            if (( attempt >= 3 )); then
+              echo "::error::DMG signing/notarization failed after $attempt attempts"
+              exit 1
+            fi
+            delay=$((attempt * 20))
+            echo "::warning::DMG signing/notarization attempt $attempt failed; retrying in ${delay}s"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
 
       - name: Archive (Windows)
         if: runner.os == 'Windows'
