@@ -7,6 +7,18 @@ MASTER="$ROOT/exports/officedex-ppt-launch-master-1080p.mp4"
 CLEAN="$ROOT/exports/officedex-ppt-launch-clean-1080p.mp4"
 X_CUT="$ROOT/exports/officedex-ppt-launch-x-30s.mp4"
 VERTICAL="$ROOT/exports/officedex-ppt-launch-vertical-20s.mp4"
+MASTER_GUIDES="$ROOT/captions/master-guides-en.srt"
+X_GUIDES="$ROOT/captions/x-guides-en.srt"
+
+test -s "$MASTER_GUIDES"
+test -s "$X_GUIDES"
+test "$(rg -c '^00:' "$MASTER_GUIDES")" = "6"
+test "$(rg -c '^00:' "$X_GUIDES")" = "3"
+rg -q '^Start with one prompt$' "$MASTER_GUIDES"
+rg -q '^Apply a precise AI edit$' "$MASTER_GUIDES"
+rg -q '^One prompt$' "$X_GUIDES"
+rg -q '^Edit with AI$' "$X_GUIDES"
+test ! -e "$ROOT/captions/master-burn-en.srt"
 
 check_media() {
   local file="$1"

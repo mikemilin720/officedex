@@ -11,3 +11,11 @@
 | 01:20–01:25 | CTA card | Download OfficeDex now |
 
 The verified browser capture is slowed uniformly to improve legibility and maintain calm, readable pacing. No fake product interface or simulated click is inserted.
+
+## On-screen guide policy
+
+- The 85-second master uses six short top-right feature guides so they stay clear of the persistent sidebar and slide thumbnails.
+- The 30-second X cut uses only `One prompt`, `Approve each step`, and `Edit with AI`.
+- The clean master has no guide text beyond the opening and CTA cards.
+- The vertical cut keeps its fixed top headline and bottom CTA only.
+- Full narration-style subtitles are not used.

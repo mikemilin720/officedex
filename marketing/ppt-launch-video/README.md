@@ -16,7 +16,7 @@ This production kit builds an English OfficeDex launch film from the verified de
 - [x] Demo run verified
 - [x] Product flow recorded in a headless browser
 - [x] Opening and CTA graphics prepared
-- [x] English on-screen captions prepared
+- [x] Short English feature guides prepared
 - [x] 85-second master exported and validated
 - [x] Clean 1080p master exported and validated
 - [x] 30-second X cutdown exported and validated

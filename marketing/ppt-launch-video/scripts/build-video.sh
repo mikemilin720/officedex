@@ -5,7 +5,8 @@ export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RAW_ROOT="$ROOT/raw/browser"
 GRAPHICS="$ROOT/graphics/rendered"
-CAPTIONS="$ROOT/captions/master-burn-en.srt"
+MASTER_GUIDES="$ROOT/captions/master-guides-en.srt"
+X_GUIDES="$ROOT/captions/x-guides-en.srt"
 EXPORTS="$ROOT/exports"
 MASTER="$EXPORTS/officedex-ppt-launch-master-1080p.mp4"
 CLEAN="$EXPORTS/officedex-ppt-launch-clean-1080p.mp4"
@@ -40,7 +41,7 @@ ffmpeg -hide_banner -loglevel error -y \
    [1:v]$common_video,setpts=${slow_factor}*PTS,trim=duration=${PRODUCT_SECONDS},setpts=PTS-STARTPTS[v1]; \
    [2:v]$common_video,trim=duration=${CTA_SECONDS},setpts=PTS-STARTPTS[v2]; \
    [v0][v1][v2]concat=n=3:v=1:a=0[base]; \
-   [base]subtitles=filename='$CAPTIONS':force_style='FontName=Arial,FontSize=11,PrimaryColour=&H00FFFFFF,OutlineColour=&H8005101A,BorderStyle=3,Outline=1,Shadow=0,MarginV=22,Alignment=2'[video]" \
+   [base]subtitles=filename='$MASTER_GUIDES':force_style='FontName=Arial,FontSize=9,PrimaryColour=&H001A1005,OutlineColour=&H00F2FAFC,BorderStyle=3,Outline=5,Shadow=0,MarginL=34,MarginV=28,Alignment=7,Bold=1'[video]" \
   -map "[video]" -an \
   -c:v libx264 -preset medium -crf 18 -profile:v high -level 4.1 \
   -movflags +faststart -t "$TIMELINE_SECONDS" "$MASTER"
@@ -58,7 +59,7 @@ ffmpeg -hide_banner -loglevel error -y \
   -c:v libx264 -preset medium -crf 18 -profile:v high -level 4.1 \
   -movflags +faststart -t "$TIMELINE_SECONDS" "$CLEAN"
 
-ffmpeg -hide_banner -loglevel error -y -i "$MASTER" \
+ffmpeg -hide_banner -loglevel error -y -i "$CLEAN" \
   -filter_complex \
   "[0:v]trim=start=0:end=4,setpts=PTS-STARTPTS[v0]; \
    [0:v]trim=start=7:end=12,setpts=PTS-STARTPTS[v1]; \
@@ -66,7 +67,8 @@ ffmpeg -hide_banner -loglevel error -y -i "$MASTER" \
    [0:v]trim=start=49:end=55,setpts=PTS-STARTPTS[v3]; \
    [0:v]trim=start=65:end=71,setpts=PTS-STARTPTS[v4]; \
    [0:v]trim=start=82:end=85,setpts=PTS-STARTPTS[v5]; \
-   [v0][v1][v2][v3][v4][v5]concat=n=6:v=1:a=0[video]" \
+   [v0][v1][v2][v3][v4][v5]concat=n=6:v=1:a=0[base]; \
+   [base]subtitles=filename='$X_GUIDES':force_style='FontName=Arial,FontSize=10,PrimaryColour=&H001A1005,OutlineColour=&H00F2FAFC,BorderStyle=3,Outline=5,Shadow=0,MarginL=34,MarginV=28,Alignment=7,Bold=1'[video]" \
   -map "[video]" -an -c:v libx264 -preset medium -crf 19 -movflags +faststart "$X_CUT"
 
 ffmpeg -hide_banner -loglevel error -y -i "$CLEAN" \
