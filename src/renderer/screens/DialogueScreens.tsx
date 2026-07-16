@@ -25,7 +25,7 @@ import {
   UserOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { getAttachmentSpec } from "../../shared/types";
 import type { Artifact, BridgeEvent, DesktopTask, DocumentType, GenerateInput, GenerationMode, ImagePromptSlot, ImagePromptTemplate, ImageRatio, ModifyPptistDeckResult, StageState, VibeProjectTreeNode, VibeTreeSnapshot, WorkspaceSummary } from "../../shared/types";
 import { defaultGenerateInput, documentTypeOptions, normalizeNewGenerationDocumentType } from "../defaults";
@@ -1072,7 +1072,7 @@ function ImageTemplateThumbnail({ src }: { src?: string }) {
   const [failedSrc, setFailedSrc] = useState<string | undefined>();
   const showImage = Boolean(src && failedSrc !== src);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setFailedSrc(undefined);
   }, [src]);
 
