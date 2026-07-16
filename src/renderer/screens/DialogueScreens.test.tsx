@@ -3815,12 +3815,12 @@ describe("DialogueScreen state machine", () => {
     const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
     const pendingRule = css.match(/\.living-tree-flow-node\.is-pending\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
     const confirmedRule = css.match(/\.living-tree-flow-node\.is-confirmed:not\(\.is-deck\)\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
-    const drawingBeforeRule = css.match(/\.living-tree-flow-node\.is-node-drawing::before,\n\.living-tree-flow-node\.is-idea-drawing::before\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
-    const drawingPendingRule = css.match(/\.living-tree-flow-node\.is-node-drawing\.is-pending,\n\.living-tree-flow-node\.is-idea-drawing\.is-pending\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const drawingBeforeRule = css.match(/\.living-tree-flow-node\.is-node-drawing::before,\r?\n\.living-tree-flow-node\.is-idea-drawing::before\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
+    const drawingPendingRule = css.match(/\.living-tree-flow-node\.is-node-drawing\.is-pending,\r?\n\.living-tree-flow-node\.is-idea-drawing\.is-pending\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
     const drawingOutlineRule = css.match(/\.living-tree-node-outline-rect\s*\{(?<body>[^}]*)\}/s)?.groups?.body ?? "";
     const visualAssetIconRule = css.match(/^\.living-tree-visual-asset-icon\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
     const slideThumbnailRule = css.match(/^\.living-tree-flow-node\.is-generated_slide\s*\{(?<body>[^}]*)\}/m)?.groups?.body ?? "";
-    const outlineKeyframes = css.match(/@keyframes living-tree-node-outline-draw\s*\{(?<body>.*?)\n\}/s)?.groups?.body ?? "";
+    const outlineKeyframes = css.match(/@keyframes living-tree-node-outline-draw\s*\{(?<body>.*?)\r?\n\}/s)?.groups?.body ?? "";
 
     expect(pendingRule).toContain("245, 196, 0");
     expect(pendingRule).not.toContain("221, 91, 0");

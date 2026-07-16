@@ -14,7 +14,7 @@ describe("verify-wails-app", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/executable is missing/i);
-    expect(result.stderr).toMatch(/Contents\/MacOS\/officedex/);
+    expect(result.stderr).toMatch(/Contents[\\/]MacOS[\\/]officedex/);
   });
 
   it("passes when CFBundleExecutable exists and is executable", async () => {

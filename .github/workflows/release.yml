@@ -51,6 +51,13 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Install vendored PPTist test dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd third_party/pptist
+          HUSKY=0 npm ci
+
       - name: Build embedded PPTist from committed source
         if: runner.os != 'Windows'
         run: npm run build:pptist
