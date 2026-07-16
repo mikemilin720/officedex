@@ -2171,19 +2171,34 @@ describe("DialogueScreen state machine", () => {
 		      }));
 		      await Promise.resolve();
 			    });
-			    expectDialogueBubbleNotLoading("Applying edit 1 in PPTist...");
-			    expect(screen.queryByText("Edits applied. Saving locally...")).toBeNull();
-		    expect(screen.queryByText("Changes pending local save...")).toBeNull();
-		    fireEvent.change(editInput, { target: { value: "Make the deck shorter." } });
-		    expect(sendButton.disabled).toBe(false);
+		    expectDialogueBubbleNotLoading("Applying edit 1 in PPTist...");
+		    const autosaveMessage = postMessage.mock.calls.find(([msg]) => {
+		      const payload = msg as { type?: string; requestId?: string; targetFilePath?: string };
+		      return payload.type === "pptist:export-pptx" && payload.targetFilePath === artifact.filePath;
+		    })?.[0] as { requestId: string; fileName?: string; targetFilePath: string };
+		    expect(autosaveMessage.requestId).toBeTruthy();
+		    expect(autosaveMessage.fileName).toBe(artifact.fileName);
 		    await act(async () => {
-		      await vi.advanceTimersByTimeAsync(2000);
+		      window.dispatchEvent(new MessageEvent("message", {
+		        source: iframe.contentWindow,
+		        data: {
+		          type: "pptist:export-result",
+		          requestId: autosaveMessage.requestId,
+		          targetFilePath: artifact.filePath,
+		          buffer: new Uint8Array([1, 2, 3]).buffer,
+		          fileName: artifact.fileName,
+		        },
+		      }));
+		      await Promise.resolve();
 		    });
-	    expect(postMessage.mock.calls.some(([msg]) => {
-	      const payload = msg as { type?: string; targetFilePath?: string };
-	      return payload.type === "pptist:export-pptx" && payload.targetFilePath;
-	    })).toBe(false);
-	    expect(savePptxSpy).not.toHaveBeenCalled();
+		    expect(savePptxSpy).toHaveBeenCalledWith(
+		      new Uint8Array([1, 2, 3]),
+		      artifact.fileName,
+		      { targetFilePath: artifact.filePath },
+		    );
+		    expect(screen.getByText("Saved locally.")).toBeTruthy();
+	    fireEvent.change(editInput, { target: { value: "Make the deck shorter." } });
+	    expect(sendButton.disabled).toBe(false);
 	    expect(exportButton.disabled).toBe(false);
 	    fireEvent.click(exportButton);
 	    const exportMessages = postMessage.mock.calls.filter(([msg]) => (msg as { type?: string }).type === "pptist:export-pptx");
@@ -2198,8 +2213,7 @@ describe("DialogueScreen state machine", () => {
 	      }));
 	      await Promise.resolve();
 	    });
-	    expect(savePptxSpy).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), artifact.fileName, undefined);
-	    expect(screen.getByText("Saved locally.")).toBeTruthy();
+	    expect(savePptxSpy).toHaveBeenLastCalledWith(new Uint8Array([1, 2, 3]), artifact.fileName, undefined);
 	    expect(onContinueModify).not.toHaveBeenCalled();
 	    expect(showInFolderButton.disabled).toBe(false);
 	  });

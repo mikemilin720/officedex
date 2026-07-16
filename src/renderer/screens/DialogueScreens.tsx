@@ -2618,7 +2618,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
             onSlideUpdated={handleSlideUpdated}
             onSelectionChanged={handlePptistSelectionChanged}
             onSlidesLoaded={handleSlidesLoaded}
-            autosaveEnabled={false}
+            autosaveEnabled={Boolean(hasPptxFile && artifact?.filePath && task.status === "completed")}
             thumbnailCapturePaused={pptistThumbnailCapturePaused}
             ariaLabel={completedReviewMode ? t("vibe.pptx.review.editorAria") : undefined}
             onAutosaveStateChange={(state, msg) => {
