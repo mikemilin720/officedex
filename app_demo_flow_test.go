@@ -15,6 +15,7 @@ func TestRecordAndEmitTaskEventPersistsWithoutWailsContext(t *testing.T) {
 	if err := store.Open(context.Background()); err != nil {
 		t.Fatalf("Open local store: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	reg, err := preview.New(preview.RegistryOptions{TrustedRoots: []string{t.TempDir()}})
 	if err != nil {
 		t.Fatalf("preview registry: %v", err)
