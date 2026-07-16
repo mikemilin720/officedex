@@ -15,14 +15,16 @@ check_media() {
   local want_width="$4"
   local want_height="$5"
   test -s "$file"
-  local duration width height
+  local duration width height audio_streams
   duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$file")"
   width="$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$file")"
   height="$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$file")"
+  audio_streams="$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$file")"
   awk -v value="$duration" -v min="$min_duration" -v max="$max_duration" 'BEGIN { exit !(value >= min && value <= max) }'
   test "$width" = "$want_width"
   test "$height" = "$want_height"
-  echo "${file:t}: duration=${duration}s dimensions=${width}x${height}"
+  test -z "$audio_streams"
+  echo "${file:t}: duration=${duration}s dimensions=${width}x${height} audio_streams=0"
 }
 
 check_media "$MASTER" 75 90 1920 1080

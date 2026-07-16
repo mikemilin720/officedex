@@ -5,7 +5,6 @@ export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RAW_ROOT="$ROOT/raw/browser"
 GRAPHICS="$ROOT/graphics/rendered"
-AUDIO="$ROOT/audio/generated/narration-samantha.wav"
 CAPTIONS="$ROOT/captions/master-burn-en.srt"
 EXPORTS="$ROOT/exports"
 MASTER="$EXPORTS/officedex-ppt-launch-master-1080p.mp4"
@@ -19,7 +18,6 @@ PRODUCT_SECONDS=$((TIMELINE_SECONDS - OPENING_SECONDS - CTA_SECONDS))
 
 mkdir -p "$EXPORTS"
 "$ROOT/scripts/render-graphics.sh"
-"$ROOT/scripts/generate-voice.sh"
 
 if [[ -n "${OFFICEDEX_PROMO_SOURCE:-}" ]]; then
   SOURCE="$OFFICEDEX_PROMO_SOURCE"
@@ -37,43 +35,39 @@ ffmpeg -hide_banner -loglevel error -y \
   -loop 1 -t "$OPENING_SECONDS" -i "$GRAPHICS/opening.png" \
   -i "$SOURCE" \
   -loop 1 -t "$CTA_SECONDS" -i "$GRAPHICS/cta.png" \
-  -i "$AUDIO" \
   -filter_complex \
   "[0:v]$common_video,trim=duration=${OPENING_SECONDS},setpts=PTS-STARTPTS[v0]; \
    [1:v]$common_video,setpts=${slow_factor}*PTS,trim=duration=${PRODUCT_SECONDS},setpts=PTS-STARTPTS[v1]; \
    [2:v]$common_video,trim=duration=${CTA_SECONDS},setpts=PTS-STARTPTS[v2]; \
    [v0][v1][v2]concat=n=3:v=1:a=0[base]; \
-   [base]subtitles=filename='$CAPTIONS':force_style='FontName=Arial,FontSize=11,PrimaryColour=&H00FFFFFF,OutlineColour=&H8005101A,BorderStyle=3,Outline=1,Shadow=0,MarginV=22,Alignment=2'[video]; \
-   [3:a]atrim=0:${TIMELINE_SECONDS},asetpts=PTS-STARTPTS[audio]" \
-  -map "[video]" -map "[audio]" \
+   [base]subtitles=filename='$CAPTIONS':force_style='FontName=Arial,FontSize=11,PrimaryColour=&H00FFFFFF,OutlineColour=&H8005101A,BorderStyle=3,Outline=1,Shadow=0,MarginV=22,Alignment=2'[video]" \
+  -map "[video]" -an \
   -c:v libx264 -preset medium -crf 18 -profile:v high -level 4.1 \
-  -c:a aac -b:a 192k -movflags +faststart -t "$TIMELINE_SECONDS" "$MASTER"
+  -movflags +faststart -t "$TIMELINE_SECONDS" "$MASTER"
 
 ffmpeg -hide_banner -loglevel error -y \
   -loop 1 -t "$OPENING_SECONDS" -i "$GRAPHICS/opening.png" \
   -i "$SOURCE" \
   -loop 1 -t "$CTA_SECONDS" -i "$GRAPHICS/cta.png" \
-  -i "$AUDIO" \
   -filter_complex \
   "[0:v]$common_video,trim=duration=${OPENING_SECONDS},setpts=PTS-STARTPTS[v0]; \
    [1:v]$common_video,setpts=${slow_factor}*PTS,trim=duration=${PRODUCT_SECONDS},setpts=PTS-STARTPTS[v1]; \
    [2:v]$common_video,trim=duration=${CTA_SECONDS},setpts=PTS-STARTPTS[v2]; \
-   [v0][v1][v2]concat=n=3:v=1:a=0[video]; \
-   [3:a]atrim=0:${TIMELINE_SECONDS},asetpts=PTS-STARTPTS[audio]" \
-  -map "[video]" -map "[audio]" \
+   [v0][v1][v2]concat=n=3:v=1:a=0[video]" \
+  -map "[video]" -an \
   -c:v libx264 -preset medium -crf 18 -profile:v high -level 4.1 \
-  -c:a aac -b:a 192k -movflags +faststart -t "$TIMELINE_SECONDS" "$CLEAN"
+  -movflags +faststart -t "$TIMELINE_SECONDS" "$CLEAN"
 
 ffmpeg -hide_banner -loglevel error -y -i "$MASTER" \
   -filter_complex \
-  "[0:v]trim=start=0:end=4,setpts=PTS-STARTPTS[v0];[0:a]atrim=start=0:end=4,asetpts=PTS-STARTPTS[a0]; \
-   [0:v]trim=start=7:end=12,setpts=PTS-STARTPTS[v1];[0:a]atrim=start=7:end=12,asetpts=PTS-STARTPTS[a1]; \
-   [0:v]trim=start=24:end=30,setpts=PTS-STARTPTS[v2];[0:a]atrim=start=24:end=30,asetpts=PTS-STARTPTS[a2]; \
-   [0:v]trim=start=49:end=55,setpts=PTS-STARTPTS[v3];[0:a]atrim=start=49:end=55,asetpts=PTS-STARTPTS[a3]; \
-   [0:v]trim=start=65:end=71,setpts=PTS-STARTPTS[v4];[0:a]atrim=start=65:end=71,asetpts=PTS-STARTPTS[a4]; \
-   [0:v]trim=start=82:end=85,setpts=PTS-STARTPTS[v5];[0:a]atrim=start=82:end=85,asetpts=PTS-STARTPTS[a5]; \
-   [v0][a0][v1][a1][v2][a2][v3][a3][v4][a4][v5][a5]concat=n=6:v=1:a=1[video][audio]" \
-  -map "[video]" -map "[audio]" -c:v libx264 -preset medium -crf 19 -c:a aac -b:a 160k -movflags +faststart "$X_CUT"
+  "[0:v]trim=start=0:end=4,setpts=PTS-STARTPTS[v0]; \
+   [0:v]trim=start=7:end=12,setpts=PTS-STARTPTS[v1]; \
+   [0:v]trim=start=24:end=30,setpts=PTS-STARTPTS[v2]; \
+   [0:v]trim=start=49:end=55,setpts=PTS-STARTPTS[v3]; \
+   [0:v]trim=start=65:end=71,setpts=PTS-STARTPTS[v4]; \
+   [0:v]trim=start=82:end=85,setpts=PTS-STARTPTS[v5]; \
+   [v0][v1][v2][v3][v4][v5]concat=n=6:v=1:a=0[video]" \
+  -map "[video]" -an -c:v libx264 -preset medium -crf 19 -movflags +faststart "$X_CUT"
 
 ffmpeg -hide_banner -loglevel error -y -i "$CLEAN" \
   -filter_complex \
@@ -83,11 +77,8 @@ ffmpeg -hide_banner -loglevel error -y -i "$CLEAN" \
    pad=1080:1920:0:656:#FCFAF2, \
    drawtext=font='Arial':text='From prompt to editable PPTX':fontcolor=#05101A:fontsize=58:x=(w-text_w)/2:y=210, \
    drawtext=font='Arial':text='Plan. Confirm. Preview. Edit.':fontcolor=#03849B:fontsize=38:x=(w-text_w)/2:y=300, \
-   drawtext=font='Arial':text='Download OfficeDex now':fontcolor=#05101A:fontsize=52:x=(w-text_w)/2:y=1530[video]; \
-   [0:a]atrim=start=55:end=72,asetpts=PTS-STARTPTS[a0]; \
-   [0:a]atrim=start=82:end=85,asetpts=PTS-STARTPTS[a1]; \
-   [a0][a1]concat=n=2:v=0:a=1[audio]" \
-  -map "[video]" -map "[audio]" -c:v libx264 -preset medium -crf 19 -c:a aac -b:a 160k -movflags +faststart "$VERTICAL"
+   drawtext=font='Arial':text='Download OfficeDex now':fontcolor=#05101A:fontsize=52:x=(w-text_w)/2:y=1530[video]" \
+  -map "[video]" -an -c:v libx264 -preset medium -crf 19 -movflags +faststart "$VERTICAL"
 
 echo "source=$SOURCE"
 echo "source_duration=$source_duration"

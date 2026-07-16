@@ -6,7 +6,7 @@ This production kit builds an English OfficeDex launch film from the verified de
 
 - Audience: overseas prospective users
 - Master: 1920×1080, 75–90 seconds
-- Voice: warm, confident English female voice
+- Audio: no voiceover and no audio track
 - Visuals: real OfficeDex interface and real PPTX only
 - CTA: Download OfficeDex now
 - Production: free-first and headless; no desktop editor required
@@ -16,7 +16,7 @@ This production kit builds an English OfficeDex launch film from the verified de
 - [x] Demo run verified
 - [x] Product flow recorded in a headless browser
 - [x] Opening and CTA graphics prepared
-- [x] English narration and captions prepared
+- [x] English on-screen captions prepared
 - [x] 85-second master exported and validated
 - [x] Clean 1080p master exported and validated
 - [x] 30-second X cutdown exported and validated

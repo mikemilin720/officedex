@@ -10,4 +10,4 @@
 | 01:18–01:20 | Final result hold | Let viewers read the vertical roadmap |
 | 01:20–01:25 | CTA card | Download OfficeDex now |
 
-The verified browser capture is slowed uniformly to improve legibility and make room for narration. No fake product interface or simulated click is inserted.
+The verified browser capture is slowed uniformly to improve legibility and maintain calm, readable pacing. No fake product interface or simulated click is inserted.
