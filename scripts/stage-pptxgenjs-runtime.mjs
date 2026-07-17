@@ -66,6 +66,12 @@ export function buildRuntimeSmokeScript() {
   return `require("pptxgenjs");`;
 }
 
+export function npmInvocationForPlatform(platform) {
+  return platform === "win32"
+    ? { command: "npm", shell: true }
+    : { command: "npm", shell: false };
+}
+
 export async function pruneRuntimeNodeModules(moduleRoot) {
   await rm(path.join(moduleRoot, ".bin"), { recursive: true, force: true });
 }
@@ -122,6 +128,7 @@ function run(command, args, options = {}) {
       env: options.env ?? process.env,
       stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
       windowsHide: true,
+      shell: options.shell ?? false,
     });
     let stdout = "";
     let stderr = "";
@@ -193,8 +200,12 @@ export async function stagePptxgenjsRuntime({
   await copyFile(path.join(packageDir, "package.json"), path.join(outputDir, "package.json"));
   await copyFile(path.join(packageDir, "package-lock.json"), path.join(outputDir, "package-lock.json"));
 
-  const npmCommand = platform === "win32" ? "npm.cmd" : "npm";
-  await run(npmCommand, ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", outputDir]);
+  const npmInvocation = npmInvocationForPlatform(platform);
+  await run(
+    npmInvocation.command,
+    ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", outputDir],
+    { shell: npmInvocation.shell },
+  );
   const moduleRoot = path.join(outputDir, "node_modules");
   await pruneRuntimeNodeModules(moduleRoot);
   const actualPptxgenjsVersion = await readPptxgenjsVersion(moduleRoot);

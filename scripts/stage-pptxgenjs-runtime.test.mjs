@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import * as runtimeStager from "./stage-pptxgenjs-runtime.mjs";
 import {
   NODE_VERSION,
   PPTXGENJS_VERSION,
@@ -13,6 +14,17 @@ import {
   pruneRuntimeNodeModules,
   verifyFileChecksum,
 } from "./stage-pptxgenjs-runtime.mjs";
+
+test("runs npm through a shell only on Windows", () => {
+  assert.deepEqual(runtimeStager.npmInvocationForPlatform?.("win32"), {
+    command: "npm",
+    shell: true,
+  });
+  assert.deepEqual(runtimeStager.npmInvocationForPlatform?.("darwin"), {
+    command: "npm",
+    shell: false,
+  });
+});
 
 test("finds the exact Node archive checksum", () => {
   const expected = "a".repeat(64);
