@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -77,7 +78,17 @@ func TestAppendPptxgenjsRuntimeEnvReplacesStaleValues(t *testing.T) {
 
 func assertRuntimeEnv(t *testing.T, env []string, expected ...string) {
 	t.Helper()
-	if !slices.Equal(env, expected) {
+	normalizedEnv := normalizeRuntimeEnvForTest(env)
+	normalizedExpected := normalizeRuntimeEnvForTest(expected)
+	if !slices.Equal(normalizedEnv, normalizedExpected) {
 		t.Fatalf("env = %#v, want %#v", env, expected)
 	}
+}
+
+func normalizeRuntimeEnvForTest(env []string) []string {
+	normalized := make([]string, len(env))
+	for i, entry := range env {
+		normalized[i] = strings.ReplaceAll(entry, `\`, "/")
+	}
+	return normalized
 }
