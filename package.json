@@ -15,6 +15,7 @@
   "officecliVersion": "0.2.118",
   "scripts": {
     "prefetch:officecli": "node scripts/fetch-officecli.mjs",
+    "prefetch:pptxgenjs-runtime": "node scripts/stage-pptxgenjs-runtime.mjs",
     "predev": "npm run prefetch:officecli",
     "prebuild": "npm run prefetch:officecli",
     "dev": "wails dev",
@@ -29,7 +30,7 @@
     "dist:mac": "npm run prefetch:officecli && wails build -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\" && node scripts/bundle-runtime.mjs && npm run bundle:officecli:mac && node scripts/notarize.mjs build/bin/OfficeDex.app",
     "dist:win": "npm run prefetch:officecli && wails build -platform windows/amd64 -ldflags \"-X main.appVersion=$(node -p 'require(`./package.json`).version')\"",
     "test": "vitest run",
-    "test:scripts": "node --test scripts/bundle-licenses.test.mjs scripts/sync-embedded-pptist.test.mjs scripts/verify-font-licenses.test.mjs scripts/verify-officecli-canvas-contract.test.mjs scripts/verify-release-version.test.mjs",
+    "test:scripts": "node --test scripts/bundle-licenses.test.mjs scripts/stage-pptxgenjs-runtime.test.mjs scripts/sync-embedded-pptist.test.mjs scripts/verify-font-licenses.test.mjs scripts/verify-officecli-canvas-contract.test.mjs scripts/verify-release-version.test.mjs",
     "verify:officecli:canvas": "node scripts/verify-officecli-canvas-contract.mjs",
     "test:go": "env -u GOROOT go test ./... -count=1 && env -u GOROOT go test -tags officedex_demo ./... -count=1",
     "test:all": "npm run lint && npm run test:scripts && npx vitest run && npm run test:go && npm run test:e2e",

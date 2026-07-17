@@ -10,6 +10,8 @@ dist-electron/
 # Local bundled OfficeCLI binaries for packaging.
 build/_icon_backup/
 build/officecli/
+build/cache/
+build/pptxgenjs-runtime/
 officecli-bin/
 
 # Wails / Go build artifacts.
