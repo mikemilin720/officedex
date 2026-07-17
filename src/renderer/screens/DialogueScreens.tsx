@@ -41,6 +41,7 @@ import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
 import { ReportIssueDialog } from "../components/ReportIssueDialog";
 import { ImeInput, ImePlainTextArea, ImeTextArea } from "../components/ImeInput";
+import { ViewportAnchoredPopover } from "../components/ViewportAnchoredPopover";
 import { Check as CheckIcon, Copy as CopyIcon } from "lucide-react";
 import { loadLocalImageTemplates } from "../localImageTemplates";
 import {
@@ -151,6 +152,7 @@ type VibeCanvasData = {
   thinkingTargetKind?: VibeCanvasNodeKind;
   popoverOpen?: boolean;
   popoverContent?: ReactNode;
+  onPopoverAlignerChange?: (aligner: VoidFunction | null) => void;
   slidePushState?: "pushing" | "pushed" | "waiting";
   slideData?: PptistSlide;
   completedArtifact?: Artifact;
@@ -1662,6 +1664,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
   const [completedDrawingKey, setCompletedDrawingKey] = useState<string | null>(null);
   const [nodeDrawingStep, setNodeDrawingStep] = useState<{ key: string; index: number } | null>(null);
   const activeThinkingRef = useRef<Omit<VibeThinkingTransition, "phase"> | null>(null);
+  const activePopoverAlignerRef = useRef<VoidFunction | null>(null);
   const ideaConfirmInFlightRef = useRef(false);
   const [optimisticThinking, setOptimisticThinking] = useState<Omit<VibeThinkingTransition, "phase"> | null>(null);
   const [dismissedThinking, setDismissedThinking] = useState<VibeThinkingTransition | null>(null);
@@ -1778,6 +1781,9 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
   );
   const thinkingFocusNodeId = activeThinkingElements.nodes[0]?.id ?? dismissedThinkingElements.nodes[0]?.id ?? null;
   const cameraFocusNodeId = thinkingFocusNodeId ?? activeDrawingNodeId ?? focusedNodeId;
+  const handlePopoverAlignerChange = useCallback((aligner: VoidFunction | null) => {
+    activePopoverAlignerRef.current = aligner;
+  }, []);
 
   useEffect(() => {
     setIdeaConfirmed(snapshot.stage !== "story_ready");
@@ -2343,6 +2349,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
           : undefined,
         onPreviewArtifact: onPreview,
         popoverOpen: nodeIsPopoverOpen,
+        onPopoverAlignerChange: handlePopoverAlignerChange,
         popoverContent: nodeIsPopoverOpen ? (
           <VibeNodePopoverContent
             node={treeNode}
@@ -2549,6 +2556,7 @@ export function LivingTreeCockpit({ task, snapshot, progressIndex, stageActionLa
                 elementsSelectable
                 panOnScroll={showPptistEmbed}
                 zoomOnScroll={!showPptistEmbed}
+                onMove={() => activePopoverAlignerRef.current?.()}
                 onNodeClick={(_, node) => {
                   if ((node.data as VibeCanvasData | undefined)?.kind === "thinking") return;
                   setSelectedNodeId(node.id);
@@ -3665,16 +3673,17 @@ function VibeTreeFlowNode({ data, selected }: NodeProps<FlowNode<VibeCanvasData>
   );
 
   return (
-    <Popover
+    <ViewportAnchoredPopover
       content={data.popoverContent}
       open={data.popoverOpen}
+      onAlignerChange={data.onPopoverAlignerChange}
       placement="right"
       trigger="click"
       autoAdjustOverflow
       overlayClassName="living-tree-popover-overlay"
     >
       {nodeCard}
-    </Popover>
+    </ViewportAnchoredPopover>
   );
 }
 
