@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import type { ComponentType } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopAPI } from "../../shared/types";
 import { LocaleProvider } from "../i18n";
 import { Shell } from "./Shell";
@@ -21,8 +21,17 @@ vi.mock("../bridge", () => ({
   }),
 }));
 
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+});
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("Shell sidebar layout", () => {
@@ -108,7 +117,7 @@ describe("Shell sidebar layout", () => {
     expect(css).toMatch(/\.sidebar-settings::after\s*\{[^}]*background:\s*var\(--n-hairline-soft\);/s);
   });
 
-  it("uses the topbar as the only sidebar control and reveals the hidden sidebar from the left edge", () => {
+  it("uses the topbar as the only sidebar control and reveals the hidden sidebar from the left edge", async () => {
     render(
       <LocaleProvider value="en">
         {createElement(
@@ -145,7 +154,13 @@ describe("Shell sidebar layout", () => {
     expect(toggle.closest(".topbar-sidebar-slot")).toBeTruthy();
     expect(toggle.getAttribute("data-sidebar-icon-state")).toBe("expanded");
 
+    fireEvent.mouseEnter(toggle);
+    await screen.findByText("Collapse sidebar");
     fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")).toBeNull();
+    });
 
     expect(shell?.classList.contains("sidebar-collapsed")).toBe(true);
     const expandToggle = screen.getByRole("button", { name: /expand sidebar/i });
@@ -156,6 +171,12 @@ describe("Shell sidebar layout", () => {
     fireEvent.mouseEnter(hoverZone!);
 
     expect(expandToggle.getAttribute("data-sidebar-icon-state")).toBe("preview");
+    fireEvent.mouseEnter(expandToggle);
+    await screen.findByText("Expand sidebar");
+    fireEvent.click(expandToggle);
+    await waitFor(() => {
+      expect(document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")).toBeNull();
+    });
     expect(css).toMatch(/\.sidebar-collapsed\s*\.sidebar-hover-zone:hover\s*\+\s*\.sidebar/s);
     expect(css).toMatch(/\.sidebar-collapsed\s*\.sidebar:hover/s);
     expect(css).toMatch(/\.sidebar-collapsed\.sidebar-preview\s*\.sidebar/s);
