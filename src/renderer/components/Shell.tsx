@@ -124,6 +124,7 @@ export function Shell({
 }: ShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [sidebarPreview, setSidebarPreview] = useState(false);
+  const [sidebarToggleTooltipOpen, setSidebarToggleTooltipOpen] = useState(false);
   const lastAutoCollapseSidebarKey = useRef<string | undefined>(undefined);
   const t = useT();
   const sidebarToggleLabel = collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse");
@@ -217,13 +218,20 @@ export function Shell({
       <main className="main-frame">
         <header className="topbar">
           <div className="topbar-sidebar-slot">
-            <Tooltip title={sidebarToggleLabel} placement="bottom">
+            <Tooltip
+              title={sidebarToggleLabel}
+              placement="bottom"
+              open={sidebarToggleTooltipOpen}
+              onOpenChange={setSidebarToggleTooltipOpen}
+              destroyOnHidden
+            >
               <button
                 type="button"
                 className={`topbar-sidebar-toggle ${collapsed ? "is-collapsed" : "is-expanded"} ${sidebarPreview ? "is-previewing" : ""}`}
                 data-sidebar-icon-state={collapsed ? (sidebarPreview ? "preview" : "hidden") : "expanded"}
                 aria-label={sidebarToggleLabel}
                 onClick={() => {
+                  setSidebarToggleTooltipOpen(false);
                   setCollapsed((c) => !c);
                   setSidebarPreview(false);
                 }}
