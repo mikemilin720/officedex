@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { bundleRuntime } from "./bundle-pptxgenjs-runtime.mjs";
 
-test("copies the complete runtime into a macOS app", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "officedex-bundle-runtime-"));
+test("copies the complete runtime into a macOS app", async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pptxgenjs-runtime-bundle-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   const source = path.join(dir, "source");
   const targetApp = path.join(dir, "OfficeDex.app");
   await mkdir(path.join(source, "bin"), { recursive: true });
@@ -24,8 +25,9 @@ test("copies the complete runtime into a macOS app", async () => {
   await access(path.join(destination, "node_modules", "pptxgenjs", "package.json"));
 });
 
-test("replaces stale files from an earlier bundled runtime", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "officedex-bundle-runtime-stale-"));
+test("replaces stale files from an earlier bundled runtime", async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pptxgenjs-runtime-bundle-stale-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   const source = path.join(dir, "source");
   const target = path.join(dir, "bin");
   const destination = path.join(target, "pptxgenjs-runtime");

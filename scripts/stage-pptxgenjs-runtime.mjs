@@ -66,6 +66,10 @@ export function buildRuntimeSmokeScript() {
   return `require("pptxgenjs");`;
 }
 
+export async function pruneRuntimeNodeModules(moduleRoot) {
+  await rm(path.join(moduleRoot, ".bin"), { recursive: true, force: true });
+}
+
 function archivePlan(platform, arch) {
   if (platform === "darwin") {
     if (arch !== "universal") throw new Error(`macOS runtime must be universal, got ${arch}`);
@@ -192,6 +196,7 @@ export async function stagePptxgenjsRuntime({
   const npmCommand = platform === "win32" ? "npm.cmd" : "npm";
   await run(npmCommand, ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", outputDir]);
   const moduleRoot = path.join(outputDir, "node_modules");
+  await pruneRuntimeNodeModules(moduleRoot);
   const actualPptxgenjsVersion = await readPptxgenjsVersion(moduleRoot);
   if (actualPptxgenjsVersion !== PPTXGENJS_VERSION) {
     throw new Error(`PptxGenJS version is ${actualPptxgenjsVersion}, expected ${PPTXGENJS_VERSION}`);

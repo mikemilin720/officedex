@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import {
   buildRuntimeManifest,
   buildRuntimeSmokeScript,
   findChecksum,
+  pruneRuntimeNodeModules,
   verifyFileChecksum,
 } from "./stage-pptxgenjs-runtime.mjs";
 
@@ -49,4 +50,18 @@ test("runtime smoke loads the package without using its private package.json exp
   const script = buildRuntimeSmokeScript();
   assert.match(script, /require\("pptxgenjs"\)/);
   assert.doesNotMatch(script, /pptxgenjs\/package\.json/);
+});
+
+test("removes npm command shims that are not needed by the embedded runtime", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pptxgenjs-runtime-prune-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bin = path.join(root, ".bin");
+  await mkdir(bin, { recursive: true });
+  await writeFile(path.join(root, "tool.js"), "tool");
+  await symlink("../tool.js", path.join(bin, "tool"));
+
+  await pruneRuntimeNodeModules(root);
+
+  await assert.rejects(() => access(bin));
+  await access(path.join(root, "tool.js"));
 });

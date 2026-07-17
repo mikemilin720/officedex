@@ -13,20 +13,30 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
-import { access, copyFile, mkdir } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
+import { sha256File } from "./stage-pptxgenjs-runtime.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_NODE_ENTITLEMENTS = path.join(HERE, "..", "build", "darwin", "node-entitlements.plist");
+
 function parseArgs(argv) {
-  const out = { app: "", identity: "-", entitlements: null, sourceBinary: "", binaryName: "officecli" };
+  const out = { app: "", identity: "-", entitlements: null, nodeEntitlements: DEFAULT_NODE_ENTITLEMENTS, sourceBinary: "", binaryName: "officecli" };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--app") out.app = argv[++i];
     else if (arg === "--identity") out.identity = argv[++i];
     else if (arg === "--entitlements") out.entitlements = argv[++i];
+    else if (arg === "--node-entitlements") out.nodeEntitlements = argv[++i];
     else if (arg === "--source") out.sourceBinary = argv[++i];
     else if (arg === "--binary-name") out.binaryName = argv[++i];
   }
   return out;
+}
+
+export function codesignEntitlementsForTarget({ target, runtimeNode, defaultEntitlements, nodeEntitlements }) {
+  return target === runtimeNode ? nodeEntitlements : defaultEntitlements;
 }
 
 export function buildCodesignTargets({ app, binaryName = "officecli" }) {
@@ -35,6 +45,18 @@ export function buildCodesignTargets({ app, binaryName = "officecli" }) {
     path.join(app, "Contents", "Resources", "officecli", binaryName),
     app,
   ];
+}
+
+export async function refreshRuntimeManifestNodeChecksum(runtimeNode) {
+  const runtimeRoot = path.dirname(path.dirname(runtimeNode));
+  const manifestPath = path.join(runtimeRoot, "runtime.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.nodeSha256 = await sha256File(runtimeNode);
+  manifest.nodeSigned = true;
+  const partial = `${manifestPath}.tmp`;
+  await writeFile(partial, `${JSON.stringify(manifest, null, 2)}\n`);
+  await rename(partial, manifestPath);
+  return manifest;
 }
 
 async function main() {
@@ -72,13 +94,24 @@ async function main() {
     } catch {
       throw new Error(`[codesign] required bundled executable not found at ${target}`);
     }
+    const targetEntitlements = codesignEntitlementsForTarget({
+      target,
+      runtimeNode,
+      defaultEntitlements: args.entitlements,
+      nodeEntitlements: args.nodeEntitlements,
+    });
     const codesignArgs = ["--force", "--sign", args.identity, "--timestamp=none", "--options", "runtime"];
-    if (args.entitlements) {
-      codesignArgs.push("--entitlements", args.entitlements);
+    if (targetEntitlements) {
+      await access(targetEntitlements);
+      codesignArgs.push("--entitlements", targetEntitlements);
     }
     codesignArgs.push(target);
     console.log(`[codesign] ${args.identity === "-" ? "(ad-hoc) " : ""}${target}`);
     await run("codesign", codesignArgs);
+    if (target === runtimeNode) {
+      await refreshRuntimeManifestNodeChecksum(runtimeNode);
+      console.log(`[codesign] refreshed signed Node checksum in runtime.json`);
+    }
   }
 
   // Embedding a new file under Resources/ invalidates the outer .app seal that
