@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { access, copyFile, mkdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 function parseArgs(argv) {
   const out = { app: "", identity: "-", entitlements: null, sourceBinary: "", binaryName: "officecli" };
@@ -26,6 +27,14 @@ function parseArgs(argv) {
     else if (arg === "--binary-name") out.binaryName = argv[++i];
   }
   return out;
+}
+
+export function buildCodesignTargets({ app, binaryName = "officecli" }) {
+  return [
+    path.join(app, "Contents", "Resources", "pptxgenjs-runtime", "bin", "node"),
+    path.join(app, "Contents", "Resources", "officecli", binaryName),
+    app,
+  ];
 }
 
 async function main() {
@@ -56,21 +65,21 @@ async function main() {
     console.log(`[codesign] staged ${args.sourceBinary} -> ${targetBinary}`);
   }
 
-  try {
-    await access(targetBinary);
-  } catch {
-    console.warn(`[codesign] bundled officecli not found at ${targetBinary}, skipping`);
-    return;
+  const [runtimeNode, officecliBinary] = buildCodesignTargets({ app: args.app, binaryName: args.binaryName });
+  for (const target of [runtimeNode, officecliBinary]) {
+    try {
+      await access(target);
+    } catch {
+      throw new Error(`[codesign] required bundled executable not found at ${target}`);
+    }
+    const codesignArgs = ["--force", "--sign", args.identity, "--timestamp=none", "--options", "runtime"];
+    if (args.entitlements) {
+      codesignArgs.push("--entitlements", args.entitlements);
+    }
+    codesignArgs.push(target);
+    console.log(`[codesign] ${args.identity === "-" ? "(ad-hoc) " : ""}${target}`);
+    await run("codesign", codesignArgs);
   }
-
-  const codesignArgs = ["--force", "--sign", args.identity, "--timestamp=none", "--options", "runtime"];
-  if (args.entitlements) {
-    codesignArgs.push("--entitlements", args.entitlements);
-  }
-  codesignArgs.push(targetBinary);
-
-  console.log(`[codesign] ${args.identity === "-" ? "(ad-hoc) " : ""}${targetBinary}`);
-  await run("codesign", codesignArgs);
 
   // Embedding a new file under Resources/ invalidates the outer .app seal that
   // Wails wrote during self-signing, so re-sign the bundle itself once the
@@ -96,7 +105,11 @@ function run(cmd, args) {
   });
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const scriptPath = fileURLToPath(import.meta.url);
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === scriptPath;
+if (isMain) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

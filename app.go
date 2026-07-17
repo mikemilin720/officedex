@@ -3893,7 +3893,7 @@ func (a *App) ensureBridgeForCwd(cwd string) (*bridge.Client, error) {
 		return nil, errors.New(message)
 	}
 
-	env := llmProviderEnv(settingsValue)
+	env := appendPptxgenjsRuntimeEnv(llmProviderEnv(settingsValue), bundledPptxgenjsRuntimeEnv())
 
 	a.mu.Lock()
 	a.resolvedBinaryPath = resolved.Path
