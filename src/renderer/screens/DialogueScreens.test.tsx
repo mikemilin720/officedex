@@ -3372,6 +3372,45 @@ describe("DialogueScreen state machine", () => {
     expect(screen.getByText("Confirmed 0/2")).toBeTruthy();
   });
 
+  it("opens the Vibe task card through a native active-stage button click", async () => {
+    const task: DesktopTask = {
+      id: "task-vibe-native-stage-click",
+      conversationId: "task-vibe-native-stage-click",
+      status: "question",
+      documentType: "pptx",
+      events: [],
+      question: {
+        id: "vibe_story_ready",
+        question: "Project Map generated.",
+        allowFreeform: true,
+        options: [{ id: "generate_chapters", label: "Generate Chapters", recommended: true }],
+      },
+      vibeTree: {
+        stage: "story_ready",
+        tree: {
+          id: "tree-native-stage-click",
+          rootId: "root",
+          title: "Native Stage Click",
+          nodes: [
+            { id: "root", kind: "root", title: "Native Stage Click", status: "story_ready" },
+            { id: "branch-a", parentId: "root", kind: "branch", title: "Current State", status: "story_ready" },
+          ],
+        },
+        actions: [{ id: "generate_chapters", label: "Generate Chapters" }],
+        confirmation: { nodeIds: ["branch-a"] },
+      },
+    };
+
+    render(<DialogueScreen {...baseProps()} tasks={[task]} />);
+
+    await confirmInitialIdeaNode("Current State");
+    const trigger = screen.getByRole("button", { name: "Open Story Beat task" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    trigger.click();
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "true"));
+    expect(document.querySelector(".living-tree-step-popover")).not.toHaveStyle({ display: "none" });
+  });
+
   it("moves the popover to the next pending node after each confirmation", async () => {
     const task: DesktopTask = {
       id: "task-vibe-auto-next",

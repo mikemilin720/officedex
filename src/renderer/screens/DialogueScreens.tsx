@@ -4283,7 +4283,35 @@ function VibeProgressSteps({ stage, progressIndex, motionPhase, taskCard, autoOp
     <nav className="living-tree-steps" aria-label="Vibe-Officing progress" data-active-index={activeIndex} data-motion-phase={motionPhase ?? "settled"} data-vibe-stage={stage}>
       {steps.map((step, index) => {
         const isActive = index === activeIndex;
-        const stepEl = (
+        if (isActive && taskCard) {
+          return (
+            <Popover
+              key={step.key}
+              content={taskCard}
+              open={popoverOpen}
+              trigger={[]}
+              placement="bottom"
+              overlayClassName="living-tree-step-popover"
+              arrow={{ pointAtCenter: true }}
+              forceRender
+            >
+              <button
+                type="button"
+                className="living-tree-step is-active"
+                data-step-key={step.key}
+                data-step-index={index}
+                data-step-state="active"
+                aria-label={`Open ${step.label} task`}
+                aria-expanded={popoverOpen}
+                onClick={() => setManualOpen((current) => !current)}
+              >
+                <span>{index + 1}</span>
+                <strong>{step.label}</strong>
+              </button>
+            </Popover>
+          );
+        }
+        return (
           <div
             key={step.key}
             className={`living-tree-step ${index < activeIndex ? "is-done" : ""} ${isActive ? "is-active" : ""}`}
@@ -4295,24 +4323,6 @@ function VibeProgressSteps({ stage, progressIndex, motionPhase, taskCard, autoOp
             <strong>{step.label}</strong>
           </div>
         );
-        if (isActive && taskCard) {
-          return (
-            <Popover
-              key={step.key}
-              content={taskCard}
-              open={popoverOpen}
-              onOpenChange={setManualOpen}
-              trigger="click"
-              placement="bottom"
-              overlayClassName="living-tree-step-popover"
-              arrow={{ pointAtCenter: true }}
-              forceRender
-            >
-              {stepEl}
-            </Popover>
-          );
-        }
-        return stepEl;
       })}
     </nav>
   );
