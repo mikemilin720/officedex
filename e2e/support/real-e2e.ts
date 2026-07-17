@@ -261,7 +261,7 @@ async function answerVisibleVibeCanvas(page: Page): Promise<boolean> {
 
   const existingConfirmButton = page.getByRole("button", { name: VIBE_CONFIRM_BUTTON }).filter({ visible: true }).first();
   if (await existingConfirmButton.isVisible().catch(() => false)) {
-    await existingConfirmButton.click();
+    await existingConfirmButton.dispatchEvent("click");
     await page.waitForTimeout(600);
     return true;
   }
@@ -271,7 +271,7 @@ async function answerVisibleVibeCanvas(page: Page): Promise<boolean> {
     await pendingNode.dispatchEvent("click");
     const confirmButton = page.getByRole("button", { name: VIBE_CONFIRM_BUTTON }).filter({ visible: true }).first();
     await expect(confirmButton).toBeVisible({ timeout: 60_000 });
-    await confirmButton.click();
+    await confirmButton.dispatchEvent("click");
     await page.waitForTimeout(600);
     return true;
   }

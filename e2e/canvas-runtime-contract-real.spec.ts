@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  answerPlanUntilCompleted,
   assertNoResponseContractError,
   attachHostReport,
   preparePage,
@@ -11,6 +12,7 @@ import {
 const OFFICECLI_MAGIC_VIBE_PROMPT = "officedex::magic-deck::v1::7f3k9q2x";
 
 test("the bundled runtime enters PPTX Canvas Node mode", async ({ page }) => {
+  test.setTimeout(240_000);
   await preparePage(page);
 
   await submitGeneration(page, {
@@ -23,13 +25,18 @@ test("the bundled runtime enters PPTX Canvas Node mode", async ({ page }) => {
   await expect(canvas).toBeVisible({ timeout: 60_000 });
   await assertNoResponseContractError(page);
 
-  await page.getByRole("button", { name: /Cancel/i }).click();
-  await expect(page.getByText(/cancelled|Task cancelled/i).first()).toBeVisible({ timeout: 60_000 });
+  const artifact = await answerPlanUntilCompleted(page, "pptx");
+  expect(artifact.fileSize).toBeGreaterThan(0);
+  expect(artifact.artifactPath.toLowerCase()).toContain(".pptx");
+  await assertNoResponseContractError(page);
 
   await recordScenario({
     uiScenario: "canvas-runtime-contract",
     documentType: "pptx",
     mode: "plan",
+    taskId: artifact.taskId,
+    artifactPath: artifact.artifactPath,
+    fileSize: artifact.fileSize,
   });
 });
 

@@ -111,6 +111,9 @@ jobs:
       - name: Verify officecli Canvas Vibe contract
         run: npm run verify:officecli:canvas
 
+      - name: Complete a Canvas PPTX render with restricted child PATH
+        run: npm run verify:officecli:canvas-render
+
       - name: Wails build
         shell: bash
         run: |

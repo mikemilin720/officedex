@@ -11,6 +11,7 @@ dist-electron/
 build/_icon_backup/
 build/officecli/
 build/cache/
+build/canvas-render-smoke/
 build/pptxgenjs-runtime/
 officecli-bin/
 
