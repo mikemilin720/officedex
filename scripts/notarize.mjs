@@ -21,6 +21,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+import {
+  buildNotarizationSigningPlan,
+  refreshRuntimeManifestNodeChecksum,
+} from "./codesign-bundled-officecli.mjs";
 
 const IDENTITY =
   process.env.CODESIGN_IDENTITY ||
@@ -63,18 +69,20 @@ function findMachOBinaries(appPath) {
   return binaries;
 }
 
-function signBinary(filePath) {
+function signBinary(filePath, entitlements) {
   console.log(`[sign] ${path.relative(process.cwd(), filePath)}`);
-  run("codesign", [
+  const args = [
     "--force",
     "--sign", IDENTITY,
     "--options", "runtime",
     "--timestamp",
-    filePath,
-  ]);
+  ];
+  if (entitlements) args.push("--entitlements", entitlements);
+  args.push(filePath);
+  run("codesign", args);
 }
 
-function main() {
+async function main() {
   const targetPath = process.argv[2];
   if (!targetPath || !(targetPath.endsWith(".app") || targetPath.endsWith(".dmg"))) {
     console.error("Usage: node scripts/notarize.mjs <path/to/App.app | App.dmg>");
@@ -100,24 +108,25 @@ function main() {
     // --- App path: sign all Mach-O binaries inside-out, then the app bundle ---
     console.log("\n=== Code Signing ===");
     const binaries = findMachOBinaries(targetPath);
-    const mainExe = binaries.find((b) => b.includes("/MacOS/"));
-    const innerBinaries = binaries.filter((b) => !b.includes("/MacOS/"));
-
-    for (const bin of innerBinaries) {
-      signBinary(bin);
+    const signingPlan = buildNotarizationSigningPlan({ app: targetPath, binaries });
+    for (const item of signingPlan) {
+      if (item.bundle) {
+        console.log(`[sign] ${item.target}`);
+        run("codesign", [
+          "--force",
+          "--sign", IDENTITY,
+          "--options", "runtime",
+          "--timestamp",
+          item.target,
+        ]);
+        continue;
+      }
+      signBinary(item.target, item.entitlements);
+      if (item.refreshRuntimeManifest) {
+        await refreshRuntimeManifestNodeChecksum(item.target);
+        console.log("[sign] refreshed notarized Node checksum in runtime.json");
+      }
     }
-    if (mainExe) {
-      signBinary(mainExe);
-    }
-
-    console.log(`[sign] ${targetPath}`);
-    run("codesign", [
-      "--force",
-      "--sign", IDENTITY,
-      "--options", "runtime",
-      "--timestamp",
-      targetPath,
-    ]);
 
     console.log("[sign] verifying...");
     run("codesign", ["--verify", "--strict", targetPath]);
@@ -174,4 +183,11 @@ function main() {
   }
 }
 
-main();
+const scriptPath = fileURLToPath(import.meta.url);
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === scriptPath;
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack : String(error));
+    process.exitCode = 1;
+  });
+}

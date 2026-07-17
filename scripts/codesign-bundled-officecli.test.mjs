@@ -6,9 +6,41 @@ import test from "node:test";
 
 import {
   buildCodesignTargets,
+  buildNotarizationSigningPlan,
   codesignEntitlementsForTarget,
   refreshRuntimeManifestNodeChecksum,
 } from "./codesign-bundled-officecli.mjs";
+
+test("notarization preserves Node JIT entitlements and refreshes its checksum before sealing the app", () => {
+  const app = path.join("build", "bin", "OfficeDex.app");
+  const runtimeNode = path.join(app, "Contents", "Resources", "pptxgenjs-runtime", "bin", "node");
+  const officecli = path.join(app, "Contents", "Resources", "officecli", "officecli");
+  const mainExecutable = path.join(app, "Contents", "MacOS", "officedex");
+
+  assert.deepEqual(buildNotarizationSigningPlan({
+    app,
+    binaries: [officecli, runtimeNode, mainExecutable],
+    nodeEntitlements: "node-entitlements.plist",
+  }), [
+    { target: officecli, entitlements: null, refreshRuntimeManifest: false, bundle: false },
+    { target: runtimeNode, entitlements: "node-entitlements.plist", refreshRuntimeManifest: true, bundle: false },
+    { target: mainExecutable, entitlements: null, refreshRuntimeManifest: false, bundle: false },
+    { target: app, entitlements: null, refreshRuntimeManifest: false, bundle: true },
+  ]);
+});
+
+test("release rechecks the runtime and Canvas render after app notarization", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const notarize = workflow.indexOf("- name: Notarize .app (macOS)");
+  const verifyRuntime = workflow.indexOf("- name: Verify notarized bundled PptxGenJS runtime (macOS)");
+  const renderCanvas = workflow.indexOf("- name: Complete Canvas render from notarized package contents (macOS)");
+  const archive = workflow.indexOf("- name: Archive (macOS)");
+
+  assert.ok(notarize >= 0);
+  assert.ok(verifyRuntime > notarize);
+  assert.ok(renderCanvas > verifyRuntime);
+  assert.ok(archive > renderCanvas);
+});
 
 test("signs bundled Node before OfficeCLI and the outer app", () => {
   const app = path.join("build", "bin", "OfficeDex.app");

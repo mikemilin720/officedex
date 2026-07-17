@@ -250,6 +250,17 @@ jobs:
             attempt=$((attempt + 1))
           done
 
+      - name: Verify notarized bundled PptxGenJS runtime (macOS)
+        if: runner.os == 'macOS'
+        run: npm run verify:pptxgenjs-runtime -- --root build/bin/OfficeDex.app/Contents/Resources/pptxgenjs-runtime
+
+      - name: Complete Canvas render from notarized package contents (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          npm run verify:officecli:canvas-render -- \
+            --binary build/bin/OfficeDex.app/Contents/Resources/officecli/officecli \
+            --runtime-root build/bin/OfficeDex.app/Contents/Resources/pptxgenjs-runtime
+
       - name: Bundle officecli (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

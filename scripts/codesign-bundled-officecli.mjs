@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { sha256File } from "./stage-pptxgenjs-runtime.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_NODE_ENTITLEMENTS = path.join(HERE, "..", "build", "darwin", "node-entitlements.plist");
+export const DEFAULT_NODE_ENTITLEMENTS = path.join(HERE, "..", "build", "darwin", "node-entitlements.plist");
 
 function parseArgs(argv) {
   const out = { app: "", identity: "-", entitlements: null, nodeEntitlements: DEFAULT_NODE_ENTITLEMENTS, sourceBinary: "", binaryName: "officecli" };
@@ -44,6 +44,33 @@ export function buildCodesignTargets({ app, binaryName = "officecli" }) {
     path.join(app, "Contents", "Resources", "pptxgenjs-runtime", "bin", "node"),
     path.join(app, "Contents", "Resources", "officecli", binaryName),
     app,
+  ];
+}
+
+export function buildNotarizationSigningPlan({
+  app,
+  binaries,
+  defaultEntitlements = null,
+  nodeEntitlements = DEFAULT_NODE_ENTITLEMENTS,
+}) {
+  const runtimeNode = path.join(app, "Contents", "Resources", "pptxgenjs-runtime", "bin", "node");
+  const macOSDir = path.join(app, "Contents", "MacOS");
+  const mainExecutable = binaries.find((target) => target.startsWith(`${macOSDir}${path.sep}`));
+  const innerBinaries = binaries.filter((target) => target !== mainExecutable);
+  const executablePlan = [...innerBinaries, ...(mainExecutable ? [mainExecutable] : [])].map((target) => ({
+    target,
+    entitlements: codesignEntitlementsForTarget({
+      target,
+      runtimeNode,
+      defaultEntitlements,
+      nodeEntitlements,
+    }),
+    refreshRuntimeManifest: target === runtimeNode,
+    bundle: false,
+  }));
+  return [
+    ...executablePlan,
+    { target: app, entitlements: defaultEntitlements, refreshRuntimeManifest: false, bundle: true },
   ];
 }
 
