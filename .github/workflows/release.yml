@@ -102,6 +102,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify officecli Canvas Vibe contract
+        run: npm run verify:officecli:canvas
+
       - name: Wails build
         shell: bash
         run: |
