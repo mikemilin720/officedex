@@ -272,6 +272,13 @@ describe("PptistEmbedPanel", () => {
     expect(appSource).toContain("if (isEmbedEditable) mainStore.setCanvasPercentage(96)");
   });
 
+  it("keeps editable PPTist embeds interactive when PPTX performance mode is enabled", () => {
+    const canvasSource = readFileSync("third_party/pptist/src/views/Editor/Canvas/index.vue", "utf8");
+
+    expect(canvasSource).toContain("readonlyEmbedMode.value || (pptxPerformanceMode.value && !embedEditable.value)");
+    expect(canvasSource).not.toContain("readonlyEmbedMode.value || pptxPerformanceMode.value");
+  });
+
   it("reports embedded goto-slide timing and completion back to the host", () => {
     const appSource = readFileSync("third_party/pptist/src/App.vue", "utf8");
     const hostSource = readFileSync("src/renderer/components/PptistEmbedPanel.tsx", "utf8");

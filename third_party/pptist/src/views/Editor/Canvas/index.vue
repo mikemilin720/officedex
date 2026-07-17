@@ -230,7 +230,7 @@ const {
   pptxPerformanceMode,
 } = storeToRefs(mainStore)
 const readonlyEmbedMode = computed(() => embedMode.value && !embedEditable.value)
-const fastRenderMode = computed(() => readonlyEmbedMode.value || pptxPerformanceMode.value)
+const fastRenderMode = computed(() => readonlyEmbedMode.value || (pptxPerformanceMode.value && !embedEditable.value))
 const { currentSlide, viewportRatio, viewportSize } = storeToRefs(useSlidesStore())
 const fastCanvasSlide = computed<Slide>(() => getFastCanvasSlide(currentSlide.value) as Slide)
 const { ctrlKeyState, spaceKeyState } = storeToRefs(useKeyboardStore())
