@@ -5588,6 +5588,39 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
         // File picking is user-driven and non-critical; cancellation should not surface as an error.
       }
     };
+    const handleFooterPaste = supportsReferenceImages ? (event: ClipboardEvent<HTMLElement>) => {
+      const items = event.clipboardData?.files;
+      if (!items || items.length === 0) return;
+      const images = imageFilesFrom(items);
+      if (images.length === 0) return;
+      event.preventDefault();
+      if (referenceLimitReached) {
+        message.warning(t("dialogue.attach.referenceImages.limit", { max: referenceImageMaxCount }));
+        return;
+      }
+      const allowedExtensions = new Set((referenceImagesSpec?.extensions ?? IMAGE_EXTENSIONS).map((e) => e.toLowerCase()));
+      void (async () => {
+        const savedPaths: string[] = [];
+        for (const file of images) {
+          if (referenceImages.length + savedPaths.length >= referenceImageMaxCount) break;
+          const ext = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() : undefined;
+          const resolvedExt = ext && allowedExtensions.has(ext) ? ext : "png";
+          try {
+            const buffer = await file.arrayBuffer();
+            const path = await officecli.savePastedImage(new Uint8Array(buffer), resolvedExt);
+            if (path && !referenceImages.includes(path) && !savedPaths.includes(path)) {
+              savedPaths.push(path);
+            }
+          } catch { /* skip failed saves */ }
+        }
+        if (savedPaths.length === 0) return;
+        onReferenceImagesChange(mergeUniquePaths(referenceImages, savedPaths, referenceImageMaxCount));
+        message.success(savedPaths.length === 1 ? t("dialogue.attach.paste.attached") : t("dialogue.attach.paste.attachedMany", { count: savedPaths.length }));
+      })().catch((error) => {
+        message.error(t("dialogue.attach.paste.error", { error: (error as Error).message }));
+      });
+    } : undefined;
+
     const submitContinuation = () => {
       if (inputDisabled || !continuationPrompt.trim()) return;
       if (isModifiable && onContinueModify) {
@@ -5660,6 +5693,7 @@ function ConversationFooter({ latestTask, onContinueGeneration, onContinueModify
             value={continuationPrompt}
             onChange={(e) => setContinuationPrompt(e.target.value)}
             disabled={inputDisabled}
+            onPaste={handleFooterPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
