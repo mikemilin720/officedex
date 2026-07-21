@@ -14,7 +14,7 @@
   },
   "info": {
     "productName": "OfficeDex",
-    "productVersion": "0.6.4",
+    "productVersion": "0.6.5",
     "copyright": "",
     "comments": "OfficeDex desktop app (Wails v2 + Go)"
   }
