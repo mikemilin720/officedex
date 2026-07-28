@@ -12,7 +12,7 @@
     "url": "https://github.com/officecli/officedex/issues"
   },
   "type": "module",
-  "officecliVersion": "0.2.119",
+  "officecliVersion": "0.2.121",
   "scripts": {
     "prefetch:officecli": "node scripts/fetch-officecli.mjs",
     "prefetch:pptxgenjs-runtime": "node scripts/stage-pptxgenjs-runtime.mjs",
