@@ -919,6 +919,12 @@
   margin: -2px 0 10px;
 }
 
+.image-template-picker-toolbar {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
 .image-template-picker-head {
   display: flex;
   align-items: center;
@@ -962,6 +968,42 @@
 .image-template-refresh .material-symbol {
   font-size: 14px;
   line-height: 1;
+}
+
+.image-template-tag-filters {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 1px 2px;
+  scrollbar-width: thin;
+}
+
+.image-template-tag-filters button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--n-hairline);
+  border-radius: var(--radius-full);
+  background: var(--n-canvas);
+  color: var(--n-slate);
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.image-template-tag-filters button b {
+  color: inherit;
+  font-size: 11px;
+}
+
+.image-template-tag-filters button:hover,
+.image-template-tag-filters button.is-selected {
+  border-color: var(--n-primary);
+  background: var(--n-primary-soft);
+  color: var(--n-primary);
 }
 
 .image-template-grid {

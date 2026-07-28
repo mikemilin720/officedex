@@ -4696,6 +4696,55 @@ describe("DialogueScreen state machine", () => {
     expect(submitted).not.toHaveProperty("promptTemplateId");
   });
 
+  it("aggregates and filters image templates by one tag", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 1, slug: "hero", title: "Hero", description: "", promptPreset: "hero", sortOrder: 1, enabled: true, tags: ["Ecommerce", "Studio"] },
+      { id: 2, slug: "macro", title: "Macro", description: "", promptPreset: "macro", sortOrder: 2, enabled: true, tags: ["studio", "Product Detail"] },
+      { id: 3, slug: "ugc", title: "UGC", description: "", promptPreset: "ugc", sortOrder: 3, enabled: true, tags: ["Social Media"] },
+    ]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    expect(await screen.findByRole("button", { name: /All.*3/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Studio.*2/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Studio.*2/i }));
+    expect(screen.getByText("Hero")).toBeTruthy();
+    expect(screen.getByText("Macro")).toBeTruthy();
+    expect(screen.queryByText("UGC")).toBeNull();
+  });
+
+  it("keeps the selected template and edited prompt when the tag filter changes", async () => {
+    listImageTemplatesSpy.mockResolvedValueOnce([
+      { id: 1, slug: "hero", title: "Hero", description: "", promptPreset: "hero", sortOrder: 1, enabled: true, tags: ["Studio"] },
+      { id: 2, slug: "ugc", title: "UGC", description: "", promptPreset: "ugc", sortOrder: 2, enabled: true, tags: ["Social Media"] },
+    ]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Hero$/i }));
+    const textarea = screen.getByPlaceholderText(/Enter what you want to generate/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "edited prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: /Social Media.*1/i }));
+    expect(textarea.value).toBe("edited prompt");
+    expect(screen.getByText(/Template text has been inserted/i)).toBeTruthy();
+  });
+
+  it("returns to All when refresh removes the selected tag", async () => {
+    listImageTemplatesSpy
+      .mockResolvedValueOnce([
+        { id: 1, slug: "hero", title: "Hero", description: "", promptPreset: "hero", sortOrder: 1, enabled: true, tags: ["Studio"] },
+      ])
+      .mockResolvedValueOnce([
+        { id: 2, slug: "ugc", title: "UGC", description: "", promptPreset: "ugc", sortOrder: 2, enabled: true, tags: ["Social Media"] },
+      ]);
+    render(<DialogueScreen {...baseProps()} newGenerationDraft={{ documentType: "img", topic: "", prompt: "" }} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Studio.*1/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh$/i }));
+
+    expect(await screen.findByText("UGC")).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: /All.*1/i })).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.queryByRole("button", { name: /Studio.*1/i })).toBeNull();
+  });
+
   it("keeps dropped reference images when submitting an image template", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 7, slug: "poster", title: "Poster", description: "Cinematic poster", promptPreset: "Template prompt: replace PRODUCT", thumbnailUrl: "/api/image-templates/7/thumbnail", sortOrder: 10, enabled: true },

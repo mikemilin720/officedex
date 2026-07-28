@@ -36,6 +36,7 @@ import { FileGlyph, MaterialSymbol } from "../components/Shell";
 import { TaskRuntimePanel } from "../components/TaskRuntimePanel";
 import { Waiting2048Game } from "../components/Waiting2048Game";
 import { acquireBlob, releaseBlob } from "../imageCache";
+import { buildImageTemplateTagFilters, imageTemplateMatchesTag } from "../imageTemplateTags";
 import { useT } from "../i18n";
 import { useNow } from "../useNow";
 import { useReportCapability } from "../useReportCapability";
@@ -992,8 +993,19 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
   onRefresh: () => void;
   t: Translator;
 }) {
+  const [selectedTag, setSelectedTag] = useState("");
+  const tagFilters = useMemo(() => buildImageTemplateTagFilters(templates), [templates]);
+  const visibleTemplates = useMemo(
+    () => templates.filter((template) => imageTemplateMatchesTag(template, selectedTag)),
+    [templates, selectedTag],
+  );
+
+  useEffect(() => {
+    if (selectedTag && !tagFilters.some((filter) => filter.key === selectedTag)) setSelectedTag("");
+  }, [selectedTag, tagFilters]);
+
   const templateColumns = [[], [], []] as ImagePromptTemplate[][];
-  templates.forEach((template, index) => {
+  visibleTemplates.forEach((template, index) => {
     templateColumns[index % templateColumns.length].push(template);
   });
 
@@ -1014,20 +1026,34 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
         </span>
         {!selectedId ? <span className="image-template-selected-pill">{t("dialogue.imageTemplates.selectedLabel")}</span> : null}
       </button>
-      <div className="image-template-picker-head">
-        <span>{t("dialogue.imageTemplates.label")}</span>
-        <div className="image-template-picker-actions">
-          <button
-            type="button"
-            className="image-template-refresh"
-            onClick={() => onRefresh()}
-            disabled={loading}
-            aria-label={t("dialogue.imageTemplates.refresh")}
-            title={t("dialogue.imageTemplates.refresh")}
-          >
-            <MaterialSymbol name="refresh" />
-          </button>
+      <div className="image-template-picker-toolbar">
+        <div className="image-template-picker-head">
+          <span>{t("dialogue.imageTemplates.label")}</span>
+          <div className="image-template-picker-actions">
+            <button
+              type="button"
+              className="image-template-refresh"
+              onClick={() => onRefresh()}
+              disabled={loading}
+              aria-label={t("dialogue.imageTemplates.refresh")}
+              title={t("dialogue.imageTemplates.refresh")}
+            >
+              <MaterialSymbol name="refresh" />
+            </button>
+          </div>
         </div>
+        {tagFilters.length ? (
+          <div className="image-template-tag-filters" aria-label={t("dialogue.imageTemplates.tags.aria")}>
+            <button type="button" className={selectedTag === "" ? "is-selected" : ""} aria-pressed={selectedTag === ""} onClick={() => setSelectedTag("")}>
+              <span>{t("dialogue.imageTemplates.tags.all")}</span><b>{templates.length}</b>
+            </button>
+            {tagFilters.map((filter) => (
+              <button type="button" key={filter.key} className={selectedTag === filter.key ? "is-selected" : ""} aria-pressed={selectedTag === filter.key} onClick={() => setSelectedTag(filter.key)}>
+                <span>{filter.label}</span><b>{filter.count}</b>
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       {loading ? (
         <div className="image-template-status">
@@ -1037,6 +1063,8 @@ function ImageTemplatePicker({ templates, selectedId, loading, error, onSelect, 
         <div className="image-template-status image-template-status-error">{t("dialogue.imageTemplates.error", { error })}</div>
       ) : templates.length === 0 ? (
         <div className="image-template-status">{t("dialogue.imageTemplates.empty")}</div>
+      ) : selectedTag && visibleTemplates.length === 0 ? (
+        <div className="image-template-status">{t("dialogue.imageTemplates.tags.empty")}</div>
       ) : (
         <div className="image-template-grid image-template-vertical-wall">
           {templateColumns.map((column, columnIndex) => (
