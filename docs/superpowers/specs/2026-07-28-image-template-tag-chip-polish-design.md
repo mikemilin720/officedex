@@ -41,4 +41,3 @@ The controls remain native buttons with their existing `aria-pressed` state. Hid
 - Run the focused stylesheet test and the existing image-template tag and dialogue screen tests.
 - Run TypeScript linting.
 - Start the browser build and visually verify that the tag row uses the compact typography, has no visible native scrollbar, and still scrolls horizontally when content overflows.
-

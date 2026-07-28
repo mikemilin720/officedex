@@ -976,27 +976,37 @@
   gap: 8px;
   overflow-x: auto;
   padding: 0 1px 2px;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.image-template-tag-filters::-webkit-scrollbar {
+  display: none;
 }
 
 .image-template-tag-filters button {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
-  min-height: 30px;
+  gap: 4px;
+  min-height: 26px;
   border: 1px solid var(--n-hairline);
   border-radius: var(--radius-full);
   background: var(--n-canvas);
   color: var(--n-slate);
-  padding: 4px 10px;
-  font: inherit;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   cursor: pointer;
 }
 
 .image-template-tag-filters button b {
-  color: inherit;
-  font-size: 11px;
+  color: var(--n-muted);
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .image-template-tag-filters button:hover,
@@ -1004,6 +1014,11 @@
   border-color: var(--n-primary);
   background: var(--n-primary-soft);
   color: var(--n-primary);
+}
+
+.image-template-tag-filters button:hover b,
+.image-template-tag-filters button.is-selected b {
+  color: inherit;
 }
 
 .image-template-grid {
