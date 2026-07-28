@@ -68,6 +68,14 @@ describe("Shell sidebar layout", () => {
     expect(screen.getByAltText("OfficeDex logo").getAttribute("src")).toBe("./officedex-logo.png");
   });
 
+  it("clips the opaque sidebar logo asset to rounded corners", () => {
+    const css = readFileSync("src/renderer/styles/shell.css", "utf8");
+    const brandMarkRule = css.match(/\.brand-mark\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(brandMarkRule).toMatch(/border-radius:\s*8px;/);
+    expect(brandMarkRule).toMatch(/overflow:\s*hidden;/);
+  });
+
   it("places the credit meter above Profile in the sidebar footer", () => {
     render(
       <LocaleProvider value="en">
