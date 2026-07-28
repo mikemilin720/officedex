@@ -345,6 +345,7 @@ type bridgeImagePromptTemplate struct {
 	ThumbnailURL string                  `json:"thumbnail_url,omitempty"`
 	SortOrder    int                     `json:"sort_order"`
 	Enabled      bool                    `json:"enabled"`
+	Tags         []string                `json:"tags,omitempty"`
 	Slots        []bridgeImagePromptSlot `json:"slots,omitempty"`
 }
 
@@ -398,6 +399,7 @@ func (c *Client) ListImageTemplates(ctx context.Context) ([]types.ImagePromptTem
 			ThumbnailURL: item.ThumbnailURL,
 			SortOrder:    item.SortOrder,
 			Enabled:      item.Enabled,
+			Tags:         append([]string(nil), item.Tags...),
 			Slots:        slots,
 		})
 	}
@@ -412,6 +414,9 @@ func (c *Client) CreateImageTemplate(ctx context.Context, input types.CreateUser
 		"description":        input.Description,
 		"prompt_preset":      input.PromptPreset,
 		"sort_order":         input.SortOrder,
+	}
+	if len(input.Tags) > 0 {
+		params["tags"] = append([]string(nil), input.Tags...)
 	}
 	if len(input.Slots) > 0 {
 		slots := make([]map[string]any, 0, len(input.Slots))
@@ -446,6 +451,7 @@ func (c *Client) CreateImageTemplate(ctx context.Context, input types.CreateUser
 		ThumbnailURL: item.ThumbnailURL,
 		SortOrder:    item.SortOrder,
 		Enabled:      item.Enabled,
+		Tags:         append([]string(nil), item.Tags...),
 	}
 	return &mapped, nil
 }

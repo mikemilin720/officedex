@@ -348,6 +348,7 @@ export interface ImagePromptTemplate {
   thumbnailUrl?: string;
   sortOrder: number;
   enabled: boolean;
+  tags?: string[];
   /** When present and non-empty, the renderer shows a guided fill-in form instead of the raw textarea. */
   slots?: ImagePromptSlot[];
 }
@@ -358,6 +359,7 @@ export interface CreateUserImageTemplateInput {
   title: string;
   description?: string;
   promptPreset?: string;
+  tags?: string[];
   slots?: ImagePromptSlot[];
   sortOrder?: number;
 }

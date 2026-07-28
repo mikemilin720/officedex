@@ -1271,6 +1271,7 @@ func TestListImageTemplatesMapsBridgeResponse(t *testing.T) {
 		"thumbnail_url": "/api/image-templates/7/thumbnail",
 		"sort_order":    10,
 		"enabled":       true,
+		"tags":          []string{"Ecommerce", "Studio"},
 	}}, nil)
 
 	result := <-done
@@ -1282,6 +1283,54 @@ func TestListImageTemplatesMapsBridgeResponse(t *testing.T) {
 	}
 	if result.items[0].PromptPreset != "cinematic preset" {
 		t.Fatalf("PromptPreset = %q", result.items[0].PromptPreset)
+	}
+	if len(result.items[0].Tags) != 2 || result.items[0].Tags[0] != "Ecommerce" || result.items[0].Tags[1] != "Studio" {
+		t.Fatalf("Tags = %#v", result.items[0].Tags)
+	}
+}
+
+func TestCreateImageTemplateMapsTags(t *testing.T) {
+	client, fake := newClientWithFake(t)
+	defer client.Stop()
+
+	done := make(chan struct {
+		item *types.ImagePromptTemplate
+		err  error
+	}, 1)
+	go func() {
+		item, err := client.CreateImageTemplate(context.Background(), types.CreateUserImageTemplateInput{
+			Slug: "local-poster", Title: "Local Poster", PromptPreset: "prompt",
+			Tags: []string{"Ecommerce", "Promotion"},
+		})
+		done <- struct {
+			item *types.ImagePromptTemplate
+			err  error
+		}{item: item, err: err}
+	}()
+
+	req := fake.readRequest(t)
+	if req.Method != "image_templates/create" {
+		t.Fatalf("method = %q, want image_templates/create", req.Method)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	tags, ok := params["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "Ecommerce" || tags[1] != "Promotion" {
+		t.Fatalf("tags = %#v", params["tags"])
+	}
+	fake.writeResponse(t, req.idString(), map[string]any{
+		"id": 12, "slug": "local-poster", "title": "Local Poster", "prompt_preset": "prompt",
+		"enabled": true, "tags": []string{"Ecommerce", "Promotion"},
+	}, nil)
+
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("CreateImageTemplate: %v", result.err)
+	}
+	if len(result.item.Tags) != 2 || result.item.Tags[0] != "Ecommerce" || result.item.Tags[1] != "Promotion" {
+		t.Fatalf("Tags = %#v", result.item.Tags)
 	}
 }
 

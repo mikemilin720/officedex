@@ -215,6 +215,7 @@ type ImagePromptTemplate struct {
 	ThumbnailURL string            `json:"thumbnailUrl,omitempty"`
 	SortOrder    int               `json:"sortOrder"`
 	Enabled      bool              `json:"enabled"`
+	Tags         []string          `json:"tags,omitempty"`
 	Slots        []ImagePromptSlot `json:"slots,omitempty"`
 }
 
@@ -224,6 +225,7 @@ type CreateUserImageTemplateInput struct {
 	Title            string            `json:"title"`
 	Description      string            `json:"description,omitempty"`
 	PromptPreset     string            `json:"promptPreset,omitempty"`
+	Tags             []string          `json:"tags,omitempty"`
 	Slots            []ImagePromptSlot `json:"slots,omitempty"`
 	SortOrder        int               `json:"sortOrder,omitempty"`
 }
