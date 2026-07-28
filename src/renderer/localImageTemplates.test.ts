@@ -23,6 +23,7 @@ describe("local image templates", () => {
           description: "Local admission template",
           prompt_preset: "Show {{university_name}}",
           enabled: true,
+          tags: [" Ecommerce ", "Studio", "studio"],
           slots: [
             { key: "university_name", label: "University name", example: "Stanford", default_value: "Cambridge", required: true },
           ],
@@ -40,6 +41,7 @@ describe("local image templates", () => {
         sortOrder: 0,
         enabled: true,
         visibility: "local",
+        tags: ["Ecommerce", "Studio"],
         slots: [
           expect.objectContaining({ key: "university_name", label: "University name", defaultValue: "Cambridge", required: true }),
         ],
@@ -59,6 +61,7 @@ describe("local image templates", () => {
         sortOrder: 0,
         enabled: true,
         visibility: "local",
+        tags: ["Ecommerce", "Studio"],
       },
     ];
 
@@ -75,6 +78,7 @@ describe("local image templates", () => {
           promptPreset: "Poster prompt",
           sortOrder: 0,
           enabled: true,
+          tags: ["Ecommerce", "Studio"],
         },
       ],
     });
@@ -99,5 +103,8 @@ describe("local image templates", () => {
     expect(loadLocalImageTemplates()).toEqual([
       expect.objectContaining({ slug: "existing", promptPreset: "Keep me" }),
     ]);
+    expect(() => importLocalImageTemplatesJSON(JSON.stringify({
+      templates: [{ title: "Bad tags", promptPreset: "prompt", tags: ["x".repeat(33)] }],
+    }))).toThrow(/template\[0\]\.tags/);
   });
 });

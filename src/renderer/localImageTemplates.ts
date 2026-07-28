@@ -1,4 +1,5 @@
 import type { ImagePromptSlot, ImagePromptTemplate } from "../shared/types";
+import { normalizeImageTemplateTags } from "./imageTemplateTags";
 
 const STORAGE_KEY = "officedex:local-image-templates";
 const FILE_VERSION = 1;
@@ -57,7 +58,7 @@ export function importLocalImageTemplatesJSON(raw: string): ImagePromptTemplate[
 export function exportLocalImageTemplatesJSON(templates: ImagePromptTemplate[]): string {
   const file: LocalImageTemplatesFile = {
     version: FILE_VERSION,
-    templates: templates.map((template, index) => toStoredTemplate(normalizeTemplate(template, index))),
+    templates: templates.map((template, index) => toStoredTemplate(normalizeTemplate(template, index), index)),
   };
   return `${JSON.stringify(file, null, 2)}\n`;
 }
@@ -83,6 +84,7 @@ function normalizeTemplate(item: unknown, index: number): ImagePromptTemplate {
     sortOrder: numberValue(raw.sortOrder ?? raw.sort_order, index),
     enabled: booleanValue(raw.enabled, true),
     visibility: "local",
+    tags: normalizeImageTemplateTags(raw.tags, `template[${index}].tags`),
     slots: normalizeSlots(raw.slots),
   };
 }
@@ -112,7 +114,7 @@ function normalizeSlots(raw: unknown): ImagePromptSlot[] | undefined {
   });
 }
 
-function toStoredTemplate(template: ImagePromptTemplate): ImagePromptTemplate {
+function toStoredTemplate(template: ImagePromptTemplate, index: number): ImagePromptTemplate {
   return {
     slug: template.slug,
     title: template.title,
@@ -121,6 +123,7 @@ function toStoredTemplate(template: ImagePromptTemplate): ImagePromptTemplate {
     sortOrder: template.sortOrder,
     enabled: template.enabled,
     ...(template.thumbnailUrl ? { thumbnailUrl: template.thumbnailUrl } : {}),
+    ...(template.tags?.length ? { tags: normalizeImageTemplateTags(template.tags, `template[${index}].tags`) } : {}),
     ...(template.slots?.length ? { slots: toStoredSlots(template.slots) } : {}),
   } as ImagePromptTemplate;
 }
