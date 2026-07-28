@@ -4712,6 +4712,30 @@ describe("DialogueScreen state machine", () => {
     expect(screen.queryByText("UGC")).toBeNull();
   });
 
+  it("uses compact tag chips without a visible native horizontal scrollbar", () => {
+    const css = readFileSync("src/renderer/styles/dialogue.css", "utf8");
+    const rowRule = css.match(/\.image-template-tag-filters\s*\{[^}]*\}/s)?.[0] ?? "";
+    const chipRule = css.match(/\.image-template-tag-filters button\s*\{[^}]*\}/s)?.[0] ?? "";
+    const countRule = css.match(/\.image-template-tag-filters button b\s*\{[^}]*\}/s)?.[0] ?? "";
+    const interactiveCountRule = css.match(/\.image-template-tag-filters button:hover b,\s*\.image-template-tag-filters button\.is-selected b\s*\{[^}]*\}/s)?.[0] ?? "";
+    const webkitScrollbarRule = css.match(/\.image-template-tag-filters::\-webkit-scrollbar\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(rowRule).toContain("overflow-x: auto;");
+    expect(rowRule).toContain("scrollbar-width: none;");
+    expect(rowRule).toContain("-webkit-overflow-scrolling: touch;");
+    expect(chipRule).toContain("min-height: 26px;");
+    expect(chipRule).toContain("gap: 4px;");
+    expect(chipRule).toContain("padding: 2px 8px;");
+    expect(chipRule).toContain("font-size: 12px;");
+    expect(chipRule).toContain("font-weight: 500;");
+    expect(chipRule).toContain("line-height: 1.2;");
+    expect(countRule).toContain("color: var(--n-muted);");
+    expect(countRule).toContain("font-size: 10px;");
+    expect(countRule).toContain("font-weight: 500;");
+    expect(interactiveCountRule).toContain("color: inherit;");
+    expect(webkitScrollbarRule).toContain("display: none;");
+  });
+
   it("keeps the selected template and edited prompt when the tag filter changes", async () => {
     listImageTemplatesSpy.mockResolvedValueOnce([
       { id: 1, slug: "hero", title: "Hero", description: "", promptPreset: "hero", sortOrder: 1, enabled: true, tags: ["Studio"] },
